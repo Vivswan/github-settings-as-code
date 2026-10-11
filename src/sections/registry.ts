@@ -224,24 +224,26 @@ const byKeyErased: { [K in SectionKey]: SectionModule<K> } = byKey;
  *   module property read per call  -> handlers read `this`, and a test stubs the module while the engine holds this
  */
 function refusingForeignContexts<K extends SectionKey>(module: SectionModule<K>): SectionModule<K> {
-  const refusal = (ctx: PlanContext, handler: "plan" | "snapshot"): Error | null =>
+  const foreign = (ctx: PlanContext, handler: "plan" | "snapshot"): string | null =>
     ctx.section === module.key
       ? null
-      : new Error(
-          `${module.key}.${handler}() was given the context built for section "${ctx.section}"; build it from this module: ` +
-            `${handler}Context(sectionModule("${module.key}"), api, repo${handler === "plan" ? "" : ", onMissingPermission"})`,
-        );
+      : `${module.key}.${handler}() was given the context built for section "${ctx.section}"; build it from this module: ` +
+        `${handler}Context(sectionModule("${module.key}"), api, repo${handler === "plan" ? "" : ", onMissingPermission"})`;
   return {
     ...module,
     plan: (ctx, desired) => {
-      const error = refusal(ctx, "plan");
-      return error === null ? module.plan(ctx, desired) : Promise.reject(error);
+      const problem = foreign(ctx, "plan");
+      return problem === null
+        ? module.plan(ctx, desired)
+        : Promise.reject(new Error(`BUG: ${problem}`));
     },
     ...(hasSnapshot(module)
       ? {
           snapshot: (ctx: SnapshotContext<EndpointDict, GraphqlDict, K>) => {
-            const error = refusal(ctx, "snapshot");
-            return error === null ? module.snapshot(ctx) : Promise.reject(error);
+            const problem = foreign(ctx, "snapshot");
+            return problem === null
+              ? module.snapshot(ctx)
+              : Promise.reject(new Error(`BUG: ${problem}`));
           },
         }
       : {}),

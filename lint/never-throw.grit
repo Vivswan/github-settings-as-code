@@ -1,12 +1,13 @@
-// The never-throw rule of AGENTS.md as a Biome linter plugin: a `throw` under src/ is a BUG: invariant (a
-// programming error no user can cause) or a bare rethrow of the catch binding; anything else is a failure the
-// caller should receive as a Result.
+// The never-throw rule of AGENTS.md as a Biome linter plugin: a `throw` or a `Promise.reject()` under src/ is a
+// BUG: invariant (a programming error no user can cause) or a bare rethrow of the catch binding; anything else is a
+// failure the caller should receive as a Result.
 //
 // Reach and exemptions are the plugin's `overrides` entry in biome.json, with `includes` relative to the repository
 // root; a top-level `plugins[].includes` matches the absolute path (biomejs/biome#11082), so the checkout's parent
 // directories would decide the reach. The rule covers src/** only; .github/scripts/ stays exempt by policy, since a
 // build script may throw on a user-caused failure.
-//   src/cli/inputs.ts  -> exempt: commander's argParser can only refuse a value by throwing InvalidArgumentError
+//   src/cli/inputs.ts  -> one `// biome-ignore lint/plugin:` suppression on the InvalidArgumentError throw: commander's
+//                         argParser can only refuse a value by throwing
 //
 // GritQL has no scopes, so a second binding of the caught name anywhere in the catch body flags every rethrow in that
 // body, not only the shadowed one; the fix is to rename. The regex reads the literal's source text, so BUG: must open
@@ -16,7 +17,14 @@
 //   a function-type parameter in a cast, return type, or signature  -> a binding
 //   a name in a type alias, an interface, or a type annotation       -> not one: nothing there holds a value
 
-`throw $arg` as $throw where {
+or {
+  `throw $arg` as $site,
+  `Promise.reject($arg)` as $site,
+  `Promise.reject<$_>($arg)` as $site,
+  // No argument: a rejection with no reason is never a BUG: invariant or a rethrow.
+  `Promise.reject()` as $site where { $arg = `undefined` },
+  `Promise.reject<$_>()` as $site where { $arg = `undefined` }
+} where {
   not or {
     and {
       $arg <: JsNewExpression(arguments=JsCallArguments(args=[$first, ...])),
@@ -27,7 +35,7 @@
       $arg <: JsIdentifierExpression(),
       // A throw from a function nested in the catch body may run after the clause has ended, and one from a try
       // nested there is caught or rethrown by that try, so the walk up from the throw to its clause stops at both.
-      $throw <: within JsCatchClause(declaration=JsCatchDeclaration(binding=$arg), body=$body) until or {
+      $site <: within JsCatchClause(declaration=JsCatchDeclaration(binding=$arg), body=$body) until or {
         JsTryStatement(),
         JsTryFinallyStatement(),
         JsArrowFunctionExpression(),
@@ -54,5 +62,5 @@
       } where { $binding <: $arg }
     }
   },
-  register_diagnostic(span=$throw, message="throw outside the never-throw rule: not a BUG: invariant (an Error whose message starts with BUG:) and not a bare rethrow of the catch binding; return a Result instead")
+  register_diagnostic(span=$site, message="throw or Promise.reject outside the never-throw rule: not a BUG: invariant (an Error whose message starts with BUG:) and not a bare rethrow of the catch binding; return a Result instead")
 }

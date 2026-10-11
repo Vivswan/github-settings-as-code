@@ -174,6 +174,7 @@ function accumulate(value: string, previous?: string): string {
 export function once(flag: string): (value: string, previous?: string) => string {
   return (value, previous) => {
     if (previous !== undefined) {
+      // biome-ignore lint/plugin: commander's argParser can only refuse a value by throwing InvalidArgumentError
       throw new InvalidArgumentError(`--${flag} takes one value and was given more than once`);
     }
     return value;
