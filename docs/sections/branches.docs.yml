@@ -157,7 +157,7 @@ coverage:
         PUT's replace).
       - >-
         The snapshot's own rules read is BranchProtectionRulesSnapshot, the planner's selection under
-        a declaration that tolerates no denial: a concealed 404 is a PermissionDenied naming the
+        a declaration that tolerates no denial: a concealed 404 is a permission-denied failure naming the
         grant, which the engine turns into a skipped section under on-missing-permission: warn and a
         failed run under fail, instead of reading as no rules.
       - >-

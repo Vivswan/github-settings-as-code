@@ -102,7 +102,7 @@ interface EndpointDeclFields {
    */
   readonly hints?: Readonly<Partial<Record<HintableStatus, string>>>;
   /**
-   * Appended to the PermissionDenied message (which never reads `hints`) when a 403/404 can mean
+   * Appended to the permission-denied failure's message (which never reads `hints`) when a 403/404 can mean
    * something other than a missing grant (Git LFS disabled account-wide) and the body does not tell
    * the readings apart; a body that does is a `rejections` entry. One sentence, no trailing period.
    */
@@ -117,7 +117,7 @@ interface EndpointDeclFields {
   readonly pageSize?: number;
   /**
    * The section's PRIMARY READ and what a fine-grained 404 on it means: "denied" classifies as
-   * PermissionDenied and stops the section (an advisory read only exposes tryCall, which returns it as
+   * a permission-denied failure and stops the section (an advisory read only exposes tryCall, which returns it as
    * { error }), "absent" reads as a missing resource and proceeds. At most one per section; the read port
    * (ReadPort in ./plan.ts) and denialPosture() read it.
    */

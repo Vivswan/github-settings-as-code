@@ -3,7 +3,8 @@
  * that job's commit of the patch to the PR branch under a lease on the commit it was cut on.
  *
  *   format   format job   RUNNER_TEMP, GITHUB_OUTPUT                                   -> format.patch, head=, changed=
- *   push     push job     GH_TOKEN, HEAD_REF, HEAD_SHA, RUNNER_TEMP, GITHUB_REPOSITORY   -> the commit on the PR branch
+ *   push     push job     GH_TOKEN, HEAD_REF, HEAD_SHA, PR_CHECKOUT, RUNNER_TEMP,        -> the commit on the PR branch
+ *                         GITHUB_REPOSITORY
  *
  * Node builtins only: the push job installs nothing, so no git hook or lifecycle script exists where the write
  * token is.

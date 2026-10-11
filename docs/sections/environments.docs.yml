@@ -165,7 +165,7 @@ coverage:
       - >-
         The pin state reads back through the snapshot's own pins read, EnvironmentPinsSnapshot, the
         planner's selection under a declaration that tolerates no denial: a concealed 404 is a
-        PermissionDenied naming the grant, which the engine turns into a skipped section under
+        permission-denied failure naming the grant, which the engine turns into a skipped section under
         on-missing-permission: warn and a failed run under fail, instead of reading as no pins.
       - >-
         In the snapshot the pinned environments LEAD the file in rank order with `pinned: true`, since
