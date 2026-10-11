@@ -36,7 +36,7 @@ jobs:
           jq -n --argjson targets "${REPOS_RESULT:-null}" \
             '{run: env.GITHUB_RUN_ID, at: now | todate, targets: $targets}' \
             > evidence.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: settings-attestation
           path: evidence.json

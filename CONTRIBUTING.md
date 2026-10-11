@@ -45,7 +45,7 @@ The end-to-end tests build the bundle to a temp path and run it as a subprocess 
 - `bun run fuzz` runs seeded property fuzzing: random scenarios, each checked against an oracle that predicts the outcome class from the token mask, policy, and mode.
 - The mock serves the section endpoints plus the core routes the action calls outside the sections. A request that matches no registered route fails loudly; the mock never invents a response.
 - PR CI runs the full scenario corpus, the endpoint-coverage tripwire, and 25 fuzz iterations on every pull request, and uploads the e2e failure artifacts.
-- The release gate (`.github/workflows/release-gate.yml`) runs the deep fuzz and the OpenAPI drift probe on the release PR, on a manual dispatch, and every night. It is required under `all-green` on the release PR alone.
+- The release gate (`.github/workflows/release-gate.yml`) runs the deep fuzz and the OpenAPI drift probe on the release PR, on a manual dispatch, and every night. It is required under `all-green` on the release PR and on a manual dispatch.
 - The nightly workflow covers the Octokit freshness probes (the packages that describe GitHub's API, at their latest releases) and runs the full gate against them, covers the float canary, and opens the `@octokit/openapi` bump PR once the committed bump passes the full gate. A red night, the release gate included, files under the `nightly-failure` issue.
 - The fuzz nightly runs the full fuzz on its own schedule and files under `fuzz-nightly` with a replay command.
 
@@ -61,4 +61,4 @@ bun run fuzz --seed <iterationSeed> --iterations 1    # replay one failing itera
 - Releases run downstream of the `all-green` gate: ci.yml calls the fleet's release workflow, so a release or a release-PR refresh only happens from a green `main`.
 - release-please does the version math, the changelog, the version pins, and the release PR; merging that PR cuts the release.
 - Every ref a `uses:` pin can name (`vX.Y.Z`, the moving major, `latest`) points at a packaged commit: the child of one `main` commit, carrying its tree plus the built bundle, schema, and library; every green push mints one under a `build/<position>.<sha7>` tag, the ten newest kept. The tags up to v2.0.0 point at `main` commits from when `main` committed the bundle.
-- The repo-owned hooks `update-release.yml` and `update-release-pr.yml` mint the tags and keep release-please's boundary (`last-release-sha`) fresh. The git topology lives in `.github/scripts/release-pipeline/tags.ts` and its test.
+- Three repo-owned hooks share the ref work: `post-green.yml` packages every green push under its `build/` tag, prunes the window, and moves `latest`; `update-release.yml` mints `vX.Y.Z` and moves the major; `update-release-pr.yml` anchors release-please's boundary (`last-release-sha`) and publishes the `next` pre-release to npm. The git topology lives in `.github/scripts/release-pipeline/tags.ts` and its test.
