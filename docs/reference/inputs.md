@@ -61,7 +61,7 @@ A `check` run exits 1 on any drift, so a downstream step usually reads `result` 
 
 ## Environment variables
 
-Beside the inputs, a run reads these from its environment. The Actions runner sets every `GITHUB_*` and `ACTIONS_*` name below except `GITHUB_TOKEN`, which a workflow exports itself; the [command line](../start/cli.md) reads `GITHUB_TOKEN`, `GITHUB_REPOSITORY`, `GITHUB_API_URL`, and `GSAC_RETRY_BASE_MS` under the same names.
+Beside the inputs, a run reads these from its environment. The Actions runner sets every `GITHUB_*` and `ACTIONS_*` name below except `GITHUB_TOKEN`, which a workflow exports itself; the [command line](../start/cli.md) reads every name here except `ACTIONS_RUNTIME_TOKEN`, under the same names: `GITHUB_OUTPUT` and `GITHUB_STEP_SUMMARY` only under `GITHUB_ACTIONS=true`.
 
 | Variable | Read for |
 |---|---|
@@ -69,6 +69,7 @@ Beside the inputs, a run reads these from its environment. The Actions runner se
 | `GITHUB_REPOSITORY` | The default `repository`, the owner of a bare `<name>.yml` under `repos-dir`, and the one target never redacted |
 | `GITHUB_SERVER_URL`, `GITHUB_RUN_ID` | The run link a private report carries |
 | `GITHUB_API_URL` | The REST base URL (GitHub Enterprise Server) |
-| `GITHUB_OUTPUT`, `GITHUB_STEP_SUMMARY` | Where the action writes its outputs and the step summary (the command line prints them instead) |
+| `GITHUB_ACTIONS` | `true` on a runner: the command line then also appends its outputs to `GITHUB_OUTPUT`, writes the summary to `GITHUB_STEP_SUMMARY` (or to the file `--summary` names), and issues annotations as workflow commands |
+| `GITHUB_OUTPUT`, `GITHUB_STEP_SUMMARY` | Where the action writes its outputs and the step summary (the command line writes them too under `GITHUB_ACTIONS=true`, `--summary` overriding the summary file; in a terminal it prints the outputs and writes the summary only to the file `--summary` names) |
 | `ACTIONS_RUNTIME_TOKEN` | The artifact service's credential; `private-report: artifact` warns and uploads nothing without it (GitHub Enterprise Server) |
 | `GSAC_RETRY_BASE_MS` | A test knob: the real milliseconds in one retry-backoff second. Set, it also selects the immediate scheduler, so the rate-limit `Retry-After` waits and the write limiter's spacing are skipped rather than scaled. Unset, a second is a second and the waits are real. Set it only to make a retry scenario finish in milliseconds against a mock; against GitHub the skipped waits earn the next secondary rate limit |

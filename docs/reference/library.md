@@ -383,8 +383,8 @@ console.log(exitCode, collected.outputs.result, collected.lines.map((entry) => e
 
 ## CLI
 
-The package's `bin` entries, `github-settings-as-code` and `gsac`, run the same flows from a terminal: `check`, `apply`, and `render` take the action's inputs as `--flags`,
-and `validate` and `permissions` read a settings file alone. The [command line guide](../start/cli.md) has every command, the flag rule, and the exit codes.
+The package's `bin` entries, `github-settings-as-code` and `gsac`, run the same flows from a terminal: `check`, `apply`, `render`, and `snapshot` take the action's inputs as `--flags`,
+`init` snapshots one repository into a settings file, and `validate` and `permissions` read a settings file alone. The [command line guide](../start/cli.md) has every command, the flag rule, and the exit codes.
 
 ## Versioning
 

@@ -52,7 +52,7 @@ jobs:
             .github/settings/baseline.yml
             .github/repos/${{ matrix.repo }}.yml
           rendered-file: merged/${{ matrix.repo }}.yml
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: merged-${{ matrix.repo }}
           path: merged/${{ matrix.repo }}.yml
@@ -62,7 +62,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: settings-apply
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: merged-*
           merge-multiple: true
