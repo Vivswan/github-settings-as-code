@@ -5,6 +5,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { devNull } from "node:os";
 import { join } from "node:path";
 
 export interface StepResult {
@@ -14,6 +15,20 @@ export interface StepResult {
   /** The GITHUB_OUTPUT file's lines. */
   outputs: string[];
 }
+
+/** The step runs git as a runner would: no exported identity (GIT_AUTHOR_* and GIT_COMMITTER_* outrank the config
+ * configureBotIdentity writes, so a developer shell that exports them signs the bot's commits as the developer) and
+ * no global or system git config. The step's own cwd config is the one git reads. */
+const AMBIENT_GIT_CLEARED: Record<string, string | undefined> = {
+  GIT_AUTHOR_NAME: undefined,
+  GIT_AUTHOR_EMAIL: undefined,
+  GIT_AUTHOR_DATE: undefined,
+  GIT_COMMITTER_NAME: undefined,
+  GIT_COMMITTER_EMAIL: undefined,
+  GIT_COMMITTER_DATE: undefined,
+  GIT_CONFIG_GLOBAL: devNull,
+  GIT_CONFIG_NOSYSTEM: "1",
+};
 
 export function runStep(
   script: string,
@@ -31,6 +46,7 @@ export function runStep(
     env: Object.fromEntries(
       Object.entries({
         ...process.env,
+        ...AMBIENT_GIT_CLEARED,
         RUNNER_TEMP: runnerTemp,
         GITHUB_OUTPUT: outputFile,
         ...env,
