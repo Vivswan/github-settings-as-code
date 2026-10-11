@@ -105,7 +105,7 @@ To keep a permanent drift-report workflow alongside the applying one, see the [c
 
 Three surfaces carry the result, the same three the [check mode guide](../operate/check-mode.md#where-the-output-lands) describes:
 
-- **The log** holds the per-drift and per-change lines shown above. Every run ends in a `result:` line naming the outcome (`applied`, `clean`, `drift`, `partial`, or `failed`); a failing run writes its error annotation first.
+- **The log** holds the per-drift and per-change lines shown above. Every run ends in a `result:` line naming its outcome: for the check and apply runs on this page, `applied`, `clean`, `drift`, `partial`, or `failed`. A failing run writes its error annotation first.
 - **The step summary** renders a table with one row per declared section: its status plus the same detail lines, so you rarely need to open the log at all.
 - **Annotations** surface problems on the run page: errors carry the GitHub API's message verbatim plus the fix, warnings mark sections skipped under `on-missing-permission: warn`, and notices carry advisory notes (for example that `enable_git_lfs` is write-only, so check mode cannot verify it).
 
