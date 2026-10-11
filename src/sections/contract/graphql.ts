@@ -47,7 +47,7 @@ interface GraphqlOpCommon<V extends Record<string, unknown>> {
   /** Read only by the e2e mock, which exempts advisory reads from its denial barrier; the GraphQL helpers tolerate by declared outcomes alone. */
   readonly advisory?: boolean;
   /**
-   * Appended to the PermissionDenied message for an operation whose
+   * Appended to the permission-denied failure's message for an operation whose
    * FORBIDDEN/NOT_FOUND can mean something other than a missing token grant.
    * One sentence, no trailing period.
    */

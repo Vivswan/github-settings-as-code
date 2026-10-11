@@ -276,7 +276,7 @@ function predictAtGrade(
   }
   if (witness !== undefined) {
     // The witness forces one write and every write is denied at this grade, so the section can never
-    // be a no-op "applied"; mirrors the mid-apply PermissionDenied fold in orchestrate.ts.
+    // be a no-op "applied"; mirrors the mid-apply permission-denied fold in orchestrate.ts.
     const allowed: Set<Outcome> =
       required || meta.policy === "fail" ? new Set(["failed"]) : new Set(["skipped"]);
     return { allowed, mayWrite: false };

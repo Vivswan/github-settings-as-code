@@ -5,7 +5,8 @@
  *   probe-schema     checks job     @octokit/openapi and @octokit/graphql-schema at latest, then the lockstep tests
  *   probe-types      checks job     @octokit/types and @octokit/openapi-types at latest, then the typecheck, its
  *                                   failures sorted into tripwires and breakage
- *   refresh-openapi  refresh job    a newer @octokit/openapi pinned, the descriptor-derived files regenerated and
+ *   refresh-openapi  refresh-openapi job
+ *                                   a newer @octokit/openapi pinned, the descriptor-derived files regenerated and
  *                                   committed, the whole gate run, and the bump PR opened when it passes
  *
  * The probed packages are the ones that describe GitHub's API; the runtime octokit client packages stay out on

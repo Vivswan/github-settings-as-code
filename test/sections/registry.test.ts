@@ -136,7 +136,7 @@ describe("section permissions", () => {
   });
 
   test("no endpoint keys a hint on 403/404 - the permission branch never reads hints", () => {
-    // failureFor classifies 403/404 as PermissionDenied before reading `hints`, so a hint there is dead advice; ambiguity on those statuses goes in
+    // failureFor classifies 403/404 as permission-denied before reading `hints`, so a hint there is dead advice; ambiguity on those statuses goes in
     // `denialHint`. HintableStatus misses a hoisted hints object that also carries a permitted key, and sections hoist shared hints, so this sweep
     // is the runtime backstop.
     for (const [key, endpoint] of Object.entries(allEndpoints())) {

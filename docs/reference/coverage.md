@@ -213,7 +213,7 @@ The side-by-side comparison with the Probot Settings app lives in the migration 
 - The rules query fires only when an entry has a wildcard name or declares a GraphQL-routed key (a pure-REST declaration issues no GraphQL request).
 - That also scopes the undeclared-rule NOTE: only a run whose declaration fires the query reports a live wildcard rule the file does not declare, as a note and never a deletion.
 - Wildcard updates have PATCH semantics (an omitted key keeps its live value, unlike the literal PUT's replace).
-- The snapshot's own rules read is BranchProtectionRulesSnapshot, the planner's selection under a declaration that tolerates no denial: a concealed 404 is a PermissionDenied naming the grant, which the engine turns into a skipped section under on-missing-permission: warn and a failed run under fail, instead of reading as no rules.
+- The snapshot's own rules read is BranchProtectionRulesSnapshot, the planner's selection under a declaration that tolerates no denial: a concealed 404 is a permission-denied failure naming the grant, which the engine turns into a skipped section under on-missing-permission: warn and a failed run under fail, instead of reading as no rules.
 - That read supplies the GraphQL-only surface: a literal entry carries its force_push_bypassers (actor strings in the file's spelling, sorted) and required_deployments when set, an empty allowance list and an off requirement omitted since an absent routed key leaves the live value untouched.
 - Every wildcard rule is written as its own snapshot entry with the off controls dropped.
 - A branch only a wildcard rule protects is NOT written as a literal entry (the REST read serves that rule's protection under the branch's name, and a literal entry would create a second rule on apply).
@@ -269,7 +269,7 @@ The side-by-side comparison with the Probot Settings app lives in the migration 
 - A final count that would overflow the cap - live pins nobody declared count toward it - fails BEFORE the first pin mutation, naming the cap and the way to make room; check mode surfaces the same overflow as a note.
 - Pins with no pinned declaration - undeclared environments, or entries without the key - are never unpinned; one sitting among the leading ranks is moved after the declared block, surfaced as a note in BOTH modes so check and apply agree exactly.
 - Everything reads back, so check mode reports exact pin membership and order drift (the order line names both sequences).
-- The pin state reads back through the snapshot's own pins read, EnvironmentPinsSnapshot, the planner's selection under a declaration that tolerates no denial: a concealed 404 is a PermissionDenied naming the grant, which the engine turns into a skipped section under on-missing-permission: warn and a failed run under fail, instead of reading as no pins.
+- The pin state reads back through the snapshot's own pins read, EnvironmentPinsSnapshot, the planner's selection under a declaration that tolerates no denial: a concealed 404 is a permission-denied failure naming the grant, which the engine turns into a skipped section under on-missing-permission: warn and a failed run under fail, instead of reading as no pins.
 - In the snapshot the pinned environments LEAD the file in rank order with `pinned: true`, since the planner reads declaration order as pin order, and the unpinned ones follow without the key (an absent key leaves a pin untouched); a pin naming no listed environment is a note.
 
 **Autolinks** (`autolinks`)

@@ -4,8 +4,8 @@
  *
  *   rebuild   build job   RUNNER_TEMP, GITHUB_OUTPUT                  -> autofix.patch, changed=, pruned=
  *   push      push job    TOKEN, CAN_RETRIGGER, HEAD_REF, HEAD_SHA,    -> the commit on the PR branch, notify=
- *                         PRUNED, RUNNER_TEMP, GITHUB_REPOSITORY,
- *                         GITHUB_OUTPUT
+ *                         PR_CHECKOUT, PRUNED, RUNNER_TEMP,
+ *                         GITHUB_REPOSITORY, GITHUB_OUTPUT
  *
  * FIX_OWNED_PATHS is a security boundary and stays literal here: the patch is cut on a runner PR code ran on, so
  * the push job admits nothing outside it, and it runs this file from the default branch's checkout, so the list it

@@ -3,7 +3,7 @@
 # passes preflight and the RepositoryFeatures read, so the denial surfaces
 # at the UpdateRepositoryFeatures mutation and must classify as a
 # permission failure naming the Administration grant - the 200+errors path
-# folding into the same PermissionDenied policy as a REST denial.
+# folding into the same permission-denied policy as a REST denial.
 name: repository-toggles-graphql-denied
 settings:
   repository:

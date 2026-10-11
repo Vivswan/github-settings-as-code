@@ -45,7 +45,7 @@ import { resolveUndeclaredPolicies } from "./undeclared.js";
 import { validateSectionShapes } from "./validate.js";
 
 /**
- * `httpStatus` is the safe code of the PermissionDenied behind a failed or skipped section (the redacted view shows it
+ * `httpStatus` is the safe code of the permission-denied failure behind a failed or skipped section (the redacted view shows it
  * as `HTTP 403` in place of the hidden detail); the `?: never` pin makes a code on a healthy row unrepresentable.
  */
 export type SectionOutcome =
