@@ -1,8 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { validateSectionShapes } from "../../../src/engine/validate.js";
 import type { GitHubClient } from "../../../src/github/api.js";
-import { describeProblem } from "../../../src/problem.js";
 import { actionsSection, endpointRouted } from "../../../src/sections/actions/index.js";
 // The `as ActionsConfig` casts below simulate keys GitHub adds: the shape passes unknown keys through verbatim, which the static config type cannot
 // spell without giving up typo-checking on the known keys.
@@ -19,11 +17,7 @@ import {
 import { MockApi, withListing } from "../../mock-api.js";
 import { provePlanIdempotent } from "../plan-idempotence.js";
 import { REPO, unwrap } from "../section-run.js";
-import { validatedInput } from "../validated-input.js";
-
-function shapeError(doc: Record<string, unknown>, sourceLabel: string): string | null {
-  return validateSectionShapes(doc, sourceLabel).match(() => null, describeProblem);
-}
+import { shapeError, validatedInput } from "../validated-input.js";
 
 const BASE = "/repos/o/r/actions/permissions";
 const PERMISSIONS = `GET ${BASE}`;

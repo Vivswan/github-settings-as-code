@@ -1,6 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { validateSectionShapes } from "../../../src/engine/validate.js";
-import { describeProblem } from "../../../src/problem.js";
 import type { SectionInput } from "../../../src/sections/contract/declared.js";
 import {
   driftOf,
@@ -16,12 +14,8 @@ import { MockApi } from "../../mock-api.js";
 import { fragmentFake } from "../fragment-fake.js";
 import { provePlanIdempotent } from "../plan-idempotence.js";
 import { REPO, unwrap } from "../section-run.js";
-import { validatedInput } from "../validated-input.js";
+import { shapeError, validatedInput } from "../validated-input.js";
 import { webhooksMockHandlers } from "./mock.js";
-
-function shapeError(doc: Record<string, unknown>, sourceLabel: string): string | null {
-  return validateSectionShapes(doc, sourceLabel).match(() => null, describeProblem);
-}
 
 const LIST = "GET /repos/o/r/hooks?per_page=100&page=1";
 
