@@ -81,7 +81,7 @@ jobs:
           artifact-name: fuzz-failures-${{ github.run_attempt }}
           title: Fuzz failures
           label-color: "B60205"
-          label-description: Automated fuzz failure
+          label-description: Automated nightly fuzz failure
           stream: fuzz
 
       - name: Close the fuzz issue on a green run
