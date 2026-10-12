@@ -68,6 +68,9 @@ describe("the published schema and the runtime agree on the shapes the corpus ne
       false,
     ],
     ["a bad policy value", { rulesets: { _undeclared: "remove", entries: [] } }, false],
+    // The update endpoint rejects an empty body; minProperties mirrors the parse refusal so an editor flags it too.
+    ["an empty pages mapping", { pages: {} }, false],
+    ["a pages mapping with one field", { pages: { https_enforced: true } }, true],
     [
       "the nested variables knob, wrapped",
       prod({ variables: { _undeclared: "keep", entries: [{ name: "A", value: "1" }] } }),

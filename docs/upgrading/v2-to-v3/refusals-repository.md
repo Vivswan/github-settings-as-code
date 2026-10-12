@@ -47,6 +47,8 @@ v3   pages.custom_404: GitHub reports this field on the Pages site and the updat
 
 `url`, `html_url`, `status`, `custom_404`, `protected_domain_state`, `pending_domain_unverified_at`, and `https_certificate` are refused. `public: false` stays declarable: Enterprise Cloud shares the same host, so the check run's note beside the drift says why it cannot converge elsewhere.
 
+`pages: {}` is refused as well: the update endpoint rejects an empty body, so the mapping configured nothing, and the pre-release v3 builds only noted it at plan time. The message names the three intents it could have meant: declare a field, declare `pages: null` to disable the site, or remove the section.
+
 For `@vivswan/github-settings-as-code` consumers, `source.path` under `SectionInput<"pages">` (and so `SettingsFile`) is `"/" | "/docs"`, where the pre-release v3 builds typed `string`; another path there stops compiling.
 
 Fix: delete the reported field from the file, and publish from `/` or `/docs`.

@@ -197,17 +197,6 @@ describe("pages", () => {
     expect(result.ops[0]?.payload).toEqual({ source: { branch: "main", path: "/" } });
   });
 
-  test("an empty pages mapping is a note, not an empty PUT", async () => {
-    const api = new MockApi({ [GET]: { data: {} } });
-    expect(await plan(api, {})).toEqual({
-      ops: [],
-      notes: [
-        "pages: declared as an empty mapping, which configures nothing (the update endpoint rejects an empty body). Declare at least one field, use pages: null to disable the site, or remove the section",
-      ],
-      drift: [],
-    });
-  });
-
   test("a passthrough key named like a prototype member still reaches the second PUT", async () => {
     // The create body is a plain object, so an `in` check would see Object.prototype's members and drop such a key from the remainder.
     const api = new MockApi({});

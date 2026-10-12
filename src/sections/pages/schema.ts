@@ -33,6 +33,10 @@ const READ_ONLY_SITE_FIELDS = {
     "GitHub provisions the certificate for `cname`; declare `cname` and `https_enforced`",
 } satisfies Record<ReadOnlySiteField, string>;
 
+/** The refusal for `pages: {}`: each of the three fixes is a different intent, so all three are named. */
+const EMPTY_SITE_FIX =
+  "an empty mapping configures nothing; declare at least one field, declare pages: null to disable the site, or remove the section";
+
 // Not exported: consumers spell it NonNullable<PagesConfig>. The definition id stays "PagesConfig";
 // moving it onto the nullable wrapper would change the published schema.
 const PagesSite = open({
@@ -44,6 +48,13 @@ const PagesSite = open({
 })
   .check(
     rule((site, refineCtx) => {
+      // The update endpoint rejects an empty body, so a mapping with no field can only ever be a mistake.
+      if (Object.keys(site).length === 0) {
+        refineCtx.addIssue({
+          code: "custom",
+          message: EMPTY_SITE_FIX,
+        });
+      }
       // The type hides these keys; the open() parse lets them reach here.
       for (const [key, fix] of Object.entries(READ_ONLY_SITE_FIELDS)) {
         if ((site as Record<string, unknown>)[key] !== undefined) {
@@ -60,7 +71,8 @@ const PagesSite = open({
   )
   .meta({
     id: "PagesConfig",
-    // The published schema carries the same refusal, so an editor flags the key as the file is written.
+    // The published schema carries the same refusals, so an editor flags the key or the empty mapping as the file is written.
+    minProperties: 1,
     not: { anyOf: Object.keys(READ_ONLY_SITE_FIELDS).map((key) => ({ required: [key] })) },
   });
 
