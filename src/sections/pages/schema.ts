@@ -48,8 +48,9 @@ const PagesSite = open({
 })
   .check(
     rule((site, refineCtx) => {
-      // The update endpoint rejects an empty body, so a mapping with no field can only ever be a mistake.
-      if (Object.keys(site).length === 0) {
+      // The update endpoint rejects an empty body, so a mapping with no field can only ever be a mistake. A
+      // library caller's `{ field: undefined }` serializes to the same empty body, so an undefined field is no field.
+      if (Object.values(site).every((value) => value === undefined)) {
         refineCtx.addIssue({
           code: "custom",
           message: EMPTY_SITE_FIX,
