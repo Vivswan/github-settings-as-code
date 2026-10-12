@@ -91,12 +91,6 @@ export const pagesSection = {
         });
         return plan;
       }
-      if (Object.keys(desired).length === 0) {
-        plan.notes.push(
-          "pages: declared as an empty mapping, which configures nothing (the update endpoint rejects an empty body). Declare at least one field, use pages: null to disable the site, or remove the section",
-        );
-        return plan;
-      }
       // The source is split off so the no-source form never carries a source key at all: an own
       // `source: undefined` would count as a remainder below.
       const { source, ...restConfig } = desired;

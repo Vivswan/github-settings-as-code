@@ -56,6 +56,15 @@ describe("a Pages field the update cannot set is refused at parse, naming the ke
     ]);
   });
 
+  test("an empty mapping is refused at parse, naming the three intents it could have meant", () => {
+    // The update endpoint rejects an empty body, so the old plan-time note left a file that ran and configured nothing.
+    const refusal =
+      "pages: an empty mapping configures nothing; declare at least one field, declare pages: null to disable the site, or remove the section";
+    expect(issues({})).toEqual([refusal]);
+    // A library caller's undefined field is dropped by JSON, so the body GitHub would see is the same empty one.
+    expect(issues({ https_enforced: undefined })).toEqual([refusal]);
+  });
+
   test("the fields the update takes parse, and null turns the site off", () => {
     expect(
       issues({

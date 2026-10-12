@@ -376,7 +376,7 @@ The side-by-side comparison with the Probot Settings app lives in the migration 
 
 **Fields the Pages update ignores** (`pages`)
 
-- Parsing the file refuses the fields only the site GET reports (url, html_url, status, custom_404, protected_domain_state, pending_domain_unverified_at, https_certificate) and a source.path other than / or /docs, the only directories Pages publishes from.
+- Parsing the file refuses the fields only the site GET reports (url, html_url, status, custom_404, protected_domain_state, pending_domain_unverified_at, https_certificate), a source.path other than / or /docs, the only directories Pages publishes from, and an empty mapping, which the update endpoint rejects; the published schema carries the same three.
 - Sent, GitHub would drop the fields and report them as drift on every run, and the path would 422 at apply.
 - A workflow-built site still reports its source, so build_type: workflow beside a source converges.
 
