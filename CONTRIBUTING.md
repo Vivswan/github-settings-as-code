@@ -47,7 +47,7 @@ The end-to-end tests build the bundle to a temp path and run it as a subprocess 
 - PR CI runs the full scenario corpus, the endpoint-coverage tripwire, and 25 fuzz iterations on every pull request, and uploads the e2e failure artifacts.
 - The release gate (`.github/workflows/release-gate.yml`) runs the deep fuzz and the OpenAPI drift probe on the release PR, on a manual dispatch, and every night. It is required under `all-green` on the release PR and on a manual dispatch.
 - The nightly workflow covers the Octokit freshness probes (the packages that describe GitHub's API, at their latest releases) and runs the full gate against them, covers the float canary, and opens the `@octokit/openapi` bump PR once the committed bump passes the full gate. A red night, the release gate included, files under the `nightly-failure` issue.
-- The fuzz nightly runs the full fuzz on its own schedule and files under `fuzz-nightly` with a replay command.
+- The fuzz workflow runs by dispatch alone, for a seeded replay or an ad-hoc soak, and files under `fuzz-nightly` with a replay command.
 
 The fuzzer is deterministic. It prints a master seed and a per-iteration seed:
 

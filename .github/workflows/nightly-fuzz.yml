@@ -1,18 +1,15 @@
-# Nightly fuzzing for the e2e property fuzzer (test/e2e/fuzz.ts): each
+# Dispatched fuzzing for the e2e property fuzzer (test/e2e/fuzz.ts): each
 # iteration generates a random scenario, predicts its outcome class with the
 # oracle, and runs the freshly built bundle against the mock. Failing iterations
 # dump artifact directories with contract-shaped report.md files (title +
 # replay block), which the fuzz-issue steps below turn into one deduplicated
-# tracking issue. Repo-owned: generated once by the fleet sync and
+# tracking issue. The nightly deep fuzz is release-gate.yml's fuzz job, which
+# nightly.yml calls every night; this workflow is the seeded replay and the
+# ad-hoc soak, run by hand. Repo-owned: generated once by the fleet sync and
 # never overwritten by a later sync.
-name: Nightly Fuzz
+name: Fuzz
 
 on:
-  schedule:
-    # Off-peak, off the top of the hour, and distinct from the fleet's other
-    # nightlies (chromium-bridge 47 4, litellm-vscode-chat 59 7, this repo's
-    # nightly.yml 47 2).
-    - cron: "41 5 * * *"
   workflow_dispatch:
     inputs:
       seed:
@@ -24,14 +21,13 @@ on:
         required: false
         default: "300"
 
-# Scheduled nights share one group so they serialize; each manual dispatch
-# gets its own group (keyed by run id) so several seeds can run at once -
-# concurrent with each other AND with a scheduled night - without GitHub
-# cancelling the queued ones (one pending run per group). The fuzz-issue
-# steps are check-then-act, so a mixed pass/fail batch can close the
-# tracking issue under a green message; the failure comment survives.
+# Each dispatch gets its own group (keyed by run id) so several seeds can run
+# at once without GitHub cancelling the queued ones (one pending run per
+# group). The fuzz-issue steps are check-then-act, so a mixed pass/fail batch
+# can close the tracking issue under a green message; the failure comment
+# survives.
 concurrency:
-  group: ${{ github.event_name == 'workflow_dispatch' && format('nightly-fuzz-{0}', github.run_id) || 'nightly-fuzz' }}
+  group: fuzz-${{ github.run_id }}
   cancel-in-progress: false
 
 # issues: write lets the fuzz-issue action file/close the tracking issue.
@@ -43,7 +39,7 @@ jobs:
   fuzz:
     runs-on: ubuntu-latest
     # If the job hits this timeout it is CANCELLED, not failed, and the
-    # `if: failure()` reporting steps below never run - a silent night for
+    # `if: failure()` reporting steps below never run - a silent run for
     # exactly the hang a fuzzer exists to find. Bound the fuzz run itself
     # (wall-clock flag, `timeout` wrapper) below this value so a hang
     # surfaces as a failure.
@@ -83,12 +79,12 @@ jobs:
           label: "fuzz-nightly"
           artifacts-dir: test/e2e/.artifacts
           artifact-name: fuzz-failures-${{ github.run_attempt }}
-          title: Nightly fuzz failures
+          title: Fuzz failures
           label-color: "B60205"
-          label-description: Automated nightly fuzz failure
+          label-description: Automated fuzz failure
           stream: fuzz
 
-      - name: Close the fuzz issue on a green night
+      - name: Close the fuzz issue on a green run
         if: success()
         uses: Vivswan/repo-platform/actions/fuzz-issue@stable
         with:
