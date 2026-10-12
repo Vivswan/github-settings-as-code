@@ -38,7 +38,7 @@ Code is the source of truth: this section holds only the rules and the decisions
 
 - Generated artifacts are regenerated, never hand-edited; `.github/scripts/generated.ts` is the one list of them, and whole-file generated TypeScript lives under `src/generated/`.
 - `lib/index.js`, `lib/settings.schema.json`, and `lib/pkg/` are built, never committed on main.
-- Every GitHub list call goes through `listAll()` or `listAllEnveloped()`, and every API error through `call()`/`failureFor()`, so the permission policy holds (`src/sections/contract/requests.ts`).
+- Every section read and write goes through `src/sections/contract/requests.ts` (`listAll()`/`listAllEnveloped()` for lists, `call()`/`failureFor()` for errors), so the permission policy holds. The raw client is for callers outside the sections' reach: `src/github/` and `src/discovery/`, which the layering keeps off the sections import, and `src/report/issue-report.ts`, whose warnings land in public logs and so never carry the slug, the path, or the API message the shared renderer embeds.
 - What can be known wrong from the settings file or the run inputs alone is refused when the file is parsed, naming the key and the fix, never discovered at apply time:
   GET-only fields, enum violations, contradictory key pairs, unknown keys in a closed GitHub shape.
   Healing is for state this action owns: GitHub's repository settings, which apply converges toward what the settings file declares;
