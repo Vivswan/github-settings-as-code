@@ -553,3 +553,41 @@ describe("mode: snapshot", () => {
     );
   });
 });
+
+describe("target inputs the file system cannot change", () => {
+  // Before, these were refused inside resolveTargets after the repos directory was read, so an unreadable directory
+  // reported itself and hid the input error; parseConfig never touches the directory.
+  const FLEET = { GITHUB_REPOSITORY: "admin/fleet" };
+  test.each<[string, Partial<Record<InputName, string>>, Problem]>([
+    [
+      "a repos list mixing * with names",
+      { repos: "*,o/r" },
+      { code: "repos-input-wildcard-mixed" },
+    ],
+    [
+      "a repos list with a bad entry",
+      { repos: "o/r,not-a-slug" },
+      { code: "repos-input-invalid-entries", invalid: ["not-a-slug"], duplicated: [] },
+    ],
+    [
+      "discovery filters beside explicit repos",
+      { repos: "o/r", forks: "exclude" },
+      { code: "discovery-filters-without-wildcard", filters: ["forks"], targets: "explicit-repos" },
+    ],
+    [
+      "discovery filters beside repos-dir alone",
+      { "repos-dir": "repos", forks: "exclude" },
+      { code: "discovery-filters-without-wildcard", filters: ["forks"], targets: "repos-dir" },
+    ],
+  ])(
+    "%s is refused when the inputs are parsed, for apply and for a snapshot dir",
+    (_case, inputs, problem) => {
+      expect(rejection(parse({ token: "t", ...inputs }, FLEET))).toEqual(problem);
+      expect(
+        rejection(
+          parse({ token: "t", mode: "snapshot", "snapshot-dir": "snaps", ...inputs }, FLEET),
+        ),
+      ).toEqual(problem);
+    },
+  );
+});

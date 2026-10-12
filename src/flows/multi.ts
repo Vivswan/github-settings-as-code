@@ -320,6 +320,8 @@ function maskFleet(
     const knownVisibility = new Map<SlugKey, RepoVisibility>();
     // Private slugs discovery filtered out are masked but never placeholdered.
     const filteredPrivateSlugs: Private<string>[] = [];
+    // parseConfig refuses a bad repos list and misplaced filters before any file is read; a library caller that
+    // builds the config by hand meets the same refusals here.
     if (cfg.reposInput) {
       const parsed = yield* parseReposInput(cfg.reposInput);
       if (parsed.discover) {

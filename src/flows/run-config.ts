@@ -5,7 +5,7 @@
  */
 
 import { err, ok, type Result, safeTry } from "neverthrow";
-import { LIST_SEPARATOR } from "../discovery/repos-input.js";
+import { LIST_SEPARATOR, parseReposInput } from "../discovery/repos-input.js";
 import { LAYERINGS } from "../engine/layers.js";
 import type { Problem } from "../problem.js";
 import { PRIVATE_REPORT_CHANNELS } from "../report/delivery.js";
@@ -96,6 +96,28 @@ function readSnapshotBase(input: Inputs, env: ConfigEnv) {
   });
 }
 
+/**
+ * The target problems the inputs alone decide: a repos list that mixes "*" with names or carries a bad entry, and
+ * discovery filters set where no "*" discovery runs. Refused here, before any file is read, so an unreadable
+ * repos-dir cannot hide them; resolveTargets meets the same problems for a library caller that builds the config
+ * by hand.
+ */
+function refuseTargetInputs(
+  reposInput: string,
+  discoveryFiltersSet: readonly string[],
+): Result<void, Problem> {
+  const filtersWithout = (targets: "explicit-repos" | "repos-dir"): Result<void, Problem> =>
+    discoveryFiltersSet.length > 0
+      ? err({ code: "discovery-filters-without-wildcard", filters: discoveryFiltersSet, targets })
+      : ok(undefined);
+  if (!reposInput) {
+    return filtersWithout("repos-dir");
+  }
+  return parseReposInput(reposInput).andThen((parsed) =>
+    parsed.discover ? ok(undefined) : filtersWithout("explicit-repos"),
+  );
+}
+
 /** The file arm: one repository, the fleet inputs refused. */
 function parseSnapshotFileArm(
   input: Inputs,
@@ -175,6 +197,7 @@ function parseSnapshotConfig(
     if (!reposInput && !reposDir) {
       return err({ code: "input-snapshot-dir-without-targets" });
     }
+    yield* refuseTargetInputs(reposInput, filters.discoveryFiltersSet);
     return ok({
       ...base,
       form: "dir" as const,
@@ -276,6 +299,7 @@ export function parseConfig(
       if (settingsFile !== DEFAULT_SETTINGS_FILE) {
         return err({ code: "input-settings-file-with-multi" });
       }
+      yield* refuseTargetInputs(reposInput, discoveryFiltersSet);
       const adminOwner = githubRepository.split("/")[0] ?? "";
       return ok({
         ...common,
