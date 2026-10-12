@@ -15,8 +15,8 @@ permissions:
   contents: read
 
 jobs:
-  # The deep fuzz PR CI only samples (checks.yml runs 25 iterations). Same depth as a night of
-  # nightly-fuzz.yml, which stays the seeded-replay stream; this run qualifies the release candidate itself.
+  # The deep fuzz PR CI only samples (checks.yml runs 25 iterations); nightly.yml's call makes this the nightly
+  # fuzz too. nightly-fuzz.yml is the dispatched seeded replay, with its own issue stream.
   fuzz:
     runs-on: ubuntu-latest
     # The fuzz run is bounded below this value, so a hang surfaces as a failure with its artifacts, not a cancel.

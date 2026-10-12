@@ -7,8 +7,10 @@ import { readWorkflow, type Step, type Workflow, workflowFiles } from "./workflo
 
 const FUZZ_ISSUE_ACTION = "Vivswan/repo-platform/actions/fuzz-issue@stable";
 
-/** The nightlies whose one job runs the checks and files the issue; nightly.yml's report job is judged on its own below. */
-const NIGHTLIES: ReadonlyArray<[file: string, job: string]> = [["nightly-fuzz.yml", "fuzz"]];
+/** The workflows whose one job runs the checks and files the issue; nightly.yml's report job is judged on its own below. */
+const SINGLE_JOB_FILERS: ReadonlyArray<[file: string, job: string]> = [
+  ["nightly-fuzz.yml", "fuzz"],
+];
 
 const filerIn = (steps: Step[], mode: string) =>
   steps.find((s) => s.uses === FUZZ_ISSUE_ACTION && s.with?.mode === mode);
@@ -20,7 +22,7 @@ const condition = (raw: unknown): string =>
     .replace(/^\$\{\{\s*([\s\S]*?)\s*\}\}$/, "$1")
     .trim();
 
-describe.each(NIGHTLIES)("%s failure path", (file, job) => {
+describe.each(SINGLE_JOB_FILERS)("%s failure path", (file, job) => {
   const workflow = readWorkflow(file);
   const steps = workflow.jobs[job]?.steps ?? [];
   const report = filerIn(steps, "report");
@@ -30,7 +32,7 @@ describe.each(NIGHTLIES)("%s failure path", (file, job) => {
     const upload = steps.find((s) => (s.uses ?? "").startsWith("actions/upload-artifact@"));
     expect(report, "no reporting fuzz-issue step").toBeDefined();
     expect(upload, "no upload-artifact step").toBeDefined();
-    // A step without a condition runs on success() only, so a dropped `if:` files nothing on the night that fails.
+    // A step without a condition runs on success() only, so a dropped `if:` files nothing on the run that fails.
     expect(condition(report?.if)).toBe("failure()");
     expect(condition(upload?.if)).toBe(condition(report?.if));
     // upload-artifact refuses a duplicate name, so a re-run attempt uploads under its own: the name carries the attempt number.
@@ -52,7 +54,7 @@ describe.each(NIGHTLIES)("%s failure path", (file, job) => {
   });
 
   test("the job holds the grant each fuzz-issue step consumes", () => {
-    // A missing grant is not loud: the report step runs on an already-red night, so its 403 adds a line to a red job and files no issue.
+    // A missing grant is not loud: the report step runs on an already-red run, so its 403 adds a line to a red job and files no issue.
     const grants = workflow.jobs[job]?.permissions ?? workflow.permissions ?? {};
     const filers = steps.filter((s) => s.uses === FUZZ_ISSUE_ACTION);
     expect(filers.length).toBeGreaterThan(1);
@@ -151,9 +153,9 @@ describe("nightly.yml report job", () => {
   });
 });
 
-test("the nightlies file under distinct labels, so one's green night cannot close the other's issue", () => {
+test("the filers file under distinct labels, so one's green run cannot close the other's issue", () => {
   const labels = [
-    ...NIGHTLIES.map(
+    ...SINGLE_JOB_FILERS.map(
       ([file, job]) => filerIn(readWorkflow(file).jobs[job]?.steps ?? [], "report")?.with?.label,
     ),
     filerIn(readWorkflow("nightly.yml").jobs.report?.steps ?? [], "report")?.with?.label,
