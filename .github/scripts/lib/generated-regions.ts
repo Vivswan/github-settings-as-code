@@ -8,6 +8,7 @@ import { fromMarkdown } from "mdast-util-from-markdown";
 import { gfmTableFromMarkdown } from "mdast-util-gfm-table";
 import { gfmTable } from "micromark-extension-gfm-table";
 import { err, ok, type Result } from "neverthrow";
+import { visitParents } from "unist-util-visit-parents";
 import { Parser } from "yaml";
 
 /** Which comment syntax a file's markers use: a complete `<!-- -->` comment, or a whole-line YAML `#` comment. */
@@ -296,23 +297,17 @@ function scanMarkdown(text: string): MarkdownScan {
     html,
     blockquote: quoted,
   };
-  const walk = (node: MarkdownNode, inQuote: boolean): void => {
-    spansByType[node.type]?.push(nodeSpan(node));
-    if (node.type === "heading" && !inQuote) {
-      const [start, end] = nodeSpan(node);
-      headings.push({ offset: start, text: text.slice(start, end).trim() });
-    }
-    if ("children" in node) {
-      for (const child of node.children) {
-        walk(child, inQuote || node.type === "blockquote");
-      }
-    }
-  };
   const tree = fromMarkdown(text, {
     extensions: [gfmTable()],
     mdastExtensions: [gfmTableFromMarkdown()],
   });
-  walk(tree, false);
+  visitParents(tree, (node, ancestors) => {
+    spansByType[node.type]?.push(nodeSpan(node));
+    if (node.type === "heading" && !ancestors.some((ancestor) => ancestor.type === "blockquote")) {
+      const [start, end] = nodeSpan(node);
+      headings.push({ offset: start, text: text.slice(start, end).trim() });
+    }
+  });
   return { code, codeSpans, html, quoted, headings };
 }
 
