@@ -10,6 +10,7 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, posix } from "node:path";
+import { unescape as percentDecoded } from "node:querystring";
 import { DecodingMode, decodeHTML } from "entities";
 import { ok } from "neverthrow";
 import { parse as parseYaml } from "yaml";
@@ -208,6 +209,42 @@ async function linkDestinations(
   return destinations;
 }
 
+/** One local link as a browser resolves it: the path it requests and the fragment it looks up, each decoded on its own. */
+interface LinkTarget {
+  /** The destination as the renderer wrote it, for a failure message. */
+  readonly destination: string;
+
+  /** The file the link requests, relative to its page, percent-decoded as a server does (a valid escape decodes, a bare % stays); "" for a fragment-only link. */
+  readonly path: string;
+
+  /** The heading the link looks up, percent-decoded; null for a destination with no #. */
+  readonly fragment: string | null;
+}
+
+/**
+ * The links in `markdown` a reader can follow locally; a destination with a scheme (https:, mailto:, tel:) is skipped.
+ * The split on # comes before the decoding, so an encoded %23 stays part of the path, as a browser requests it.
+ */
+async function linkTargets(
+  markdown: string,
+  attributes?: readonly string[],
+): Promise<LinkTarget[]> {
+  const targets: LinkTarget[] = [];
+  for (const destination of await linkDestinations(markdown, attributes)) {
+    const hash = destination.indexOf("#");
+    const path = hash === -1 ? destination : destination.slice(0, hash);
+    if (/^[a-z]+:/.test(path)) {
+      continue;
+    }
+    targets.push({
+      destination,
+      path: percentDecoded(path),
+      fragment: hash === -1 ? null : percentDecoded(destination.slice(hash + 1)),
+    });
+  }
+  return targets;
+}
+
 /** An origin no real link names, under which docs/ is served for the resolution below. */
 const SITE_ORIGIN = "https://docs-site.invalid";
 
@@ -224,14 +261,7 @@ async function linksLeavingDocs(markdown: string, page: string): Promise<string[
   const lines = markdown.split("\n");
   const lineOf = (target: string): string => {
     const name = posix.basename(target.split("#")[0] ?? "");
-    const decoded = (text: string): string => {
-      try {
-        return decodeURIComponent(text);
-      } catch {
-        return text;
-      }
-    };
-    const needles = [target, decoded(target), name, decoded(name)];
+    const needles = [target, percentDecoded(target), name, percentDecoded(name)];
     const index = needles
       .map((needle) => lines.findIndex((line) => line.includes(needle)))
       .find((found) => found !== -1);
@@ -411,12 +441,11 @@ describe("docs/ guide pages", () => {
     const linked = new Set<string>();
     for (const file of linkScanFiles()) {
       // href only: an image or embed shows the file but takes the reader nowhere.
-      for (const destination of await linkDestinations(readFileSync(file.path, "utf8"), ["href"])) {
-        const path = destination.split("#")[0] ?? "";
-        if (path === "" || /^[a-z]+:/.test(path)) {
+      for (const target of await linkTargets(readFileSync(file.path, "utf8"), ["href"])) {
+        if (target.path === "") {
           continue;
         }
-        const resolved = join(file.path, "..", decodeURIComponent(path));
+        const resolved = join(file.path, "..", target.path);
         if (resolved !== file.path) {
           linked.add(resolved);
         }
@@ -426,49 +455,37 @@ describe("docs/ guide pages", () => {
     expect(orphans, "no README, guide, or root page links these docs/ pages").toEqual([]);
   });
 
-  /** Every link target in `file` outside its fences, the external ones (a scheme, mailto:) skipped. */
-  function linkTargets(file: { label: string; path: string }): string[] {
-    const markdown = linesOutsideFences(readFileSync(file.path, "utf8"), file.label).join("\n");
-    return [...markdown.matchAll(/\]\(([^)]+)\)/g)]
-      .map((match) => match[1] ?? "")
-      .filter((target) => !/^[a-z]+:\/\//.test(target) && !target.startsWith("mailto:"));
-  }
-
   /** Why a target's #fragment matches no heading of the markdown file it names; null for a target with no fragment to check, or a good one. */
   function fragmentProblem(
     file: { label: string; path: string },
-    target: string,
+    target: LinkTarget,
     slugsOf: (path: string) => Set<string>,
   ): string | null {
-    const hash = target.indexOf("#");
-    if (hash === -1) {
+    if (target.fragment === null) {
       return null;
     }
-    const fragment = target.slice(hash + 1);
-    const path = target.slice(0, hash);
-    const resolved = path === "" ? file.path : join(file.path, "..", path);
+    const resolved = target.path === "" ? file.path : join(file.path, "..", target.path);
     if (!resolved.endsWith(".md")) {
       return null; // only markdown targets have slugified headings
     }
     if (!existsSync(resolved)) {
-      return `${file.label}: (${target}) target file does not exist`;
+      return `${file.label}: (${target.destination}) target file does not exist`;
     }
-    if (!slugsOf(resolved).has(fragment)) {
-      return `${file.label}: (${target}) fragment matches no heading`;
+    if (!slugsOf(resolved).has(target.fragment)) {
+      return `${file.label}: (${target.destination}) fragment matches no heading`;
     }
     return null;
   }
 
-  test("every relative link in the guides, README, and CONTRIBUTING resolves to a real file", () => {
+  test("every relative link in the guides, README, and CONTRIBUTING resolves to a real file", async () => {
     const broken: string[] = [];
     for (const file of linkScanFiles()) {
-      for (const target of linkTargets(file)) {
-        const path = target.split("#")[0] ?? "";
-        if (path === "") {
+      for (const target of await linkTargets(readFileSync(file.path, "utf8"))) {
+        if (target.path === "") {
           continue;
         }
-        if (!existsSync(join(file.path, "..", path))) {
-          broken.push(`${file.label}: (${target})`);
+        if (!existsSync(join(file.path, "..", target.path))) {
+          broken.push(`${file.label}: (${target.destination})`);
         }
       }
     }
@@ -483,7 +500,7 @@ describe("docs/ guide pages", () => {
     expect(leaving).toEqual([]);
   });
 
-  test("every relative link with a #fragment points at a real heading", () => {
+  test("every relative link with a #fragment points at a real heading", async () => {
     const files = linkScanFiles();
     const slugCache = new Map<string, Set<string>>();
     const slugsOf = (path: string): Set<string> => {
@@ -496,7 +513,7 @@ describe("docs/ guide pages", () => {
     };
     const broken: string[] = [];
     for (const file of files) {
-      for (const target of linkTargets(file)) {
+      for (const target of await linkTargets(readFileSync(file.path, "utf8"))) {
         const problem = fragmentProblem(file, target, slugsOf);
         if (problem !== null) {
           broken.push(problem);
@@ -986,6 +1003,48 @@ describe("links-leaving-docs guard (mutation checks)", () => {
     // Climbing out and back in still leaves the site's root, where no docs/ directory exists.
     expect(await linksLeavingDocs("[up and back](../../docs/start/x.md)", "start/y.md")).toEqual([
       "docs/start/y.md:1: (../../docs/start/x.md) leaves docs/",
+    ]);
+  });
+});
+
+describe("link target scan (mutation checks)", () => {
+  test("reads each destination as a browser does, where a regex over the source read it differently", async () => {
+    // A regex over the source read the first three lines, the tel: link, and the encoded forms differently; the other
+    // schemes pin the skip, the two bare percents pin the tolerant decode, and %23 pins the split before the decode.
+    const link = (destination: string, path: string, fragment: string | null): LinkTarget => ({
+      destination,
+      path,
+      fragment,
+    });
+    const page = [
+      '[titled](a.md "Title") [bracketed](<a b.md>) [nested](p.md (title))',
+      "[reference][ref] [collapsed][] [shortcut]",
+      '<a href="raw.md">anchor</a> <img src="raw.png" alt="">',
+      "[phone](tel:+15550100) [mail](mailto:x@example.com) [site](https://example.com/)",
+      "Not links: `[span](code.md)` and \\[escaped](escaped.md).",
+      "[encoded](a%20b.md#frag%20x) [entity](&#46;&#46;/ent.md) [escaped](\\.\\./esc.md)",
+      "[bare percent](50%.md) [bare and escape](<50% done.md>) [encoded hash](README.md%23library) [fragment](#top)",
+      "",
+      "[ref]: ref.md",
+      "[collapsed]: collapsed.md",
+      "[shortcut]: shortcut.md",
+    ].join("\n");
+    expect(await linkTargets(page)).toEqual([
+      link("a.md", "a.md", null),
+      link("a%20b.md", "a b.md", null),
+      link("p.md", "p.md", null),
+      link("ref.md", "ref.md", null),
+      link("collapsed.md", "collapsed.md", null),
+      link("shortcut.md", "shortcut.md", null),
+      link("raw.md", "raw.md", null),
+      link("raw.png", "raw.png", null),
+      link("a%20b.md#frag%20x", "a b.md", "frag x"),
+      link("../ent.md", "../ent.md", null),
+      link("../esc.md", "../esc.md", null),
+      link("50%.md", "50%.md", null),
+      link("50%%20done.md", "50% done.md", null),
+      link("README.md%23library", "README.md#library", null),
+      link("#top", "", "top"),
     ]);
   });
 });
