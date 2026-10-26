@@ -122,6 +122,7 @@ const push = (pr: string, temp: string, headSha: string) =>
     "push",
   );
 
+/** The PR branch's tip at the origin. */
 const originTip = (fx: Fixture): string => git(fx.origin, "rev-parse", "refs/heads/pr");
 
 describe("push", () => {

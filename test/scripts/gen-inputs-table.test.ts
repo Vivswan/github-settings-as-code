@@ -10,14 +10,22 @@ import { regionBounds } from "../../.github/scripts/lib/generated-regions.js";
 import { regenerateFile } from "../../.github/scripts/lib/region-driver.js";
 import { ROOT } from "../root.js";
 
+/** The inputs page as checked in. */
 const page = readFileSync(join(ROOT, INPUTS_PAGE_PATH), "utf8");
+
+/** The inputs-table region's marker spans in it. */
 const { begin, end } = regionBounds(page, "inputs-table", "html");
+
+/** The page before, inside, and after the region. */
 const [intro, body, tail] = [
   page.slice(0, begin[1]),
   page.slice(begin[1], end[0]),
   page.slice(end[0]),
 ];
+
+/** The page regenerated from `text`, as the build does it. */
 const regenerate = (text: string): string => regenerateFile(INPUTS_PAGES, INPUTS_PAGE_PATH, text);
+
 /** The seal's refusal of the inputs-table region, naming the line below the BEGIN marker. */
 const refusal = (lineBelowBegin: number): RegExp =>
   new RegExp(

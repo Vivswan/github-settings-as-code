@@ -18,17 +18,27 @@ import { runCli } from "./streams.js";
 type Inputs = Partial<Record<InputName, string>>;
 
 interface Case {
+  /** The arm's name, which is the test's. */
   readonly name: string;
+
   /** The runner's inputs; `dir` is the side's own scratch directory for the files the arm writes or misses. */
   readonly inputs: (dir: string) => Inputs;
+
   /** A settings document written to `<dir>/settings.yml` before the run, for the arms that read one the fixtures lack. */
   readonly settings?: string;
+
+  /** The reads the mock answers; an unrouted GET answers 404. */
   readonly routes: Record<string, Route>;
+
   /** The writes the arm may perform; anything else is an unrouted mutation and throws. */
   readonly mutations?: readonly string[];
+
+  /** The GITHUB_* context both faces run under. */
   readonly env: ConfigEnv;
+
   /** Where the arm ends on both faces; without it, two faces failing alike would pass as equal. */
   readonly ends: { readonly code: number; readonly result: string };
+
   /** The private targets both faces must key by placeholder and name nowhere, under the default private-repos: redact. */
   readonly redacted?: readonly string[];
 }
@@ -41,34 +51,39 @@ const DOCS = { name: "docs", color: "0075ca", description: "Documentation" };
 const FLEET_ENV: ConfigEnv = { GITHUB_REPOSITORY: "admin/fleet" };
 
 /** The settings.yml of a remote target, as the contents endpoint hands it back through getRepoFile. */
-const remoteSettings = (
-  slug: string,
-  hasWiki: boolean,
-  isPrivate = false,
-): Record<string, Route> => ({
-  [`GET /repos/${slug}`]: { data: { has_wiki: hasWiki, private: isPrivate } },
-  [`GET /repos/${slug}/contents/.github/settings.yml`]: {
-    data: `repository:\n  has_wiki: false\n`,
-  },
-});
+function remoteSettings(slug: string, hasWiki: boolean, isPrivate = false): Record<string, Route> {
+  return {
+    [`GET /repos/${slug}`]: { data: { has_wiki: hasWiki, private: isPrivate } },
+    [`GET /repos/${slug}/contents/.github/settings.yml`]: {
+      data: `repository:\n  has_wiki: false\n`,
+    },
+  };
+}
 
-const labels = (slug: string, entries: unknown[]): Record<string, Route> => ({
-  [`GET /repos/${slug}`]: { data: { private: false } },
-  [`GET /repos/${slug}/labels?per_page=100&page=1`]: { data: entries },
-});
+function labels(slug: string, entries: unknown[]): Record<string, Route> {
+  return {
+    [`GET /repos/${slug}`]: { data: { private: false } },
+    [`GET /repos/${slug}/labels?per_page=100&page=1`]: { data: entries },
+  };
+}
 
 /** The token cannot read the repository's variables: under warn the section is skipped and the run ends partial. */
-const variablesDenied = (slug: string): Record<string, Route> => ({
-  [`GET /repos/${slug}/actions/variables?per_page=30&page=1`]: {
-    error: { status: 403, message: "Resource not accessible by personal access token", body: "" },
-  },
-});
+function variablesDenied(slug: string): Record<string, Route> {
+  return {
+    [`GET /repos/${slug}/actions/variables?per_page=30&page=1`]: {
+      error: { status: 403, message: "Resource not accessible by personal access token", body: "" },
+    },
+  };
+}
 
 /** A document declaring the section the token can read beside the one it cannot. */
 const WITH_VARIABLES =
   "repository:\n  has_wiki: false\nactions_variables:\n  - name: REGION\n    value: eu-west-1\n";
+
+/** The input under which a section the token cannot read is skipped instead of failing the run. */
 const WARN = { "on-missing-permission": "warn" } as const;
 
+/** The runner's input sets, each run through both faces. */
 const cases: Case[] = [
   {
     name: "check, one repository, clean",
@@ -196,25 +211,39 @@ const cases: Case[] = [
 
 /** What both faces are held to, with each side's scratch directory folded to one spelling. */
 interface Observed {
+  /** The exit code. */
   readonly code: number;
+
+  /** The action's outputs; the CLI prints them as `name=value` lines on stdout. */
   readonly outputs: Partial<Record<OutputName, string>>;
+
+  /** The action's plain log lines; the CLI's other stdout lines. */
   readonly logs: readonly string[];
+
+  /** The action's leveled lines as `level: text`; the CLI's stderr lines. */
   readonly annotations: readonly string[];
+
   /** Every file under the side's scratch directory, by relative path, byte for byte: no snapshot line dates itself. */
   readonly files: Record<string, string>;
 }
 
+/** The outputs the CLI prints on stdout, so a stdout line in their `name=value` shape is an output and not a log line. */
 const OUTPUT_NAMES: readonly OutputName[] = ["result", "skipped-sections", "repos-result"];
+
+/** A stdout line that is an output: its name and its value. */
 const OUTPUT_LINE = new RegExp(`^(${OUTPUT_NAMES.join("|")})=(.*)$`);
 
 /** The environment keys the action's parse reads beside the inputs, held to the case's env on both faces. */
 const CONTEXT_KEYS = ["GITHUB_REPOSITORY", "GITHUB_SERVER_URL", "GITHUB_RUN_ID", "GITHUB_TOKEN"];
+
+/** The INPUT_* variables the action's face reads, cleared before each run so a stale one cannot leak in. */
 const INPUT_KEYS = Object.keys(INPUT_DECLS).map((name) => `INPUT_${name.toUpperCase()}`);
 
 function api(c: Case): MockApi {
   return new MockApi({ ...c.routes }).allowMutations(...(c.mutations ?? []));
 }
 
+/** Folds a side's scratch directory to `<dir>` in a line, so the two sides compare equal. */
 const fold = (dir: string) => (line: string) => line.replaceAll(dir, "<dir>");
 
 /** The two faces run at different instants; the run's one moment notice is the one line that may differ. */

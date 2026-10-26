@@ -40,6 +40,7 @@ const condition = (raw: unknown): string =>
     .replace(/^\$\{\{\s*([\s\S]*?)\s*\}\}$/, "$1")
     .trim();
 
+/** A job's `needs`, one or many, as a list. */
 const needsOf = (job: Job | undefined): string[] => [job?.needs ?? []].flat();
 
 /** Every job reachable from `gate` by following `needs` edges away from it, however many hops. */
@@ -171,10 +172,7 @@ function consumedGrants(step: Step): Array<[scope: string, why: string]> {
   return grants;
 }
 
-/**
- * A called job's grant: its own permissions block, else its workflow's, else the caller's (GitHub applies the nearest block; a called
- * job with none inherits the caller's).
- */
+/** A called job's grant: its own permissions block, else its workflow's, else the caller's (GitHub applies the nearest block; a called job with none inherits the caller's). */
 const effectiveGrant = (job: Job, workflow: Workflow, caller: Job): Record<string, string> =>
   job.permissions ?? workflow.permissions ?? caller.permissions ?? {};
 
@@ -256,16 +254,25 @@ describe("the hooks' grants", () => {
   });
 });
 
+/** The trigger a library-page claim names: a release cut, a release-PR refresh, else a green push to main. */
+function triggerOf(
+  claim: string,
+): "a release cut" | "a release-PR refresh" | "a green push to main" {
+  if (/release cut/i.test(claim)) {
+    return "a release cut";
+  }
+  if (/release PR/i.test(claim)) {
+    return "a release-PR refresh";
+  }
+  return "a green push to main";
+}
+
 /**
  * The hook a library-page claim about "every green push", "every release cut", or a refresh of "the release PR" points at, by its
  * ci.yml caller's condition.
  */
 function hookFor(claim: string): { file: string; workflow: Workflow } {
-  const trigger = /release cut/i.test(claim)
-    ? "a release cut"
-    : /release PR/i.test(claim)
-      ? "a release-PR refresh"
-      : "a green push to main";
+  const trigger = triggerOf(claim);
   // A green push: the caller's own condition names the push event and the main ref beside the gate's success; a release cut: it
   // names release-please's release_created output; a release-PR refresh: its prs_created output. One caller each, or the claim
   // points at nothing.
@@ -296,10 +303,7 @@ function hookFor(claim: string): { file: string; workflow: Workflow } {
 /** A step gate that reads a verdict (`steps.<id>.outputs.<x> == 'true'`); every other condition can skip the step on the caller's own event. */
 const VERDICT_GATE = /^steps\.[\w-]+\.outputs\.[\w-]+ == 'true'$/;
 
-/**
- * Whether some step of the workflow runs the pipeline subcommand (with its argument, when one is named) on every run its job takes: the
- * step carries no condition, or a verdict gate the wiring relation ties to a probe.
- */
+/** Whether some step of the workflow runs the pipeline subcommand (with its argument, when one is named) on every run its job takes: the step carries no condition, or a verdict gate the wiring relation ties to a probe. */
 const runsSubcommand = (workflow: Workflow, subcommand: string): boolean =>
   Object.values(workflow.jobs).some((job) =>
     (job.steps ?? []).some(
@@ -391,21 +395,14 @@ describe("the library page's publishing claims", () => {
   });
 });
 
-/**
- * A step that is one bun invocation of a steps script's subcommand, with any variable assignments ahead of bun and
- * arguments after the subcommand, as the probe and the pipeline steps are: the script's name, then the subcommand.
- * Tokens may sit apart by any run of spaces or tabs, as the shell reads them; a newline is not a separator, since bash
- * ends the command there.
- */
+/** One bun invocation of a steps script's subcommand, as the probe and the pipeline steps are (variable assignments may sit ahead of bun, arguments after the subcommand), capturing the script's name and the subcommand; tokens part by spaces or tabs only, since bash ends the command at a newline. */
 const SCRIPT_STEP =
   /^(?:[A-Za-z_]\w*="[^"]*"[ \t]+)*bun[ \t]+\.github\/scripts\/([\w-]+)\.ts[ \t]+([\w-]+)(?:[ \t]+[\w-]+)*$/;
-/** Any step whose run hands bun a steps script, however it is spelled (flags, `bun run`, other separators, a line
- * continuation); one SCRIPT_STEP cannot read is a shape to extend it for, never one to pass unjudged. */
+
+/** Any step whose run hands bun a steps script, however it is spelled (flags, `bun run`, other separators, a line continuation); one SCRIPT_STEP cannot read is a shape to extend it for, never one to pass unjudged. */
 const RUNS_SCRIPT = /\bbun\b[\s\S]*\.github\/scripts\//;
-/**
- * The steps scripts a hook may run: the subcommands each dispatches and what those write to GITHUB_OUTPUT, declared by
- * the script beside the code that does it. A step naming a script or subcommand outside this is a wiring fault.
- */
+
+/** The steps scripts a hook may run: the subcommands each dispatches and what those write to GITHUB_OUTPUT, declared by the script beside the code that does it; a step naming a script or subcommand outside this is a wiring fault. */
 const SCRIPTS = new Map<
   string,
   { commands: Readonly<Record<string, unknown>>; outputs: Record<string, readonly string[]> }
@@ -414,6 +411,7 @@ const SCRIPTS = new Map<
   ["release-pipeline", { commands: RELEASE_PIPELINE_COMMANDS, outputs: RELEASE_PIPELINE_OUTPUTS }],
 ]);
 
+/** The script and subcommand a step runs, when its run is one SCRIPT_STEP shape. */
 const scriptStep = (step: Step): [script: string, command: string] | undefined => {
   const match = (step.run ?? "").trim().match(SCRIPT_STEP);
   return match ? [match[1] ?? "", match[2] ?? ""] : undefined;
@@ -458,6 +456,64 @@ function gatedOnProbe(steps: Step[], index: number, probe: number): boolean {
   return source === probe || gatedOnProbe(steps, source, probe);
 }
 
+/** The fault in a steps-script step, as the clause after its name: a script this relation does not know, or a subcommand its script does not dispatch; null for any other step. */
+function scriptFault(step: Step): string | null {
+  const script = scriptStep(step);
+  if (!script) return null;
+  const [name, command] = script;
+  const known = SCRIPTS.get(name);
+  if (known === undefined) {
+    return `runs .github/scripts/${name}.ts, a script this relation does not know`;
+  }
+  if (!Object.hasOwn(known.commands, command)) {
+    return `runs ${name} ${command}, a subcommand .github/scripts/${name}.ts does not dispatch`;
+  }
+  return null;
+}
+
+/** The outputs the step at `index` reads that no earlier step writes, as `steps.<id>.outputs.<name>`. */
+function unwrittenReads(steps: Step[], index: number): string[] {
+  return outputsRead(steps[index] as Step).flatMap(([source, name]) => {
+    const writer = steps.findIndex((s, at) => at < index && s.id === source);
+    const unwritten = writer < 0 || !outputsWritten(steps[writer] as Step).includes(name);
+    return unwritten ? [`steps.${source}.outputs.${name}`] : [];
+  });
+}
+
+/** The outputs the step at `index` writes that no later step reads. */
+function unreadWrites(steps: Step[], index: number): string[] {
+  const step = steps[index] as Step;
+  if (step.id === undefined) return [];
+  const later = steps.slice(index + 1);
+  return outputsWritten(step).filter(
+    (name) =>
+      !later.some((other) => outputsRead(other).some(([s, n]) => s === step.id && n === name)),
+  );
+}
+
+/** The wiring faults of the step at `index`, each as the clause after the step's name. */
+function stepWiringFaults(steps: Step[], index: number, probe: number): string[] {
+  const step = steps[index] as Step;
+  const faults: string[] = [];
+  const script = scriptFault(step);
+  if (script !== null) faults.push(script);
+  if (probe >= 0 && index > probe && !gatedOnProbe(steps, index, probe)) {
+    faults.push("runs whatever the probe found");
+  }
+  if ((probe < 0 || index < probe) && step.if !== undefined) {
+    // A hook runs on the caller's event, so a step's own condition skips it quietly: retag-major on a release, or the checkout
+    // the probe judges an empty workspace without.
+    faults.push("runs under a condition of its own");
+  }
+  for (const read of unwrittenReads(steps, index)) {
+    faults.push(`reads ${read}, which no earlier step writes`);
+  }
+  for (const name of unreadWrites(steps, index)) {
+    faults.push(`writes ${name}, which no later step reads`);
+  }
+  return faults;
+}
+
 /**
  * Every wiring fault in a job's steps: a step conditioned on anything but a verdict (it would skip on the caller's own event), a step
  * after the probe not gated on it, a read of an output no earlier step writes, a written output nobody reads, and a steps-script
@@ -476,53 +532,21 @@ function wiringProblems(workflow: Workflow): string[] {
       );
     }
     steps.forEach((step, index) => {
-      const script = scriptStep(step);
-      if (script) {
-        const [name, command] = script;
-        const known = SCRIPTS.get(name);
-        if (known === undefined) {
-          problems.push(
-            `${id}: ${label(step)} runs .github/scripts/${name}.ts, a script this relation does not know`,
-          );
-        } else if (!Object.hasOwn(known.commands, command)) {
-          problems.push(
-            `${id}: ${label(step)} runs ${name} ${command}, a subcommand .github/scripts/${name}.ts does not dispatch`,
-          );
-        }
-      }
-      if (probe >= 0 && index > probe && !gatedOnProbe(steps, index, probe)) {
-        problems.push(`${id}: ${label(step)} runs whatever the probe found`);
-      }
-      if ((probe < 0 || index < probe) && step.if !== undefined) {
-        // A hook runs on the caller's event, so a step's own condition skips it quietly: retag-major on a release, or the checkout
-        // the probe judges an empty workspace without.
-        problems.push(`${id}: ${label(step)} runs under a condition of its own`);
-      }
-      for (const [source, name] of outputsRead(step)) {
-        const writer = steps.findIndex((s, at) => at < index && s.id === source);
-        if (writer < 0 || !outputsWritten(steps[writer] as Step).includes(name)) {
-          problems.push(
-            `${id}: ${label(step)} reads steps.${source}.outputs.${name}, which no earlier step writes`,
-          );
-        }
-      }
-      if (step.id !== undefined) {
-        for (const name of outputsWritten(step)) {
-          const read = steps
-            .slice(index + 1)
-            .some((later) => outputsRead(later).some(([s, n]) => s === step.id && n === name));
-          if (!read)
-            problems.push(`${id}: ${label(step)} writes ${name}, which no later step reads`);
-        }
+      for (const fault of stepWiringFaults(steps, index, probe)) {
+        problems.push(`${id}: ${label(step)} ${fault}`);
       }
     });
     return problems;
   });
 }
 
-/** The post-green hook, the release-PR hook (whose publish job the post-green one used to hold), and the release hook. */
+/** The release-PR hook, whose publish job the post-green one used to hold. */
 const RELEASE_PR = "update-release-pr.yml";
+
+/** The post-green hook. */
 const POST_GREEN = "post-green.yml";
+
+/** The release hook. */
 const RELEASE = "update-release.yml";
 
 describe("the probed hooks' wiring", () => {

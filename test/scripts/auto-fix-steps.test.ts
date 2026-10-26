@@ -210,6 +210,7 @@ function cutPatch(pr: string, temp: string, mutate: () => void): void {
   git(pr, "reset", "--hard", "--quiet");
 }
 
+/** The push step's environment, as the push job sets it. */
 const PUSH_ENV = {
   TOKEN: "t0ken",
   CAN_RETRIGGER: "true",
@@ -222,9 +223,14 @@ const PUSH_ENV = {
 const push = (pr: string, temp: string, env: Record<string, string>) =>
   runStep("auto-fix-steps", temp, temp, { ...PUSH_ENV, PR_CHECKOUT: pr, ...env }, "push");
 
+/** The PR branch's tip at the origin. */
 const originTip = (fx: Fixture): string => git(fx.origin, "rev-parse", "refs/heads/pr");
+
+/** A commit's whole message at the origin. */
 const messageOf = (fx: Fixture, sha: string): string =>
   git(fx.origin, "log", "-1", "--format=%B", sha);
+
+/** A commit's author at the origin, as `name <email>`. */
 const authorOf = (fx: Fixture, sha: string): string =>
   git(fx.origin, "log", "-1", "--format=%an <%ae>", sha);
 

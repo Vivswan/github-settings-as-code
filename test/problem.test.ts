@@ -25,6 +25,7 @@ type FieldlessCode = {
   [C in Problem["code"]]: keyof ProblemOf<C> extends "code" ? C : never;
 }[Problem["code"]];
 
+/** Every code whose problem is the code alone, so its specimen needs no field. */
 const FIELDLESS: Record<FieldlessCode, true> = {
   "input-report-key-missing": true,
   "input-rendered-file-missing": true,
@@ -42,15 +43,19 @@ const FIELDLESS: Record<FieldlessCode, true> = {
   "repos-input-wildcard-mixed": true,
 };
 
+/** The section keys as the unknown-sections lines list them. */
 const KNOWN = SECTION_KEYS.join(", ");
 
+/** The sentence every malformed-section-entries line ends with. */
 const PASSTHROUGH =
   "Fix these values in the settings file (only the named keys are validated; extra fields pass " +
   "through, except in closed sections and strict nested objects like actions.cache, which reject " +
   "unrecognized keys)";
 
+/** The sentence a transient discovery failure's line ends with. */
 const RERUN = "This is not a permission problem; re-run, and retry later if it persists";
 
+/** The sentence a discovery refusal under a non-user token ends with. */
 const PAT =
   "Discovery needs a user PAT; the workflow GITHUB_TOKEN and GitHub App installation tokens " +
   'cannot enumerate a user\'s repositories. List the target repositories explicitly in the "repos" input';

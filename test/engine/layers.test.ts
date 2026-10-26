@@ -434,18 +434,19 @@ describe("mergeLayers: the undeclared knob across layers", () => {
   });
 });
 
-/**
- * Two layers sharing ONE key per list section, spelled as the section's planner folds it (case for labels,
- * collaborators, teams, and environments; case for the uppercased secret and variable names; a workflow's bare file
- * name against its .github/workflows/ path; verbatim elsewhere), with a lower-only field so the field merge is
- * visible. Typed over every list section, so a new one fails here until it has a row.
- */
+/** Two layers sharing ONE key per list section, with a lower-only field so the field merge is visible; typed over every list section, so a new one fails here until it has a row. */
 const SHARED_KEY_LAYERS: {
   [K in ListSection]: {
+    /** The lower layer's entry under the shared key. */
     lower: Record<string, unknown>;
+
     /** A second lower entry under another key: it survives a union and goes with the list under replace. */
     other: Record<string, unknown>;
+
+    /** The higher layer's entry under the same key, spelled as the section's planner folds it: case for labels, collaborators, teams, and environments, case for the uppercased secret and variable names, a workflow's bare file name against its .github/workflows/ path, verbatim elsewhere. */
     higher: Record<string, unknown>;
+
+    /** The entry a deep merge of the two yields: the higher's spelling of the key, the lower-only fields kept. */
     deep: Record<string, unknown>;
   };
 } = {

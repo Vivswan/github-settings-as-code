@@ -276,6 +276,17 @@ describe("permissions renderers", () => {
   });
 });
 
+/** Where a region's placement says it must sit in `path`, as the refusal words it. */
+function homeOf(placement: GeneratedRegion["placement"], path: string): string {
+  if (placement.kind === "under-key") {
+    return `must sit directly under the "${placement.key}:" mapping in ${path}`;
+  }
+  if (placement.kind === "under-heading") {
+    return `must sit under "${placement.heading}" in ${path}`;
+  }
+  return `must close ${path}`;
+}
+
 describe("generated files", () => {
   test.each(
     Object.entries(FILES).flatMap(([path, file]) =>
@@ -292,12 +303,7 @@ describe("generated files", () => {
     const { placement } = region;
     const anchor =
       placement.kind === "under-key" ? "\nruns:\n" : `\n${text.match(/^## .*$/gm)?.at(-1)}\n`;
-    const home =
-      placement.kind === "under-key"
-        ? `must sit directly under the "${placement.key}:" mapping in ${path}`
-        : placement.kind === "under-heading"
-          ? `must sit under "${placement.heading}" in ${path}`
-          : `must close ${path}`;
+    const home = homeOf(placement, path);
     expect(() =>
       regenerateFile(FILES, path, relocatedRegion(text, name, markerSyntaxFor(path), anchor)),
     ).toThrow(`the ${name} region ${home}`);
@@ -484,6 +490,39 @@ describe("generated files", () => {
     expect(regionOf("policy-defaults-table").bodyRefusal(body)).toMatch(refusal);
   });
 
+  /** Holds one input to the statement: the renderer faults as it says, the guard admits what was written and refuses the joined cells otherwise; `outcomes` records which. */
+  function holdPolicyTable(
+    region: ReturnType<typeof regionOf>,
+    outcomes: Map<string, "written" | "faulted">,
+    input: string,
+    sections: readonly KnobbedSection[],
+    prose: Readonly<Record<string, PolicyRowProse>>,
+  ): void {
+    // The renderer's delete-first order, so a fault names the same row on both sides.
+    const rows = ["delete", "keep"].flatMap((policy) =>
+      sections
+        .filter((section) => section.undeclaredDefault === policy)
+        .map((section): PolicyRow => ({ section, prose: prose[section.key] ?? { override: "" } })),
+    );
+    const fault = policyTableFault(rows);
+    let rendered: string | undefined;
+    let thrown: string | undefined;
+    try {
+      rendered = renderPolicyDefaultsTable(sections, prose);
+    } catch (error) {
+      thrown = error instanceof Error ? error.message : String(error);
+    }
+    expect(thrown, input).toBe(fault);
+    if (rendered === undefined) {
+      const joined = [DEFAULTS_TABLE_HEADER, ...rows.map(policyCells).map(tableRow)].join("\n");
+      expect(region.bodyRefusal(`\n${joined}\n`), input).toBeDefined();
+      outcomes.set(input, "faulted");
+    } else {
+      expect(region.bodyRefusal(`\n${rendered}\n`), input).toBeUndefined();
+      outcomes.set(input, "written");
+    }
+  }
+
   // The equivalence the round trip promises, held to the one statement both sides consult: the renderer throws
   // exactly the fault policyTableFault() states for the rows, the guard admits what the renderer wrote, and the
   // guard refuses the same cells joined without the renderer whenever the statement faults. A check on one side
@@ -491,37 +530,6 @@ describe("generated files", () => {
   test("the Defaults renderer and guard agree with the shared statement on every generated input", () => {
     const region = regionOf("policy-defaults-table");
     const outcomes = new Map<string, "written" | "faulted">();
-    const hold = (
-      input: string,
-      sections: readonly KnobbedSection[],
-      prose: Readonly<Record<string, PolicyRowProse>>,
-    ): void => {
-      // The renderer's delete-first order, so a fault names the same row on both sides.
-      const rows = ["delete", "keep"].flatMap((policy) =>
-        sections
-          .filter((section) => section.undeclaredDefault === policy)
-          .map(
-            (section): PolicyRow => ({ section, prose: prose[section.key] ?? { override: "" } }),
-          ),
-      );
-      const fault = policyTableFault(rows);
-      let rendered: string | undefined;
-      let thrown: string | undefined;
-      try {
-        rendered = renderPolicyDefaultsTable(sections, prose);
-      } catch (error) {
-        thrown = error instanceof Error ? error.message : String(error);
-      }
-      expect(thrown, input).toBe(fault);
-      if (rendered !== undefined) {
-        expect(region.bodyRefusal(`\n${rendered}\n`), input).toBeUndefined();
-        outcomes.set(input, "written");
-      } else {
-        const joined = [DEFAULTS_TABLE_HEADER, ...rows.map(policyCells).map(tableRow)].join("\n");
-        expect(region.bodyRefusal(`\n${joined}\n`), input).toBeDefined();
-        outcomes.set(input, "faulted");
-      }
-    };
     const policies = ["delete", "keep"] as const;
     const caveats = [
       undefined,
@@ -534,28 +542,31 @@ describe("generated files", () => {
       "a\rb",
     ];
     const overrides = ["x", "", "   ", " padded ", "`keep`: y", "a | b", "y\u2028z"];
-    for (const key of ["labels", "Labels", "secret_scanning_custom_patterns"]) {
-      for (const undeclaredDefault of policies) {
-        for (const caveat of caveats) {
-          for (const override of overrides) {
-            const prose = caveat === undefined ? { override } : { caveat, override };
-            hold(
-              `${key} ${undeclaredDefault} ${JSON.stringify(prose)}`,
-              [{ key, undeclaredDefault }],
-              {
-                [key]: prose,
-              },
-            );
-          }
-        }
-      }
+    const inputs = ["labels", "Labels", "secret_scanning_custom_patterns"].flatMap((key) =>
+      policies.flatMap((undeclaredDefault) =>
+        caveats.flatMap((caveat) =>
+          overrides.map((override) => ({ key, undeclaredDefault, caveat, override })),
+        ),
+      ),
+    );
+    for (const { key, undeclaredDefault, caveat, override } of inputs) {
+      const prose = caveat === undefined ? { override } : { caveat, override };
+      holdPolicyTable(
+        region,
+        outcomes,
+        `${key} ${undeclaredDefault} ${JSON.stringify(prose)}`,
+        [{ key, undeclaredDefault }],
+        { [key]: prose },
+      );
     }
     const labels: KnobbedSection = { key: "labels", undeclaredDefault: "delete" };
     const rulesets: KnobbedSection = { key: "rulesets", undeclaredDefault: "keep" };
     const prose = { labels: { override: "x" }, rulesets: { caveat: "c", override: "y" } };
-    hold("labels twice", [labels, labels], prose);
-    hold("keep before delete", [rulesets, labels], prose);
-    hold("whitespace override", [labels], { labels: { override: "   " } });
+    holdPolicyTable(region, outcomes, "labels twice", [labels, labels], prose);
+    holdPolicyTable(region, outcomes, "keep before delete", [rulesets, labels], prose);
+    holdPolicyTable(region, outcomes, "whitespace override", [labels], {
+      labels: { override: "   " },
+    });
     expect(outcomes.get("labels twice")).toBe("faulted");
     expect(outcomes.get("keep before delete")).toBe("written");
     expect(outcomes.get("whitespace override")).toBe("faulted");

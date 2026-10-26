@@ -9,9 +9,13 @@
 import { describe, expect, test } from "bun:test";
 import { type Job, readWorkflow, type Workflow, workflowFiles } from "./workflow-loader.js";
 
+/** The reusable gate workflow. */
 const RELEASE_GATE = "release-gate.yml";
+
+/** How a caller's job names it under `uses`. */
 const CALL = `./.github/workflows/${RELEASE_GATE}`;
 
+/** The jobs of `wf` with no timeout-minutes. */
 const unboundedJobs = (wf: Workflow): string[] =>
   Object.entries(wf.jobs)
     .filter(([, job]) => typeof job["timeout-minutes"] !== "number")

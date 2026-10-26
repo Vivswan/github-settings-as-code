@@ -8,16 +8,31 @@ export function restoreFetch(): void {
   globalThis.fetch = realFetch;
 }
 
+/** The URL a fetch input names, in whichever of its three forms it arrives. */
+function hrefOf(input: string | URL | Request): string {
+  if (typeof input === "string") {
+    return input;
+  }
+  if (input instanceof URL) {
+    return input.href;
+  }
+  return input.url;
+}
+
 /** The last response repeats, so a retried failure keeps failing. */
 export function stubFetch(responses: Array<() => Response>): {
+  /** How many requests arrived. */
   calls: number;
+
+  /** Every request's URL path, in order. */
   paths: string[];
+
   /** Every request's full URL, query included, in order. */
   urls: string[];
 } {
   const state = { calls: 0, paths: [] as string[], urls: [] as string[] };
   globalThis.fetch = (async (input: string | URL | Request) => {
-    const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const href = hrefOf(input);
     const make = responses[Math.min(state.calls, responses.length - 1)];
     state.calls++;
     state.paths.push(new URL(href).pathname);

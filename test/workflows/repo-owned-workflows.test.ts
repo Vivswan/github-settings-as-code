@@ -8,29 +8,40 @@
 import { describe, expect, test } from "bun:test";
 import { type Job, readWorkflow, type Step } from "./workflow-loader.js";
 
+/** The checkout path of the default branch, the trusted side. */
 const TRUSTED = "trusted";
+
+/** The checkout path of the PR head. */
 const BRANCH = "branch";
+
+/** The ref the trusted checkout must take. */
 const DEFAULT_BRANCH_REF = `\${{ github.event.repository.default_branch }}`;
+
+/** The ref the PR checkout must take. */
 const HEAD_REF = `\${{ github.event.pull_request.head.ref }}`;
+
+/** The PR checkout's absolute path, as the push step is handed it. */
 const PR_CHECKOUT = `\${{ github.workspace }}/${BRANCH}`;
+
+/** The one push-script step a push job runs. */
 const PUSH_SCRIPT = /^bun \.github\/scripts\/[\w-]+-steps\.ts push$/;
 
-/** A runtime or package manager at a command position: each reads the checkout's manifest or scripts and runs
- * what it finds there. */
+/** A runtime or package manager at a command position: each reads the checkout's manifest or scripts and runs what it finds there. */
 const RUNS_CHECKOUT = /(?:^|[\s;&|(])(?:bun|bunx|node|npm|npx|pnpm|yarn|deno|tsx)(?=\s|$)/m;
+
 /** The script with its quoted strings blanked, so a word inside an echo is not read as a command. */
 const commandsOf = (run: string) => run.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, '""');
+
+/** A step's name for a failure line. */
 const label = (step: Step): string => step.name ?? step.uses ?? step.run ?? "unnamed step";
+
+/** The step's working-directory, which the loader's Step type does not declare. */
 const workingDirectory = (step: Step): unknown =>
   (step as Step & { "working-directory"?: unknown })["working-directory"];
 
-/** A drift tripwire over the named lexical shapes of a push job (the default-branch ref into trusted, the PR head
- * into branch, the working directory, no literal branch or PR_CHECKOUT reference, one push-script step), not an
- * enumeration of every bypass; the assertion and the negative controls read this one list. */
-function boundaryProblems(push: Job | undefined): string[] {
+/** The checkouts' faults: the trusted one not on the default branch, the branch one not on the PR head, credentials kept. */
+function checkoutProblems(steps: Step[]): string[] {
   const problems: string[] = [];
-  const steps = push?.steps ?? [];
-  if (push?.permissions?.contents !== "write") problems.push("the push job has no write token");
   const checkouts = steps.filter((step) => (step.uses ?? "").startsWith("actions/checkout@"));
   const trusted = checkouts.find((step) => step.with?.path === TRUSTED);
   const branch = checkouts.find((step) => step.with?.path === BRANCH);
@@ -43,6 +54,52 @@ function boundaryProblems(push: Job | undefined): string[] {
       problems.push(`the ${String(step.with?.path)} checkout keeps its credentials`);
     }
   }
+  return problems;
+}
+
+/** A run step's faults: checkout code run outside trusted, an install, a literal branch path, a push, a PR_CHECKOUT read. */
+function runProblems(step: Step, run: string): string[] {
+  const problems: string[] = [];
+  const commands = commandsOf(run);
+  if (RUNS_CHECKOUT.test(commands) && workingDirectory(step) !== TRUSTED) {
+    problems.push(`"${label(step)}" runs checkout code outside ${TRUSTED}`);
+  }
+  if (/\binstall\b/.test(commands))
+    problems.push(`"${label(step)}" installs under the write token`);
+  // The raw text: a quoted path is still a path.
+  if (new RegExp(`\\b${BRANCH}\\b`).test(run)) {
+    problems.push(`"${label(step)}" names the ${BRANCH} checkout; only PR_CHECKOUT may`);
+  }
+  // The one push is leasePush() inside the script; a push written here has no lease the tests exercise.
+  if (/\bgit\s+push\b/.test(run)) {
+    problems.push(`"${label(step)}" pushes outside the push script`);
+  }
+  // The PR tree's path reaches the push script through its env alone; a run step that reads it would run from it.
+  if (/PR_CHECKOUT/.test(run)) {
+    problems.push(`"${label(step)}" reads PR_CHECKOUT; only the push script may`);
+  }
+  return problems;
+}
+
+/** The push-script step's env faults: a variable missing, PR_CHECKOUT or HEAD_REF not the lexical shape. */
+function pushEnvProblems(step: Step): string[] {
+  const problems: string[] = [];
+  for (const name of ["HEAD_SHA", "HEAD_REF", "PR_CHECKOUT"]) {
+    if (step.env?.[name] === undefined) problems.push(`the push step has no ${name} in its env`);
+  }
+  if (step.env?.PR_CHECKOUT !== PR_CHECKOUT) problems.push(`PR_CHECKOUT is not ${PR_CHECKOUT}`);
+  if (step.env?.HEAD_REF !== HEAD_REF) problems.push(`HEAD_REF is not the PR head`);
+  return problems;
+}
+
+/** A drift tripwire over the named lexical shapes of a push job (the default-branch ref into trusted, the PR head
+ * into branch, the working directory, no literal branch or PR_CHECKOUT reference, one push-script step), not an
+ * enumeration of every bypass; the assertion and the negative controls read this one list. */
+function boundaryProblems(push: Job | undefined): string[] {
+  const problems: string[] = [];
+  const steps = push?.steps ?? [];
+  if (push?.permissions?.contents !== "write") problems.push("the push job has no write token");
+  problems.push(...checkoutProblems(steps));
   const setupBun = steps.find((step) => (step.uses ?? "").startsWith("oven-sh/setup-bun@"));
   if (setupBun?.with?.["bun-version-file"] !== `${TRUSTED}/.bun-version`) {
     problems.push(`bun is not pinned from ${TRUSTED}/.bun-version`);
@@ -53,31 +110,10 @@ function boundaryProblems(push: Job | undefined): string[] {
       problems.push(`"${label(step)}" is a local action, run from a checkout`);
     }
     if (step.run === undefined) continue;
-    const commands = commandsOf(step.run);
-    if (RUNS_CHECKOUT.test(commands) && workingDirectory(step) !== TRUSTED) {
-      problems.push(`"${label(step)}" runs checkout code outside ${TRUSTED}`);
-    }
-    if (/\binstall\b/.test(commands))
-      problems.push(`"${label(step)}" installs under the write token`);
-    // The raw text: a quoted path is still a path.
-    if (new RegExp(`\\b${BRANCH}\\b`).test(step.run)) {
-      problems.push(`"${label(step)}" names the ${BRANCH} checkout; only PR_CHECKOUT may`);
-    }
-    // The one push is leasePush() inside the script; a push written here has no lease the tests exercise.
-    if (/\bgit\s+push\b/.test(step.run)) {
-      problems.push(`"${label(step)}" pushes outside the push script`);
-    }
-    // The PR tree's path reaches the push script through its env alone; a run step that reads it would run from it.
-    if (/PR_CHECKOUT/.test(step.run)) {
-      problems.push(`"${label(step)}" reads PR_CHECKOUT; only the push script may`);
-    }
+    problems.push(...runProblems(step, step.run));
     if (!PUSH_SCRIPT.test(step.run.trim())) continue;
     pushes += 1;
-    for (const name of ["HEAD_SHA", "HEAD_REF", "PR_CHECKOUT"]) {
-      if (step.env?.[name] === undefined) problems.push(`the push step has no ${name} in its env`);
-    }
-    if (step.env?.PR_CHECKOUT !== PR_CHECKOUT) problems.push(`PR_CHECKOUT is not ${PR_CHECKOUT}`);
-    if (step.env?.HEAD_REF !== HEAD_REF) problems.push(`HEAD_REF is not the PR head`);
+    problems.push(...pushEnvProblems(step));
   }
   if (pushes !== 1) problems.push(`${pushes} push script steps, not one`);
   return problems;

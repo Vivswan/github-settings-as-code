@@ -197,13 +197,13 @@ describe("the Sections table guard", () => {
         thrown = error instanceof Error ? error.message : String(error);
       }
       expect(thrown, input).toBe(fault);
-      if (rendered !== undefined) {
-        expect(region.bodyRefusal(`\n${rendered}\n`), input).toBeUndefined();
-        outcomes.set(input, "written");
-      } else {
+      if (rendered === undefined) {
         const joined = [SECTIONS_TABLE_HEADER, ...cells.map(tableRow)].join("\n");
         expect(region.bodyRefusal(`\n${joined}\n`), input).toBeDefined();
         outcomes.set(input, "faulted");
+      } else {
+        expect(region.bodyRefusal(`\n${rendered}\n`), input).toBeUndefined();
+        outcomes.set(input, "written");
       }
     };
     const texts = ["x", "", "  ", "a | b", "a\rb", " padded ", "`code`: (p)", "y\u2028z"];

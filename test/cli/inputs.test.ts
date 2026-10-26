@@ -52,17 +52,21 @@ beforeAll(async () => {
 });
 
 interface Case {
+  /** The case's name, which is the test's. */
   readonly name: string;
+
   /** The argv after the program name: the subcommand and its flags. */
   readonly argv: readonly string[];
+
   /** The same inputs as the runner would present them. */
   readonly inputs: Inputs;
+
+  /** The GITHUB_* context the parse runs under. */
   readonly env?: ConfigEnv;
-  /**
-   * A flag the subcommand does not expose: commander refuses it before
-   * parseConfig runs, where the action's path refuses the same input by name.
-   */
+
+  /** A flag the subcommand does not expose: commander refuses it before parseConfig runs, where the action's path refuses the same input by name. */
   readonly unknownFlag?: InputName;
+
   /** A value the action accepts and only the CLI refuses, with the line it prints. */
   readonly cliRefuses?: string;
 }
@@ -368,11 +372,10 @@ function base(mode: Mode): Inputs {
   }
 }
 
-/**
- * The snapshot's fleet inputs need the directory form: they unset the base's
- * snapshot-file (an empty value reads as unset) and name a snapshot-dir.
- */
+/** The snapshot's fleet inputs in the directory form: an empty snapshot-file unsets the base's (an empty value reads as unset) beside a snapshot-dir. */
 const SNAPSHOT_FLEET: Inputs = { "snapshot-file": "", "snapshot-dir": "snaps", repos: "*" };
+
+/** The snapshot inputs that need the fleet form beside them. */
 const SNAPSHOT_FLEET_INPUTS = new Set<InputName>([
   "snapshot-dir",
   "repos",
@@ -500,6 +503,56 @@ describe("the per-mode flag split", () => {
     },
   };
 
+  /** The base argv of the first subcommand exposing `name`. */
+  function subcommandExposing(name: InputName): string[] {
+    if (inputsForMode("check").includes(name) || name === "token") {
+      return check;
+    }
+    if (inputsForMode("render").includes(name)) {
+      return ["render"];
+    }
+    return ["snapshot", "--token", "ghp"];
+  }
+
+  /** That argv minus every `--name value` pair, so a test's own repeats are the flag's only occurrences. */
+  function argvWithout(name: InputName): string[] {
+    const base = subcommandExposing(name);
+    return base.filter((argument, index) => {
+      const value = index > 0 && base[index - 1] === `--${name}`;
+      return argument !== `--${name}` && !value;
+    });
+  }
+
+  /** A single-value flag given twice is refused by commander, naming the flag and the second value. */
+  async function expectRepeatRefused(name: InputName): Promise<void> {
+    // Long values: a token value is masked, and a one-letter mask would eat the message.
+    const actual = await throughArgv(
+      [...argvWithout(name), `--${name}`, "first-value", `--${name}`, "second-value"],
+      {},
+    );
+    // The token's echoed value is masked (registered before the parse); the rest print as given.
+    const echoed = name === "token" ? "***" : "second-value";
+    expect(actual.code, name).toBe(1);
+    expect(actual.stderr, name).toBe(
+      `error: option '--${name} <value>' argument '${echoed}' is invalid. --${name} takes one value and was given more than once\n`,
+    );
+  }
+
+  /** A list flag given twice reaches the parsed config with both values, in order. */
+  async function expectRepeatKept(name: InputName, repeated: Repeated): Promise<void> {
+    const [first, second] = repeated.pair;
+    const actual = await throughArgv(
+      [...repeated.argv, `--${name}`, first, `--${name}`, second],
+      repeated.env ?? {},
+    );
+    expect(actual.stderr, name).toBe("");
+    expect(actual.parsed, name).toBeDefined();
+    expect(actual.parsed === undefined ? [] : repeated.kept(actual.parsed), name).toEqual([
+      first,
+      second,
+    ]);
+  }
+
   test("a repeated flag accumulates exactly for the inputs declared list, and is refused for the rest", async () => {
     const exposed = new Set(exposedInputs());
     for (const name of Object.keys(REPEATED) as InputName[]) {
@@ -508,46 +561,14 @@ describe("the per-mode flag split", () => {
       // The record and the declaration agree on which inputs are lists.
       expect(repeated !== "single", `${name} declares list: ${decl.list}`).toBe(decl.list === true);
       expect(isList(name), name).toBe(decl.list === true);
+      if (repeated === "single" && !exposed.has(name)) {
+        continue; // the mode is the subcommand; an unsupported input has no flag
+      }
       if (repeated === "single") {
-        if (!exposed.has(name)) {
-          continue; // the mode is the subcommand; an unsupported input has no flag
-        }
-        // The base argv of the first subcommand exposing the flag, minus this flag, so the two
-        // repeats below are its only occurrences.
-        const base =
-          inputsForMode("check").includes(name) || name === "token"
-            ? check
-            : inputsForMode("render").includes(name)
-              ? ["render"]
-              : ["snapshot", "--token", "ghp"];
-        const flag = base.filter((argument, index) => {
-          const value = index > 0 && base[index - 1] === `--${name}`;
-          return argument !== `--${name}` && !value;
-        });
-        // Long values: a token value is masked, and a one-letter mask would eat the message.
-        const actual = await throughArgv(
-          [...flag, `--${name}`, "first-value", `--${name}`, "second-value"],
-          {},
-        );
-        // The token's echoed value is masked (registered before the parse); the rest print as given.
-        const echoed = name === "token" ? "***" : "second-value";
-        expect(actual.code, name).toBe(1);
-        expect(actual.stderr, name).toBe(
-          `error: option '--${name} <value>' argument '${echoed}' is invalid. --${name} takes one value and was given more than once\n`,
-        );
+        await expectRepeatRefused(name);
         continue;
       }
-      const [first, second] = repeated.pair;
-      const actual = await throughArgv(
-        [...repeated.argv, `--${name}`, first, `--${name}`, second],
-        repeated.env ?? {},
-      );
-      expect(actual.stderr, name).toBe("");
-      expect(actual.parsed, name).toBeDefined();
-      expect(actual.parsed === undefined ? [] : repeated.kept(actual.parsed), name).toEqual([
-        first,
-        second,
-      ]);
+      await expectRepeatKept(name, repeated);
     }
   });
 

@@ -16,6 +16,7 @@ import {
 import { renderTable, tableBody } from "../../src/report/markdown.js";
 import { relocatedRegion } from "./relocated-region.js";
 
+/** A document holding one html-marked region between prose lines. */
 const HTML_BLOCK = [
   "before",
   "<!-- BEGIN GENERATED: table (bun run build:docs; edit x) -->",
@@ -24,6 +25,7 @@ const HTML_BLOCK = [
   "after",
 ].join("\n");
 
+/** Look-alikes for "tab" under the html syntax: other names, and bare or half markers. */
 const HTML_NEAR_MISSES = [
   "<!-- BEGIN GENERATED: table -->",
   "<!-- BEGIN GENERATED: tab.extra -->",
@@ -330,8 +332,13 @@ function linkRegion(url = "https://example.com"): GeneratedRegion {
   });
 }
 
+/** A region whose body is a table, in doc.md. */
 const TABLE = tableRegion();
+
+/** A region whose body is a list, in doc.md. */
 const LIST = listRegion();
+
+/** A region whose body is one link definition, in doc.md. */
 const LINK = linkRegion();
 
 // An action manifest: two mapping regions, the END markers at column zero as action.yml writes them.
@@ -404,7 +411,11 @@ const PATH_OF: Readonly<Record<string, string>> = {
   ins: "action.yml",
   outs: "action.yml",
 };
+
+/** The manifest's inputs region, under its inputs key. */
 const INS = yamlRegion("ins", { kind: "under-key", key: "inputs" });
+
+/** The manifest's outputs region, under its outputs key. */
 const OUTS = yamlRegion("outs", { kind: "under-key", key: "outputs" });
 
 describe("assertRegionPlacement", () => {

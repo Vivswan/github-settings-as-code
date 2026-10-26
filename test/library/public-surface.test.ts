@@ -32,6 +32,7 @@ export function exportedNames(
     .sort();
 }
 
+/** The heading the API tables sit under, up to the next second-level heading. */
 const API_HEADING = "## The API by group";
 
 /** The header row of an API table, as GFM reads it (the leading pipe and the padding optional); the knob table's header is `| Knob |`. */
@@ -42,6 +43,74 @@ const NAME_ROW = /^\|?\s*`([^`\s]+)`\s*\|/;
 
 /** The header's delimiter row: dashes per column, the colons, the outer pipes, and the padding optional. */
 const DELIMITER_ROW = /^\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+
+/** A line as GFM reads it: its blockquote depth and the text under the markers. */
+interface QuotedLine {
+  /** How many `>` markers (each with any spaces after it) open the line; nested markers stack. */
+  readonly depth: number;
+
+  /** The text under the markers, trimmed. */
+  readonly text: string;
+}
+
+/** The line `raw` as GFM reads it. */
+function quotedLine(raw: string): QuotedLine {
+  let text = raw.trim();
+  let depth = 0;
+  for (let marker = text.match(/^>\s*/); marker; marker = text.match(/^>\s*/)) {
+    depth++;
+    text = text.slice(marker[0].length);
+  }
+  return { depth, text: text.trim() };
+}
+
+/**
+ * The lines of `section` outside its fences, each with its offset; a fence opener is yielded as a blank line, which
+ * ends a table as the opener does. The open fence is its mark and the quote depth it opened at. A closer is the whole
+ * line at that depth; a `>` line inside a fence at depth 0 is fence text, and so is a table. A line below the fence's
+ * depth ends the blockquote, and the fence with it.
+ */
+function* outsideFences(
+  section: readonly QuotedLine[],
+): Generator<{ offset: number; text: string }> {
+  let fence: { mark: string; depth: number } | null = null;
+  for (const [offset, { depth, text }] of section.entries()) {
+    // A backtick fence's info string carries no backtick, so a triple-backtick inline span is not an opener.
+    const opener = text.match(/^(`{3,})(?![^`]*`)|^(~{3,})/)?.[0];
+    if (fence !== null && depth < fence.depth) {
+      fence = null;
+    }
+    if (fence !== null) {
+      if (depth === fence.depth && text.startsWith(fence.mark) && /^(`+|~+)$/.test(text)) {
+        fence = null;
+      }
+      continue;
+    }
+    if (opener !== undefined) {
+      fence = { mark: opener, depth };
+      yield { offset, text: "" };
+      continue;
+    }
+    yield { offset, text };
+  }
+}
+
+/** Whether the line at `offset` is a Name table's header: the header row with the delimiter row under it. */
+function opensNameTable(section: readonly QuotedLine[], offset: number): boolean {
+  return (
+    NAME_TABLE_HEADER.test(section[offset]?.text ?? "") &&
+    DELIMITER_ROW.test(section[offset + 1]?.text ?? "")
+  );
+}
+
+/** Whether the line at `offset` is the delimiter row under a Name table's header. */
+function isNameTableDelimiter(section: readonly QuotedLine[], offset: number): boolean {
+  return (
+    offset > 0 &&
+    NAME_TABLE_HEADER.test(section[offset - 1]?.text ?? "") &&
+    DELIMITER_ROW.test(section[offset]?.text ?? "")
+  );
+}
 
 /**
  * The names the page documents: the first column of every `| Name |` table between "## The API by group" and the
@@ -56,39 +125,10 @@ export function documentedNames(markdown: string): string[] {
   if (start < 0) {
     throw new Error(`${PAGE} has no "${API_HEADING}" heading`);
   }
-  // A line as GFM reads it: its blockquote depth (a marker is `>` plus any spaces, nested markers stack) and the text under the markers.
-  const section = lines.slice(start + 1).map((raw) => {
-    let text = raw.trim();
-    let depth = 0;
-    for (let marker = text.match(/^>\s*/); marker; marker = text.match(/^>\s*/)) {
-      depth++;
-      text = text.slice(marker[0].length);
-    }
-    return { depth, text: text.trim() };
-  });
+  const section = lines.slice(start + 1).map(quotedLine);
   const names: string[] = [];
   let inNameTable = false;
-  // The open fence: its mark and the quote depth it opened at. A closer is the whole line at that depth; a `>` line
-  // inside a fence at depth 0 is fence text, and so is a table. A line below the fence's depth ends the blockquote,
-  // and the fence with it.
-  let fence: { mark: string; depth: number } | null = null;
-  for (const [offset, { depth, text: line }] of section.entries()) {
-    // A backtick fence's info string carries no backtick, so a triple-backtick inline span is not an opener.
-    const opener = line.match(/^(`{3,})(?![^`]*`)|^(~{3,})/)?.[0];
-    if (fence !== null && depth < fence.depth) {
-      fence = null;
-    }
-    if (fence !== null) {
-      if (depth === fence.depth && line.startsWith(fence.mark) && /^(`+|~+)$/.test(line)) {
-        fence = null;
-      }
-      continue;
-    }
-    if (opener !== undefined) {
-      fence = { mark: opener, depth };
-      inNameTable = false;
-      continue;
-    }
+  for (const { offset, text: line } of outsideFences(section)) {
     if (line.startsWith("## ")) {
       break;
     }
@@ -97,16 +137,10 @@ export function documentedNames(markdown: string): string[] {
       continue;
     }
     if (!inNameTable) {
-      if (NAME_TABLE_HEADER.test(line) && DELIMITER_ROW.test(section[offset + 1]?.text ?? "")) {
-        inNameTable = true;
-      }
+      inNameTable = opensNameTable(section, offset);
       continue;
     }
-    if (
-      offset > 0 &&
-      NAME_TABLE_HEADER.test(section[offset - 1]?.text ?? "") &&
-      DELIMITER_ROW.test(line)
-    ) {
+    if (isNameTableDelimiter(section, offset)) {
       continue;
     }
     const match = line.match(NAME_ROW);

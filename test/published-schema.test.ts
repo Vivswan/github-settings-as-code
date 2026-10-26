@@ -14,20 +14,28 @@ import { NESTED_KEYS } from "../src/sections/environments/nested.js";
 import { ENVIRONMENT_PARSE_FIXTURES } from "./fixtures/environment-parse-rules.js";
 import { readSettingsSchema } from "./settings-schema.js";
 
+/** The built lib/settings.schema.json, as published. */
 const schema = readSettingsSchema();
 
 // strict: false because the generated schema carries draft-07 idioms AJV's strict mode complains about; validation semantics are unchanged.
-// The format plugin is loaded so a format keyword, should one ever be emitted, is judged here the way editors and CI linters judge it.
 const ajv = new Ajv({ strict: false, allErrors: true });
+
+/** The format plugin under either module shape, loaded so a format keyword, should one ever be emitted, is judged here the way editors and CI linters judge it. */
 const add = (addFormats as unknown as { default?: typeof addFormats }).default ?? addFormats;
+
 (add as typeof addFormats)(ajv);
+
+/** The published schema's verdict on a document. */
 const validate: ValidateFunction = ajv.compile(schema);
 
+/** The runtime's verdict on the same document. */
 const runtimeAccepts = (doc: Record<string, unknown>): boolean =>
   !("error" in validateSectionShapes(doc, "fixture"));
 
 /** One environments[] entry named prod, the host of every nested knob. */
 const prod = (entry: Record<string, unknown>) => ({ environments: [{ name: "prod", ...entry }] });
+
+/** The flag object that declares custom branch policies, which a patterns list needs beside it. */
 const customPolicies = { protected_branches: false, custom_branch_policies: true };
 
 describe("published schema openness", () => {
@@ -275,32 +283,31 @@ describe("the published schema carries the repository topic grammar and commit-m
   });
 });
 
+/** Every `format` keyword under `node`, as `<path>.format=<value>`, in document order. */
+function formatKeywords(node: unknown, path: string): string[] {
+  if (Array.isArray(node)) {
+    return node.flatMap((item, index) => formatKeywords(item, `${path}[${index}]`));
+  }
+  if (typeof node !== "object" || node === null) {
+    return [];
+  }
+  const found: string[] = [];
+  for (const [key, value] of Object.entries(node)) {
+    if (key === "format") {
+      found.push(`${path}.format=${String(value)}`);
+    }
+    found.push(...formatKeywords(value, `${path}.${key}`));
+  }
+  return found;
+}
+
 describe("format keywords stay out of the published schema", () => {
   // ajv-formats judges a format keyword by its own grammar, and two of zod's differ from the runtime's: format: "uri" refuses the
   // non-ASCII hosts, paths, and spaces the runtime's new URL() takes, and format: "date-time" rounds a long fractional second into
   // an invalid :60. The generator strips every format keyword, and this walk keeps future ones out too (zod's pattern stays and is
   // the runtime's grammar for the ISO types, so the two validators agree on every date form).
   test("no definition in the published schema carries a format keyword", () => {
-    const formatted: string[] = [];
-    const walk = (node: unknown, path: string): void => {
-      if (Array.isArray(node)) {
-        for (const [index, item] of node.entries()) {
-          walk(item, `${path}[${index}]`);
-        }
-        return;
-      }
-      if (typeof node !== "object" || node === null) {
-        return;
-      }
-      for (const [key, value] of Object.entries(node)) {
-        if (key === "format") {
-          formatted.push(`${path}.format=${String(value)}`);
-        }
-        walk(value, `${path}.${key}`);
-      }
-    };
-    walk(schema.definitions, "definitions");
-    expect(formatted).toEqual([]);
+    expect(formatKeywords(schema.definitions, "definitions")).toEqual([]);
   });
 
   test.each([

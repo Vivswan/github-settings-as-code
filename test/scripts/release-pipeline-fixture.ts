@@ -25,9 +25,14 @@ export function git(cwd: string, ...args: string[]): string {
 
 /** Resolved to its physical path: the shim compares against `pwd -P`. */
 const FIXTURE_AREA = realpathSync(tmpdir());
+
+/** The prefix of every fixture root's directory name, which the guard keys on. */
 const FIXTURE_PREFIX = "release-pipeline-";
+
+/** The variable the git shim reads its push plans directory from. */
 const PLANS_ENV = "RELEASE_PIPELINE_PUSH_PLANS";
 
+/** Every fixture root created, removed after the file's tests. */
 const roots: string[] = [];
 
 export function guardRefusal(cwd: string): string {
@@ -107,11 +112,15 @@ export function installReleasePipelineFixture(): void {
 
 type Setting = [key: string, value: string];
 
-/** A fixture repository does nothing between the commands a test runs in it. Since git 2.54 every push and fetch
+/** The setting disableBackgroundMaintenance writes. */
+const NO_MAINTENANCE: Setting = ["maintenance.auto", "false"];
+
+/**
+ * A fixture repository does nothing between the commands a test runs in it. Since git 2.54 every push and fetch
  * spawns a detached `git maintenance run --auto` whose geometric repack packs and deletes the loose objects as soon
  * as two of them share the objects/17 shard; a plain-path clone copying the origin's loose objects at that moment
- * dies with "failed to copy file ... No such file or directory". Origins take pushes and clones fetch, so all get it. */
-const NO_MAINTENANCE: Setting = ["maintenance.auto", "false"];
+ * dies with "failed to copy file ... No such file or directory". Origins take pushes and clones fetch, so all get it.
+ */
 function disableBackgroundMaintenance(dir: string): void {
   git(dir, "config", ...NO_MAINTENANCE);
 }
@@ -182,13 +191,16 @@ export function manifestJson(
 ): string {
   return `${JSON.stringify({ name: "@scope/pkg", version, files: ["lib/pkg/"], scripts }, null, 2)}\n`;
 }
-/** The six scripts pacote reads before it prepares a git dependency, spelled here so a name dropped from the
- * pipeline's list would stay in a packaged manifest and fail the manifest assertion. */
+
+/** The six scripts pacote reads before it prepares a git dependency, spelled here so a name dropped from the pipeline's list would stay in a packaged manifest and fail the manifest assertion. */
 const PREPARATION_SCRIPTS = ["prepare", "prepack", "build", "preinstall", "install", "postinstall"];
+
+/** A fixture manifest's scripts: the preparation six, and one the strip must keep. */
 const FIXTURE_SCRIPTS = {
   ...Object.fromEntries(PREPARATION_SCRIPTS.map((name) => [name, `echo ${name}`])),
   test: "bun test",
 };
+
 /** FIXTURE_SCRIPTS after the pipeline's strip: the preparation scripts gone, the rest kept. */
 const STRIPPED_SCRIPTS = { test: "bun test" };
 
@@ -212,6 +224,7 @@ function treePaths(cwd: string, sha: string): string[] {
 const PACKAGED_DIFF =
   "lib/index.js\nlib/pkg/index.d.ts\nlib/pkg/index.js\nlib/settings.schema.json\npackage.json";
 
+/** The changelog release-please writes for a 2.1.0 release. */
 export const CHANGELOG_21 = `# Changelog
 
 ## [2.1.0](https://example.invalid/compare/v2.0.0...v2.1.0) (2026-08-14)
@@ -349,17 +362,21 @@ export function pushGreenCommit(
 /** Where a main commit sits on origin's main: its first-parent count, the position its build tag carries. */
 export const positionOf = (fx: Fixture, sha: string): number =>
   Number(git(fx.origin, "rev-list", "--count", "--first-parent", sha));
+
 /** The build tag the pipeline names for a main commit. */
 export const buildTagOf = (fx: Fixture, sha: string): string =>
   `refs/tags/build/${positionOf(fx, sha)}.${sha.slice(0, 7)}`;
+
 /** Every build tag origin holds, in ref order. */
 export const buildTags = (fx: Fixture): string[] =>
   git(fx.origin, "for-each-ref", "--format=%(refname)", "refs/tags/build/")
     .split("\n")
     .filter(Boolean);
+
 /** The packaged commit a main commit's build tag names on origin. */
 export const packagedOf = (fx: Fixture, sha: string): string =>
   git(fx.origin, "rev-parse", `${buildTagOf(fx, sha)}^{}`);
+
 /** Whether origin still holds a commit object: a pruned tag's commit stays until origin collects it, one a
  * release tag or latest names stays for good. */
 export function originHolds(fx: Fixture, sha: string): boolean {
@@ -389,18 +406,29 @@ export function shallowClone(fx: Fixture, name: string): string {
 /** Author and committer of a commit, as the pipeline must stamp its own. */
 export const identityOf = (cwd: string, sha: string): string =>
   git(cwd, "log", "-1", "--format=%an <%ae> / %cn <%ce>", sha);
+
+/** The bot the pipeline commits as. */
 const BOT = "settings-as-code-release <settings-as-code-release@users.noreply.github.com>";
+
+/** That bot as author and committer. */
 export const BOT_IDENTITY = `${BOT} / ${BOT}`;
-/** The identity a clone's own config carries after the pipeline ran in it: clone() set it, and it must stay
- * (a repo config the pipeline wrote would outlive the run and stamp every later commit from that checkout). */
+
+/** The identity a clone's own config carries after the pipeline ran in it: clone() set it, and it must stay (a repo config the pipeline wrote would outlive the run and stamp every later commit from that checkout). */
 export const localIdentity = (cwd: string): string =>
   `${git(cwd, "config", "--local", "--get", "user.name")} <${git(cwd, "config", "--local", "--get", "user.email")}>`;
+
+/** The identity clone() sets. */
 export const FIXTURE_IDENTITY = "fixture <fixture@example.invalid>";
+
 /** A commit's parents as its object records them, whatever ref or shallow state the reading clone is in. */
 export const parentsOf = (cwd: string, sha: string): string[] =>
   [...git(cwd, "cat-file", "-p", sha).matchAll(/^parent ([0-9a-f]{40})$/gm)].map((m) => m[1] ?? "");
+
+/** The commit origin's latest tag names. */
 export const latestTag = (fx: Fixture): string =>
   git(fx.origin, "rev-parse", "refs/tags/latest^{}");
+
+/** `ref` as origin lists it, `<sha>\t<ref>`, or empty when origin lacks it. */
 export const remoteRef = (fx: Fixture, ref: string): string =>
   git(fx.work, "ls-remote", "origin", ref);
 
@@ -630,32 +658,38 @@ export function withPushPlans(
     .map((line) => line.split(" "));
 }
 
+/** The moving pointer's ref. */
 export const LATEST = "refs/tags/latest";
+
+/** The anchor push, as the shim logs it. */
 export const ANCHOR_PUSH = ["push", "origin", "HEAD:refs/heads/release-please--branches--main"];
-/** The pipeline's pushes as the shim logs them: a create-once push, a lease-guarded move, a batch of deletions. */
+
+/** A create-once push of `commit` to `ref`, as the shim logs it. */
 export const createOf = (commit: string, ref: string): string[] => [
   "push",
   "origin",
   `${commit}:${ref}`,
 ];
+
+/** A lease-guarded move of `ref` from `observed` to `commit`, as the shim logs it. */
 export const moveOf = (ref: string, observed: string, commit: string): string[] => [
   "push",
   `--force-with-lease=${ref}:${observed}`,
   "origin",
   `${commit}:${ref}`,
 ];
+
+/** A batch deletion of `refs`, as the shim logs it. */
 export const deleteOf = (...refs: string[]): string[] => [
   "push",
   "origin",
   ...refs.map((ref) => `:${ref}`),
 ];
+
 /** The commit a logged create push carried (its objects exist in the pushing clone). */
 export const createdSha = (push: string[]): string => (push[2] ?? "").split(":")[0] ?? "";
 
-/** Remotes a file:// origin cannot play, as git words them, replayed with the ref UNMOVED on origin, so none is a
- * lost compare-and-set: a pointer or anchor push throws on the first, a tag create tries again while the ref reads
- * absent and throws after the last. The pipeline judges origin's ref, never git's words; the stale-info wording is
- * the proof. A ruleset's refusal (GH013) takes the token's path and is not replayed. */
+/** Remotes a file:// origin cannot play, as git words them, each replayed with the ref UNMOVED on origin so none is a lost compare-and-set and the pipeline must judge origin's ref, not git's words; a ruleset's refusal (GH013) takes the token's path and is not replayed. */
 export const PERMANENT: [string, string][] = [
   [
     "a token without write access",

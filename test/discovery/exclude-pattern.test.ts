@@ -178,34 +178,44 @@ describe("compileExcludePattern", () => {
     REMAINDERS.some((remainder) => remainder.test(sentence));
   const quoted = (text: string): string[] =>
     [...text.matchAll(/"((?:\\.|[^"\\])*)"/g)].map((m) => JSON.parse(`"${m[1]}"`) as string);
+  // The machine fix each sentence opening names, first match wins: "it holds a run of stars" sits before "it holds ".
+  const FIXES: ReadonlyArray<readonly [string, (view: string, sentence: string) => string]> = [
+    ["it is wrapped in whitespace", (view) => view.trim()],
+    ["it holds a run of stars", (view) => view.replace(/\*{2,}/g, "*")],
+    [
+      "it holds ",
+      (view, sentence) => {
+        const chars = quoted(sentence.slice(0, sentence.indexOf(", which")));
+        return view
+          .split("")
+          .filter((char) => !chars.includes(char))
+          .join("");
+      },
+    ],
+    [
+      "its ",
+      (view, sentence) => {
+        const where = [...sentence.matchAll(/ at (\d+)/g)].map((m) => Number(m[1]));
+        return view
+          .split("")
+          .filter((_, i) => !where.includes(i))
+          .join("");
+      },
+    ],
+    ['it starts with "./"', (view) => view.replace(/^(!?)(?:\.\/)+/, "$1")],
+    [
+      "the class ",
+      (view, sentence) => {
+        const parts = quoted(sentence);
+        const cls = parts[0] ?? "";
+        return view.replace(cls, sentence.endsWith("so delete it") ? "" : (parts.at(-1) ?? ""));
+      },
+    ],
+  ];
   const applyFix = (view: string, sentence: string): string => {
-    if (sentence.startsWith("it is wrapped in whitespace")) {
-      return view.trim();
-    }
-    if (sentence.startsWith("it holds a run of stars")) {
-      return view.replace(/\*{2,}/g, "*");
-    }
-    if (sentence.startsWith("it holds ")) {
-      const chars = quoted(sentence.slice(0, sentence.indexOf(", which")));
-      return view
-        .split("")
-        .filter((char) => !chars.includes(char))
-        .join("");
-    }
-    if (sentence.startsWith("its ")) {
-      const where = [...sentence.matchAll(/ at (\d+)/g)].map((m) => Number(m[1]));
-      return view
-        .split("")
-        .filter((_, i) => !where.includes(i))
-        .join("");
-    }
-    if (sentence.startsWith('it starts with "./"')) {
-      return view.replace(/^(!?)(?:\.\/)+/, "$1");
-    }
-    if (sentence.startsWith("the class ")) {
-      const parts = quoted(sentence);
-      const cls = parts[0] ?? "";
-      return view.replace(cls, sentence.endsWith("so delete it") ? "" : (parts.at(-1) ?? ""));
+    const fix = FIXES.find(([opening]) => sentence.startsWith(opening));
+    if (fix !== undefined) {
+      return fix[1](view, sentence);
     }
     if (isRemainder(sentence)) {
       return view;

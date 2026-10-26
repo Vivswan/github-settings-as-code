@@ -10,12 +10,14 @@ import { ROOT } from "../root.js";
 import { withTempDir } from "../temp-dir.js";
 import { lint } from "./fixture-lint.js";
 
+/** The plugin's one message, verbatim. */
 const MESSAGE =
   "throw or Promise.reject outside the never-throw rule: not a BUG: invariant (an Error whose message starts with BUG:) and not a bare rethrow of the catch binding; return a Result instead";
 
 /** A line ending in `// outside` is one the plugin must flag; every other throw here is inside the rule. */
 const OUTSIDE = /\/\/ outside$/;
 
+/** A src/ module of throws and rejections, every one inside the rule but the lines marked outside. */
 const THROWS = `
 export function bug(x: unknown): never {
   if (x === null) throw new Error("BUG: bug() was handed null");
@@ -314,9 +316,13 @@ export function rejectsTheCatchBinding(run: () => Promise<void>): Promise<void> 
 }
 `.trimStart();
 
+/** A module whose one throw the rule flags, planted where the plugin must and must not reach. */
 const OUTSIDE_THE_RULE = 'export function outside(): never {\n  throw new Error("x");\n}\n';
+
 /** The one throw the rule admits by suppression: commander's argParser can only refuse a value by throwing. */
 const CONTRACT_FILE = "src/cli/inputs.ts";
+
+/** The suppression comment the contract file carries over that throw. */
 const SUPPRESSION = /^\s*\/\/ biome-ignore lint\/plugin: .*\n/m;
 
 describe("the never-throw plugin", () => {

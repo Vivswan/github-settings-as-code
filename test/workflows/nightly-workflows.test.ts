@@ -5,6 +5,7 @@ import { ARTIFACTS_DIR } from "../e2e/constants.js";
 import { ROOT } from "../root.js";
 import { readWorkflow, type Step, type Workflow, workflowFiles } from "./workflow-loader.js";
 
+/** The action every filer step uses. */
 const FUZZ_ISSUE_ACTION = "Vivswan/repo-platform/actions/fuzz-issue@stable";
 
 /** The workflows whose one job runs the checks and files the issue; nightly.yml's report job is judged on its own below. */
@@ -12,6 +13,7 @@ const SINGLE_JOB_FILERS: ReadonlyArray<[file: string, job: string]> = [
   ["nightly-fuzz.yml", "fuzz"],
 ];
 
+/** The filer step in `mode` among `steps`, when there is one. */
 const filerIn = (steps: Step[], mode: string) =>
   steps.find((s) => s.uses === FUZZ_ISSUE_ACTION && s.with?.mode === mode);
 
@@ -166,6 +168,7 @@ test("the filers file under distinct labels, so one's green run cannot close the
 
 type Workflows = ReadonlyArray<[file: string, workflow: Workflow]>;
 
+/** Every upload-artifact step across `workflows`, with the job it sits in. */
 const uploadSteps = (workflows: Workflows) =>
   workflows.flatMap(([file, workflow]) =>
     Object.entries(workflow.jobs).flatMap(([job, spec]) =>
@@ -175,10 +178,7 @@ const uploadSteps = (workflows: Workflows) =>
     ),
   );
 
-/**
- * A path block is one pattern per line, read in its normalized spelling: the guards match on prefixes, so ./test/e2e/x
- * would slip past test/e2e/ otherwise.
- */
+/** A path block is one pattern per line, read in its normalized spelling: the guards match on prefixes, so ./test/e2e/x would slip past test/e2e/ otherwise. */
 const patternsOf = (path: unknown) =>
   String(path ?? "")
     .split("\n")
@@ -201,9 +201,11 @@ const emptyHiddenUploads = (workflows: Workflows) =>
     )
     .map(({ where }) => where);
 
+/** The step's patterns under test/e2e/. */
 const e2ePatterns = (step: Step) =>
   patternsOf(step.with?.path).filter((pattern) => pattern.startsWith("test/e2e/"));
 
+/** The uploads whose test/e2e/ pattern names anything but the e2e artifacts directory. */
 const driftedE2eUploads = (workflows: Workflows) =>
   uploadSteps(workflows)
     .filter(({ step }) =>

@@ -17,7 +17,10 @@ import { withTempDir } from "../temp-dir.js";
 // The tsc spawn per test times out bun's 5s default under parallel machine load.
 setDefaultTimeout(60_000);
 
+/** The page under test, as the diagnostics label it. */
 const PAGE = "docs/reference/library.md";
+
+/** The package name the fences import from. */
 const PACKAGE = "@vivswan/github-settings-as-code";
 
 /** Where the package's two import paths land when the fences compile against this checkout. */
@@ -95,6 +98,20 @@ export function examplesProgram(fences: readonly Fence[]): {
 /** `tsc --pretty false` prints `<file>(<line>,<col>): error TS<code>: <message>`, continuation lines indented. */
 const DIAGNOSTIC = /^(.+?)\((\d+),(\d+)\): error (TS\d+): (.*)$/;
 
+/** The diagnostics in tsc's stdout, each rendered by `render` with its indented continuation lines appended. */
+function diagnosticsOf(stdout: string, render: (match: RegExpMatchArray) => string): string[] {
+  const problems: string[] = [];
+  for (const raw of stdout.split("\n")) {
+    const match = raw.match(DIAGNOSTIC);
+    if (match) {
+      problems.push(render(match));
+    } else if (raw.startsWith("  ") && problems.length > 0) {
+      problems[problems.length - 1] += `\n${raw}`;
+    }
+  }
+  return problems;
+}
+
 /**
  * Every diagnostic tsc reports for the page's fences, as `<label>:<page line>: TS<code>: <message>`.
  * A diagnostic outside the examples file keeps its own path. The compile runs in a temp project
@@ -126,22 +143,14 @@ export function compileExamples(markdown: string, label: string): Promise<string
     if (tsc.error) {
       throw tsc.error;
     }
-    const problems: string[] = [];
-    for (const raw of tsc.stdout.split("\n")) {
-      const match = raw.match(DIAGNOSTIC);
-      if (match) {
-        const [, printed = "", line = "0", column = "0", code = "", message = ""] = match;
-        // tsc prints paths relative to its cwd, the temp project.
-        const file = resolve(dir, printed);
-        problems.push(
-          file === examples
-            ? `${label}:${pageLine(Number(line))}: ${code}: ${message}`
-            : `${file}(${line},${column}): ${code}: ${message}`,
-        );
-      } else if (raw.startsWith("  ") && problems.length > 0) {
-        problems[problems.length - 1] += `\n${raw}`;
-      }
-    }
+    const problems = diagnosticsOf(tsc.stdout, (match) => {
+      const [, printed = "", line = "0", column = "0", code = "", message = ""] = match;
+      // tsc prints paths relative to its cwd, the temp project.
+      const file = resolve(dir, printed);
+      return file === examples
+        ? `${label}:${pageLine(Number(line))}: ${code}: ${message}`
+        : `${file}(${line},${column}): ${code}: ${message}`;
+    });
     // tsc exits 0 only on a clean compile; a non-zero exit with no parsed diagnostic is tooling
     // trouble (a crash, a changed output format) and must never read as a clean page.
     if ((tsc.status !== 0) !== problems.length > 0) {

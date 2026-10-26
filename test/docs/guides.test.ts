@@ -1,3 +1,12 @@
+/**
+ * The guides' fence vocabulary is closed; plain `yaml` is reserved for workflow files so a settings example cannot dodge validation by dropping its tag.
+ *   yaml settings -> a complete settings document
+ *   yaml layer    -> one layer of a merge, valid once its directives and removal entries are stripped
+ *   yaml          -> a workflow file
+ *   mermaid       -> a diagram, pinned to real code in diagrams.test.ts
+ *   text, bash    -> never yaml
+ */
+
 import { describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, posix } from "node:path";
@@ -29,14 +38,7 @@ function guidePages(): string[] {
     .sort();
 }
 
-/**
- * The closed fence vocabulary; plain `yaml` is reserved for workflow files so a settings example cannot dodge validation by dropping its tag.
- *   yaml settings -> a complete settings document
- *   yaml layer    -> one layer of a merge, valid once its directives and removal entries are stripped
- *   yaml          -> a workflow file
- *   mermaid       -> a diagram, pinned to real code in diagrams.test.ts
- *   text, bash    -> never yaml
- */
+/** The closed fence vocabulary the header lists. */
 const ALLOWED_FENCE_INFO = new Set([
   "yaml settings",
   "yaml layer",
@@ -46,6 +48,52 @@ const ALLOWED_FENCE_INFO = new Set([
   "text",
   "bash",
 ]);
+
+/** The keys a workflow file carries at its top level. */
+const WORKFLOW_TOP_KEYS = new Set([
+  "name",
+  "run-name",
+  "on",
+  "permissions",
+  "env",
+  "defaults",
+  "concurrency",
+  "jobs",
+]);
+
+/** The document a yaml block parses to, or null when it does not parse. */
+function parsedYaml(block: string): unknown {
+  try {
+    return parseYaml(block);
+  } catch {
+    return null;
+  }
+}
+
+/** A mapping whose `jobs` is a non-null object (a list passes too) and whose keys are all workflow keys, so a settings document smuggled in with a decorative jobs key still fails on its section keys. */
+function isWorkflowFile(doc: unknown): boolean {
+  const record =
+    typeof doc === "object" && doc !== null && !Array.isArray(doc)
+      ? (doc as Record<string, unknown>)
+      : null;
+  return (
+    record !== null &&
+    typeof record.jobs === "object" &&
+    record.jobs !== null &&
+    Object.keys(record).every((key) => WORKFLOW_TOP_KEYS.has(key))
+  );
+}
+
+/** A mapping carrying a section key: a settings example by shape. */
+function isSettingsShaped(doc: unknown): boolean {
+  const known = new Set<string>(SECTION_KEYS);
+  return (
+    typeof doc === "object" &&
+    doc !== null &&
+    !Array.isArray(doc) &&
+    Object.keys(doc).some((key) => known.has(key))
+  );
+}
 
 /**
  * Fence-policy violations for one document. fencedBlocks (markdown.ts) needs the exact info string on a backtick fence preceded only by indent,
@@ -160,10 +208,10 @@ async function linkDestinations(
   return destinations;
 }
 
-/**
- * docs/ served under a path no real link names, so a destination that climbs out (even back into a literal "docs/") lands outside the prefix.
- */
+/** An origin no real link names, under which docs/ is served for the resolution below. */
 const SITE_ORIGIN = "https://docs-site.invalid";
+
+/** The path docs/ is served under, which no real link names either, so a destination that climbs out (even back into a literal "docs/") lands outside it. */
 const SITE_ROOT = "/docs-root-7c1e/";
 
 /**
@@ -229,10 +277,13 @@ function headingSlugs(markdown: string, source: string): Set<string> {
 interface RefusalRow {
   /** Which gate the table documents, from its header's second cell. */
   readonly gate: "validation" | "fold";
+
   /** The first cell, the row's name in a failure. */
   readonly has: string;
+
   /** The refused layer(s), flow YAML, one document each. */
   readonly inputs: string[];
+
   /** The message the second cell quotes, whole. */
   readonly quoted: string;
 }
@@ -254,6 +305,56 @@ function isDelimiterRow(line: string | undefined): boolean {
   return line !== undefined && /^\s*\|?(\s*:?-+:?\s*\|)*\s*:?-+:?\s*\|?\s*$/.test(line);
 }
 
+/** The gate a refusal table's second header cell names. */
+const REFUSAL_GATES: Record<string, RefusalRow["gate"]> = {
+  "Caught by": "validation",
+  "The fold says": "fold",
+};
+
+/** The gate the table a piped header line opens documents, given the line after the header. */
+function tableGate(line: string, next: string | undefined, source: string): RefusalRow["gate"] {
+  // A piped line opens a table only when the delimiter row follows it;
+  // one that renders as prose is an authoring slip, not a row to skip.
+  if (!isDelimiterRow(next)) {
+    throw new Error(`${source}: refusal table row outside a known table: ${line.trim()}`);
+  }
+  const header = tableCells(line);
+  if (header.length !== 2) {
+    throw new Error(`${source}: refusal table header is not two cells: ${line.trim()}`);
+  }
+  const [has = "", says = ""] = header;
+  const gate = has === "The layer has" ? (REFUSAL_GATES[says] ?? null) : null;
+  if (gate === null) {
+    throw new Error(`${source}: unknown refusal table header "${line.trim()}"`);
+  }
+  return gate;
+}
+
+/** One row of a table under `gate`; a row that cannot be reproduced fails by name. */
+function refusalRow(line: string, gate: RefusalRow["gate"], source: string): RefusalRow {
+  const cells = tableCells(line);
+  if (cells.length !== 2) {
+    throw new Error(`${source}: refusal table row is not two cells: ${line.trim()}`);
+  }
+  const [has = "", says = ""] = cells;
+  const trigger = has.match(/\((`[^`]+`(?: or `[^`]+`)*)\)$/);
+  if (!trigger) {
+    throw new Error(
+      `${source}: refusal row "${has}" does not end with its layer in parentheses as a code span (or code spans joined by "or"), so it cannot be reproduced`,
+    );
+  }
+  const quoted = says.match(/^(?:Validation: )?`([^`]+)`$/);
+  if (!quoted) {
+    throw new Error(`${source}: refusal row "${has}" does not quote one message in a code span`);
+  }
+  return {
+    gate,
+    has,
+    inputs: [...(trigger[1] ?? "").matchAll(/`([^`]+)`/g)].map((match) => match[1] ?? ""),
+    quoted: quoted[1] ?? "",
+  };
+}
+
 /**
  * The layering guide's refusal tables are the single source; a row missing its input or its message fails here by name.
  * Rows are recognized more permissively than GFM renders them, so every divergence adds a pin and never loses one.
@@ -263,10 +364,6 @@ function isDelimiterRow(line: string | undefined): boolean {
  *   header + delimiter row  -> opens a table (the delimiter's cell count is not checked); a blank line closes it
  */
 function refusalRows(section: readonly string[], source: string): RefusalRow[] {
-  const GATES: Record<string, RefusalRow["gate"]> = {
-    "Caught by": "validation",
-    "The fold says": "fold",
-  };
   const rows: RefusalRow[] = [];
   let gate: RefusalRow["gate"] | null = null;
   for (let index = 0; index < section.length; index++) {
@@ -275,48 +372,15 @@ function refusalRows(section: readonly string[], source: string): RefusalRow[] {
       gate = null;
       continue;
     }
-    if (gate === null) {
-      if (!line.includes("|")) {
-        continue; // prose between the tables
-      }
-      // A piped line opens a table only when the delimiter row follows it;
-      // one that renders as prose is an authoring slip, not a row to skip.
-      if (!isDelimiterRow(section[index + 1])) {
-        throw new Error(`${source}: refusal table row outside a known table: ${line.trim()}`);
-      }
-      const header = tableCells(line);
-      if (header.length !== 2) {
-        throw new Error(`${source}: refusal table header is not two cells: ${line.trim()}`);
-      }
-      const [has = "", says = ""] = header;
-      gate = has === "The layer has" ? (GATES[says] ?? null) : null;
-      if (gate === null) {
-        throw new Error(`${source}: unknown refusal table header "${line.trim()}"`);
-      }
-      index++; // the delimiter row, the only line a table skips
+    if (gate !== null) {
+      rows.push(refusalRow(line, gate, source));
       continue;
     }
-    const cells = tableCells(line);
-    if (cells.length !== 2) {
-      throw new Error(`${source}: refusal table row is not two cells: ${line.trim()}`);
+    if (!line.includes("|")) {
+      continue; // prose between the tables
     }
-    const [has = "", says = ""] = cells;
-    const trigger = has.match(/\((`[^`]+`(?: or `[^`]+`)*)\)$/);
-    if (!trigger) {
-      throw new Error(
-        `${source}: refusal row "${has}" does not end with its layer in parentheses as a code span (or code spans joined by "or"), so it cannot be reproduced`,
-      );
-    }
-    const quoted = says.match(/^(?:Validation: )?`([^`]+)`$/);
-    if (!quoted) {
-      throw new Error(`${source}: refusal row "${has}" does not quote one message in a code span`);
-    }
-    rows.push({
-      gate,
-      has,
-      inputs: [...(trigger[1] ?? "").matchAll(/`([^`]+)`/g)].map((match) => match[1] ?? ""),
-      quoted: quoted[1] ?? "",
-    });
+    gate = tableGate(line, section[index + 1], source);
+    index++; // the delimiter row, the only line a table skips
   }
   return rows;
 }
@@ -362,21 +426,48 @@ describe("docs/ guide pages", () => {
     expect(orphans, "no README, guide, or root page links these docs/ pages").toEqual([]);
   });
 
+  /** Every link target in `file` outside its fences, the external ones (a scheme, mailto:) skipped. */
+  function linkTargets(file: { label: string; path: string }): string[] {
+    const markdown = linesOutsideFences(readFileSync(file.path, "utf8"), file.label).join("\n");
+    return [...markdown.matchAll(/\]\(([^)]+)\)/g)]
+      .map((match) => match[1] ?? "")
+      .filter((target) => !/^[a-z]+:\/\//.test(target) && !target.startsWith("mailto:"));
+  }
+
+  /** Why a target's #fragment matches no heading of the markdown file it names; null for a target with no fragment to check, or a good one. */
+  function fragmentProblem(
+    file: { label: string; path: string },
+    target: string,
+    slugsOf: (path: string) => Set<string>,
+  ): string | null {
+    const hash = target.indexOf("#");
+    if (hash === -1) {
+      return null;
+    }
+    const fragment = target.slice(hash + 1);
+    const path = target.slice(0, hash);
+    const resolved = path === "" ? file.path : join(file.path, "..", path);
+    if (!resolved.endsWith(".md")) {
+      return null; // only markdown targets have slugified headings
+    }
+    if (!existsSync(resolved)) {
+      return `${file.label}: (${target}) target file does not exist`;
+    }
+    if (!slugsOf(resolved).has(fragment)) {
+      return `${file.label}: (${target}) fragment matches no heading`;
+    }
+    return null;
+  }
+
   test("every relative link in the guides, README, and CONTRIBUTING resolves to a real file", () => {
     const broken: string[] = [];
     for (const file of linkScanFiles()) {
-      const markdown = linesOutsideFences(readFileSync(file.path, "utf8"), file.label).join("\n");
-      for (const match of markdown.matchAll(/\]\(([^)]+)\)/g)) {
-        const target = match[1] ?? "";
-        if (/^[a-z]+:\/\//.test(target) || target.startsWith("#") || target.startsWith("mailto:")) {
-          continue;
-        }
+      for (const target of linkTargets(file)) {
         const path = target.split("#")[0] ?? "";
         if (path === "") {
           continue;
         }
-        const resolved = join(file.path, "..", path);
-        if (!existsSync(resolved)) {
+        if (!existsSync(join(file.path, "..", path))) {
           broken.push(`${file.label}: (${target})`);
         }
       }
@@ -405,28 +496,10 @@ describe("docs/ guide pages", () => {
     };
     const broken: string[] = [];
     for (const file of files) {
-      const markdown = linesOutsideFences(readFileSync(file.path, "utf8"), file.label).join("\n");
-      for (const match of markdown.matchAll(/\]\(([^)]+)\)/g)) {
-        const target = match[1] ?? "";
-        if (/^[a-z]+:\/\//.test(target) || target.startsWith("mailto:")) {
-          continue;
-        }
-        const hash = target.indexOf("#");
-        if (hash === -1) {
-          continue;
-        }
-        const fragment = target.slice(hash + 1);
-        const path = target.slice(0, hash);
-        const resolved = path === "" ? file.path : join(file.path, "..", path);
-        if (!resolved.endsWith(".md")) {
-          continue; // only markdown targets have slugified headings
-        }
-        if (!existsSync(resolved)) {
-          broken.push(`${file.label}: (${target}) target file does not exist`);
-          continue;
-        }
-        if (!slugsOf(resolved).has(fragment)) {
-          broken.push(`${file.label}: (${target}) fragment matches no heading`);
+      for (const target of linkTargets(file)) {
+        const problem = fragmentProblem(file, target, slugsOf);
+        if (problem !== null) {
+          broken.push(problem);
         }
       }
     }
@@ -547,53 +620,15 @@ describe("docs/ guide pages", () => {
     test(`docs/${page}: plain yaml blocks are workflow files, everything else is tagged`, () => {
       // Requiring every plain yaml block to parse as a workflow means a settings example cannot dodge validation by dropping its tag.
       for (const block of fencedBlocks(markdown, "yaml")) {
-        let doc: unknown;
-        try {
-          doc = parseYaml(block);
-        } catch {
-          doc = null;
-        }
-        // A settings document smuggled in with a decorative jobs key still fails on its section keys.
-        const WORKFLOW_TOP_KEYS = new Set([
-          "name",
-          "run-name",
-          "on",
-          "permissions",
-          "env",
-          "defaults",
-          "concurrency",
-          "jobs",
-        ]);
-        const record =
-          typeof doc === "object" && doc !== null && !Array.isArray(doc)
-            ? (doc as Record<string, unknown>)
-            : null;
-        const isWorkflow =
-          record !== null &&
-          typeof record.jobs === "object" &&
-          record.jobs !== null &&
-          Object.keys(record).every((key) => WORKFLOW_TOP_KEYS.has(key));
         expect(
-          isWorkflow,
+          isWorkflowFile(parsedYaml(block)),
           `docs/${page} has a plain yaml block that is not a workflow file (starts "${block.split("\n")[0]}"); tag settings examples as \`\`\`yaml settings`,
         ).toBe(true);
       }
       // A text block that parses to a mapping carrying a section key is a settings example hiding from validation.
-      const known = new Set<string>(SECTION_KEYS);
       for (const block of fencedBlocks(markdown, "text")) {
-        let doc: unknown;
-        try {
-          doc = parseYaml(block);
-        } catch {
-          continue;
-        }
-        const settingsShaped =
-          typeof doc === "object" &&
-          doc !== null &&
-          !Array.isArray(doc) &&
-          Object.keys(doc).some((key) => known.has(key));
         expect(
-          settingsShaped,
+          isSettingsShaped(parsedYaml(block)),
           `docs/${page} has a text block shaped like a settings document (starts "${block.split("\n")[0]}"); fence it as \`\`\`yaml settings`,
         ).toBe(false);
       }

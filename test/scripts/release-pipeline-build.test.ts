@@ -58,6 +58,7 @@ import {
 setDefaultTimeout(60_000);
 installReleasePipelineFixture();
 
+/** The run URL packageCommit stamps on what it mints. */
 const RUN_URL = "https://example.invalid/actions/runs/7";
 
 /** A run's result with latest's reason left out: the pointer's sha and whether it moved are what the run did. */

@@ -16,12 +16,7 @@ import { withTempDir } from "../temp-dir.js";
 /** Every layer file's text, lowest first, as the e2e runner writes a scenario's stack. */
 type Stack = readonly string[];
 
-/**
- * A stack in no schema order: `labels` before `repository` (SECTION_KEYS lists them the other way),
- * `enable_vulnerability_alerts` before `has_wiki` (the schema declares the PATCH fields first), a wrapper opening
- * with its entries, and a higher layer opening with the section the schema lists last. The bytes pinned here are the
- * canonical rendering of the fold; no layer's order survives into them.
- */
+/** A stack whose sections, fields, wrapper entries, and higher layer's opening section all sit out of schema order, so no layer's order can survive into the fold. */
 const UNORDERED: Stack = [
   stringifyYaml({
     labels: {
@@ -40,6 +35,7 @@ const UNORDERED: Stack = [
   }),
 ];
 
+/** The canonical rendering of that fold, byte for byte. */
 const UNORDERED_MERGED = [
   "repository:",
   "  has_issues: false",
@@ -60,10 +56,7 @@ const UNORDERED_MERGED = [
   "",
 ].join("\n");
 
-/**
- * Every e2e scenario mode: render writes a file for (a refused stack writes none), as the runner lays it out: the
- * layers below, the scenario's settings on top.
- */
+/** Every e2e render scenario that writes a file (a refused stack writes none), laid out as the runner does: the layers below, the scenario's settings on top. */
 const SCENARIO_STACKS: [string, Stack, Layering][] = loadScenarios(scenarioRoots())
   .filter((scenario) => scenario.inputs?.mode === "render" && scenario.expect.exit_code === 0)
   .map((scenario) => [

@@ -52,27 +52,43 @@ function runnerInputs(job: RunJob): string[] {
   ];
 }
 
+/** The step of `job` named `name`. */
 const stepNamed = (job: RunJob, name: string): Step =>
   must(
     job.steps.find((step) => step.name === name),
     `step ${name}`,
   );
+
 /** The one floor guard both publishers run; the floor itself is NPM_FLOOR in release-pipeline/npm.ts. */
 const FLOOR_GUARD = "bun .github/scripts/release-pipeline.ts npm-floor";
+
+/** The name both publishers give that step. */
 const FLOOR_GUARD_NAME = "Require an npm that publishes through OIDC";
+
 /** The pipeline's npm module's text, where the floor is defined. */
 const npmSource = (): string =>
   readFileSync(join(ROOT, ".github", "scripts", "release-pipeline", "npm.ts"), "utf8");
+
+/** The setup-node step of `job`. */
 const setupNode = (job: RunJob): Step =>
   must(
     job.steps.find((step) => step.uses?.startsWith("actions/setup-node@")),
     "setup-node step",
   );
 
+/** The stable publisher's workflow, the release hook. */
 const STABLE_FILE = "update-release.yml";
+
+/** The stable publisher's job. */
 const STABLE_JOB = "publish-npm";
+
+/** The next publisher's workflow, the release-PR hook. */
 const NEXT_FILE = "update-release-pr.yml";
+
+/** The next publisher's job. */
 const NEXT_JOB = "publish-next";
+
+/** Both publishers' workflows and jobs, read fresh. */
 const publishers = () => {
   const nextWorkflow = readWorkflow(NEXT_FILE);
   return {
@@ -130,10 +146,8 @@ function conditionedSteps(job: RunJob, probed: boolean): string[] {
   );
 }
 
-/** Every way the two publishers break their shared contract; the assertions and the negative controls read this one list. */
-function publisherProblems(nextWorkflow: Workflow, stableWorkflow: Workflow): string[] {
-  const next = runJob(nextWorkflow.jobs[NEXT_JOB], `${NEXT_JOB} job`);
-  const stable = runJob(stableWorkflow.jobs[STABLE_JOB], `${STABLE_JOB} job`);
+/** A publisher not guarded to the manifest's repository, and its steps running under a condition of their own. */
+function guardProblems(next: RunJob, stable: RunJob): string[] {
   const problems: string[] = [];
   const guard = `github.repository == '${manifestSlug()}'`;
   for (const [label, job] of [
@@ -145,18 +159,40 @@ function publisherProblems(nextWorkflow: Workflow, stableWorkflow: Workflow): st
       problems.push(`${label}: "${name}" runs under a condition of its own`);
     }
   }
+  return problems;
+}
+
+/** The publishers taking different concurrency lanes, or a lane whose group is not one literal. */
+function laneProblems(next: RunJob, stable: RunJob): string[] {
+  const problems: string[] = [];
   if (JSON.stringify(next.concurrency) !== JSON.stringify(stable.concurrency)) {
     problems.push("the publishers take different lanes");
   }
   if (typeof next.concurrency?.group !== "string" || next.concurrency.group.includes("${{")) {
     problems.push("the lane's group is not one literal");
   }
+  return problems;
+}
+
+/** The stable publisher not running after every other job of its workflow. */
+function lastJobProblems(stable: RunJob, stableWorkflow: Workflow): string[] {
   const others = Object.keys(stableWorkflow.jobs)
     .filter((id) => id !== STABLE_JOB)
     .sort();
   if (JSON.stringify([stable.needs ?? []].flat().sort()) !== JSON.stringify(others)) {
-    problems.push(`${STABLE_JOB} does not run after every other job (${others.join(", ")})`);
+    return [`${STABLE_JOB} does not run after every other job (${others.join(", ")})`];
   }
+  return [];
+}
+
+/** A token, or an npm configuration, reaching npm through a workflow-level env or a runner input. */
+function tokenProblems(
+  nextWorkflow: Workflow,
+  stableWorkflow: Workflow,
+  next: RunJob,
+  stable: RunJob,
+): string[] {
+  const problems: string[] = [];
   // A workflow-level env reaches every step of every job, the publishers' included.
   const workflowEnv = [nextWorkflow, stableWorkflow].flatMap((w) =>
     Object.entries(w.env ?? {}).flat(),
@@ -168,10 +204,21 @@ function publisherProblems(nextWorkflow: Workflow, stableWorkflow: Workflow): st
     if (/^npm_config_/i.test(value))
       problems.push(`npm is configured through the environment: ${value}`);
   }
-  for (const [label, a, b] of sharedSteps(next, stable)) {
-    if (JSON.stringify(body(a)) !== JSON.stringify(body(b)))
-      problems.push(`"${label}" diverged between the publishers`);
-  }
+  return problems;
+}
+
+/** The shared steps whose bodies differ between the publishers. */
+function divergenceProblems(next: RunJob, stable: RunJob): string[] {
+  return sharedSteps(next, stable).flatMap(([label, a, b]) =>
+    JSON.stringify(body(a)) === JSON.stringify(body(b))
+      ? []
+      : [`"${label}" diverged between the publishers`],
+  );
+}
+
+/** A publisher with no publish step, or a shared step running after its publish. */
+function publishOrderProblems(next: RunJob, stable: RunJob): string[] {
+  const problems: string[] = [];
   // The publish comes after every shared step: setup, setup-node, the floor guard, and the library build it publishes.
   for (const [label, job] of [
     [NEXT_JOB, next],
@@ -190,11 +237,31 @@ function publisherProblems(nextWorkflow: Workflow, stableWorkflow: Workflow): st
         problems.push(`${label}: "${name}" runs after the publish`);
     }
   }
+  return problems;
+}
+
+/** The publishers' setup-node steps naming different registries, or none. */
+function registryProblems(next: RunJob, stable: RunJob): string[] {
   const registry = setupNode(next).with?.["registry-url"];
   if (typeof registry !== "string" || setupNode(stable).with?.["registry-url"] !== registry) {
-    problems.push("the publishers name different registries");
+    return ["the publishers name different registries"];
   }
-  return problems;
+  return [];
+}
+
+/** Every way the two publishers break their shared contract; the assertions and the negative controls read this one list. */
+function publisherProblems(nextWorkflow: Workflow, stableWorkflow: Workflow): string[] {
+  const next = runJob(nextWorkflow.jobs[NEXT_JOB], `${NEXT_JOB} job`);
+  const stable = runJob(stableWorkflow.jobs[STABLE_JOB], `${STABLE_JOB} job`);
+  return [
+    ...guardProblems(next, stable),
+    ...laneProblems(next, stable),
+    ...lastJobProblems(stable, stableWorkflow),
+    ...tokenProblems(nextWorkflow, stableWorkflow, next, stable),
+    ...divergenceProblems(next, stable),
+    ...publishOrderProblems(next, stable),
+    ...registryProblems(next, stable),
+  ];
 }
 
 describe("the npm publish jobs", () => {

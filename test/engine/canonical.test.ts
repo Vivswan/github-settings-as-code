@@ -245,6 +245,24 @@ function isMappingSchema(schema: z.ZodType): boolean {
   }
 }
 
+/** The union case: a knob wrapper's own shape with its `entries` transparent, every other option at the path itself. */
+function unionMappingListPaths(
+  node: Extract<ReturnType<typeof schemaNode>, { kind: "union" }>,
+  path: string,
+  out: Set<string>,
+): void {
+  const wrapper = node.knob?.wrapper;
+  for (const option of node.options) {
+    if (option === wrapper) {
+      for (const [key, child] of Object.entries(wrapper.shape)) {
+        mappingListPaths(child, key === "entries" ? path : `${path}.${key}`, out);
+      }
+    } else {
+      mappingListPaths(option, path, out);
+    }
+  }
+}
+
 /** Every list of mappings the schema declares, by the path LIST_IDENTITY spells (a knob wrapper's `entries` transparent). */
 function mappingListPaths(schema: z.ZodType, path: string, out: Set<string>): void {
   const node = schemaNode(schema);
@@ -267,19 +285,9 @@ function mappingListPaths(schema: z.ZodType, path: string, out: Set<string>): vo
     case "record":
       mappingListPaths(node.value, `${path}.*`, out);
       return;
-    case "union": {
-      const wrapper = node.knob?.wrapper;
-      for (const option of node.options) {
-        if (option === wrapper) {
-          for (const [key, child] of Object.entries(wrapper.shape)) {
-            mappingListPaths(child, key === "entries" ? path : `${path}.${key}`, out);
-          }
-        } else {
-          mappingListPaths(option, path, out);
-        }
-      }
+    case "union":
+      unionMappingListPaths(node, path, out);
       return;
-    }
     case "leaf":
       return;
   }

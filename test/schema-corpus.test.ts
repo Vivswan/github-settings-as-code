@@ -15,6 +15,8 @@ import { readSettingsSchema } from "./settings-schema.js";
 interface CorpusDoc {
   /** Where the fragment came from ("labels-apply-converges.yml settings"). */
   label: string;
+
+  /** The settings document the fragment holds. */
   doc: Record<string, unknown>;
 }
 
@@ -28,6 +30,7 @@ const FRAGMENT_KINDS = [
   "repos.<slug>.settings",
   "repos.<slug>.expect.snapshot",
 ] as const;
+
 type FragmentKind = (typeof FRAGMENT_KINDS)[number];
 
 /** A curated fragment remembers its file and kind, so the loader guards derive from what was collected, not from side bookkeeping. */
@@ -160,11 +163,7 @@ function generatedDocs(): CorpusDoc[] {
   return docs;
 }
 
-/**
- * The deliberate schema-vs-runtime disagreements; anything else fails.
- *   schema-looser   -> a runtime invariant the schema does not carry (a cross-field superRefine, an open closedSurface); the run rejects upfront
- *   schema-stricter -> would reject documents the action applies; none are tolerated (a deferral enum hit needs a decision, not an entry)
- */
+/** The deliberate schema-vs-runtime disagreements, every one schema-looser (a runtime invariant the schema does not carry, rejected upfront); schema-stricter would reject documents the action applies, so none is tolerated, and anything unlisted fails. */
 const KNOWN_DIVERGENCES: Record<string, string> = {
   "actions-selected-contradiction-rejected.yml settings":
     "schema-looser: the allowed_actions/selected_actions contradiction is a superRefine (cross-field), rejected at runtime upfront",
@@ -203,6 +202,44 @@ const KNOWN_DIVERGENCES: Record<string, string> = {
     "schema-looser: the same literal-value refusal, in a section the sections input excludes",
 };
 
+/** What the two validators say about one document: they agree, the label is a known divergence, or the disagreement line. */
+type Verdict = { kind: "agree" } | { kind: "known" } | { kind: "disagreement"; line: string };
+
+/** The verdict on `doc`; a known divergence is held to the schema being the looser side. */
+function verdictOn(
+  label: string,
+  doc: Record<string, unknown>,
+  validate: ValidateFunction,
+): Verdict {
+  const schemaAccepts = validate(doc) === true;
+  const runtimeAccepts = !("error" in validateSectionShapes(doc, label));
+  if (label.startsWith("generated ") && !(schemaAccepts && runtimeAccepts)) {
+    // Shape-valid by construction, so a rejection by either side is a break in that validator, not a divergence to tolerate.
+    return {
+      kind: "disagreement",
+      line: `${label}: a generated document must be accepted by both (schema ${schemaAccepts}, runtime ${runtimeAccepts})`,
+    };
+  }
+  if (schemaAccepts === runtimeAccepts) {
+    return { kind: "agree" };
+  }
+  if (KNOWN_DIVERGENCES[label] !== undefined) {
+    // A KNOWN divergence must stay schema-looser: the reverse would reject documents the action applies.
+    expect(
+      schemaAccepts,
+      `${label}: expected the schema to be the looser side (${KNOWN_DIVERGENCES[label]})`,
+    ).toBe(true);
+    return { kind: "known" };
+  }
+  const schemaVerdict = schemaAccepts ? "accepts" : "REJECTS";
+  const runtimeVerdict = runtimeAccepts ? "accepts" : "REJECTS";
+  const errors = schemaAccepts ? "" : ` (${JSON.stringify(validate.errors?.slice(0, 2))})`;
+  return {
+    kind: "disagreement",
+    line: `${label}: schema ${schemaVerdict} but runtime ${runtimeVerdict}${errors}`,
+  };
+}
+
 describe("published schema agrees with the runtime over the corpus", () => {
   const ajv = new Ajv({ strict: false, allErrors: true });
   const add = (addFormats as unknown as { default?: typeof addFormats }).default ?? addFormats;
@@ -213,33 +250,14 @@ describe("published schema agrees with the runtime over the corpus", () => {
     const disagreements: string[] = [];
     const staleAllowlist = new Set(Object.keys(KNOWN_DIVERGENCES));
     for (const { label, doc } of [...scenarioDocs(), ...generatedDocs()]) {
-      const schemaAccepts = validate(doc) === true;
-      const runtimeAccepts = !("error" in validateSectionShapes(doc, label));
-      if (label.startsWith("generated ") && !(schemaAccepts && runtimeAccepts)) {
-        // Shape-valid by construction, so a rejection by either side is a break in that validator, not a divergence to tolerate.
-        disagreements.push(
-          `${label}: a generated document must be accepted by both (schema ${schemaAccepts}, runtime ${runtimeAccepts})`,
-        );
-        continue;
-      }
-      if (schemaAccepts === runtimeAccepts) {
-        continue;
-      }
-      if (KNOWN_DIVERGENCES[label] !== undefined) {
+      const verdict = verdictOn(label, doc, validate);
+      if (verdict.kind === "known") {
         staleAllowlist.delete(label);
-        // A KNOWN divergence must stay schema-looser: the reverse would reject documents the action applies.
-        expect(
-          schemaAccepts,
-          `${label}: expected the schema to be the looser side (${KNOWN_DIVERGENCES[label]})`,
-        ).toBe(true);
         continue;
       }
-      const schemaVerdict = schemaAccepts ? "accepts" : "REJECTS";
-      const runtimeVerdict = runtimeAccepts ? "accepts" : "REJECTS";
-      const errors = schemaAccepts ? "" : ` (${JSON.stringify(validate.errors?.slice(0, 2))})`;
-      disagreements.push(
-        `${label}: schema ${schemaVerdict} but runtime ${runtimeVerdict}${errors}`,
-      );
+      if (verdict.kind === "disagreement") {
+        disagreements.push(verdict.line);
+      }
     }
     expect(disagreements, disagreements.join("\n")).toEqual([]);
     expect(
