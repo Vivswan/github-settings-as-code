@@ -12,7 +12,8 @@ import { grantFor, type SectionPermission, samePermission } from "./permissions.
 
 /**
  * What ends a section's work, as a value. `message` is the whole line the loops report; `kind` is read for policy
- * alone (a denial's partial-success handling in engine/orchestrate.ts), never to rebuild prose.
+ * alone (a denial's partial-success handling in engine/orchestrate.ts), never to rebuild prose. The denial alone
+ * carries more: its `status` is the safe code the redacted view shows.
  *
  *   live-shape  -> GitHub's answer parsed but cannot be reconciled (an item without an id, a repeated rule type)
  *   refused     -> the section declines to proceed: the settings file conflicts with live state, an actor cannot be
@@ -29,7 +30,6 @@ export type SectionFailure =
       readonly kind: "permission-denied";
       readonly section: string;
       readonly detail: string;
-      /** The HTTP status that raised the denial, for the redacted view's safe code. */
       readonly status: number;
       readonly message: string;
     };
@@ -85,28 +85,79 @@ function sentence(clause: string): string {
   return clause.charAt(0).toUpperCase() + clause.slice(1);
 }
 
+/**
+ * `operation` says WHAT was being done in settings-file terms. `op` supplies the hints and denial hint and resolves
+ * the EFFECTIVE permission: an override renders its own grant advice, and a public operation ("none") cannot be a
+ * missing-grant failure, so its 403/404 takes the generic branch; a GraphQL failure renders `GRAPHQL <opName>` in
+ * the method/path slot.
+ */
+interface FailureContext {
+  readonly operation?: string;
+  readonly op?: FailingOp;
+}
+
+/**
+ * The two spellings of the failed request: the operation label says what was being done, and the raw method/path
+ * keeps the request identifiable.
+ *
+ *   cause   -> creating ruleset "x" failed - POST /repos/...: 422 ...
+ *   denied  -> POST /repos/... (creating ruleset "x"): 403 ...
+ */
+function requestLines(
+  method: string,
+  path: string,
+  error: ApiError,
+  operation: string | undefined,
+): { cause: string; denied: string } {
+  const request = `${method} ${path}`;
+  const outcome = `${error.status} ${error.message}`;
+  return {
+    cause: `${operation ? `${operation} failed - ` : ""}${request}: ${outcome}`,
+    denied: `${request}${operation ? ` (${operation})` : ""}: ${outcome}`,
+  };
+}
+
+/** The denial's advice: the grant of the EFFECTIVE permission at the level the section needs, or the section's own, then the endpoint's hint. */
+function denialAdvice(
+  section: SectionMeta,
+  effective: SectionPermission | undefined,
+  op: FailingOp | undefined,
+): string {
+  const grant =
+    effective !== undefined && !samePermission(effective, section.permission)
+      ? grantFor(effective, undefined, overrideAdviceLevel(section, effective))
+      : sectionGrant(section);
+  const denialHint = op?.denialHint ? `. Note: ${op.denialHint}` : "";
+  return `To fix, ${grant}${denialHint}`;
+}
+
+/**
+ * The advice a rejection's declaration carries: a GraphQL op's declared outcome prose for each observed error type
+ * (a GraphQL rejection carries types, not a status), a REST endpoint's hint for the status.
+ */
+function rejectionAdvice(op: FailingOp | undefined, error: ApiError): string | undefined {
+  if (op === undefined) {
+    return undefined;
+  }
+  if ("outcomes" in op) {
+    return toleratedGraphqlErrors(op)
+      .filter((type) => error.graphqlTypes?.includes(type))
+      .map((type) => op.outcomes[type])
+      .filter((outcome): outcome is string => outcome !== undefined)
+      .map(sentence)
+      .join(". ");
+  }
+  return op.hints?.[error.status as HintableStatus];
+}
+
 export function failureFor(
   section: SectionMeta,
   method: string,
   path: string,
   error: ApiError,
-  context?: {
-    operation?: string;
-    /**
-     * Supplies the hints and denial hint and resolves the EFFECTIVE permission: an override renders its
-     * own grant advice, and a public operation ("none") cannot be a missing-grant failure, so its 403/404
-     * takes the generic branch; a GraphQL failure renders `GRAPHQL <opName>` in the method/path slot.
-     */
-    op?: FailingOp;
-  },
+  context?: FailureContext,
 ): SectionFailure {
-  // The operation label says WHAT was being done in settings-file terms; the raw method/path keeps the request identifiable.
-  //   creating ruleset "x" failed - POST /repos/...: 422 ...
-  //   the token was denied POST /repos/... (creating ruleset "x"): 403 ...
-  const request = `${method} ${path}`;
-  const outcome = `${error.status} ${error.message}`;
-  const cause = `${context?.operation ? `${context.operation} failed - ` : ""}${request}: ${outcome}`;
-  const denied = `${request}${context?.operation ? ` (${context.operation})` : ""}: ${outcome}`;
+  const { cause, denied } = requestLines(method, path, error, context?.operation);
   const kind = classifyApiError(error);
   if (kind === "rate-limit") {
     // Secondary rate limits arrive as 403 and must not read as missing permissions.
@@ -125,14 +176,9 @@ export function failureFor(
   if (kind === "permission" && effective !== "none") {
     const alsoMissing =
       error.status === 404 ? " (a 404 here can also mean the resource does not exist)" : "";
-    const denialHint = context?.op?.denialHint ? `. Note: ${context.op.denialHint}` : "";
-    const grant =
-      effective !== undefined && !samePermission(effective, section.permission)
-        ? grantFor(effective, undefined, overrideAdviceLevel(section, effective))
-        : sectionGrant(section);
     return permissionDenied(
       section.key,
-      `the token was denied ${denied}${alsoMissing}. To fix, ${grant}${denialHint}`,
+      `the token was denied ${denied}${alsoMissing}. ${denialAdvice(section, effective, op)}`,
       error.status,
     );
   }
@@ -148,18 +194,7 @@ export function failureFor(
       message: `${section.key}: ${cause}. The token was rejected as invalid or expired; update the token input (or the secret it reads) with a valid, unexpired PAT`,
     };
   }
-  // A GraphQL rejection carries error types, not a status; its declared outcomes stand in for status-keyed hints.
-  const advice =
-    op === undefined
-      ? undefined
-      : "outcomes" in op
-        ? toleratedGraphqlErrors(op)
-            .filter((type) => error.graphqlTypes?.includes(type))
-            .map((type) => op.outcomes[type])
-            .filter((outcome): outcome is string => outcome !== undefined)
-            .map(sentence)
-            .join(". ")
-        : op.hints?.[error.status as HintableStatus];
+  const advice = rejectionAdvice(op, error);
   const hint = advice ? `. ${advice}` : "";
   const docs = error.documentationUrl
     ? `. The fields and values this endpoint accepts are documented at ${error.documentationUrl}`

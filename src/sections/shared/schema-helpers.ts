@@ -10,12 +10,10 @@ import { renamedKeyError } from "./renamed-key.js";
 import { type Knob, knobOf, markKnob, OPEN_CATCHALL } from "./schema-marks.js";
 import { schemaNode } from "./schema-node.js";
 
-/**
- * The one value set of the `_undeclared` knob (a wrapper's, a file's top level) and the `undeclared` run input.
- * Described in docs/sections/shared.docs.yml and docs/schema.docs.yml.
- */
+/** The one value set of the `_undeclared` knob (a wrapper's, a file's top level) and the `undeclared` run input; described in docs/sections/shared.docs.yml and docs/schema.docs.yml. */
 export const UNDECLARED_POLICIES = ["keep", "delete"] as const;
 
+/** The knob's schema, shared by every wrapper so the published document has one UndeclaredPolicy definition. */
 export const UndeclaredPolicySchema = z.enum(UNDECLARED_POLICIES).meta({ id: "UndeclaredPolicy" });
 
 /**
@@ -45,20 +43,22 @@ export function conditional(
   };
 }
 
+/** The one value set of the `_layering` directive and the `layering` run input; described in docs/sections/shared.docs.yml and docs/schema.docs.yml. */
+export const LAYERINGS = ["replace", "shallow", "deep"] as const;
+
 /**
- * The one value set of the `_layering` directive and the `layering` run input; engine/layers.ts acts on it and
- * re-exports it to the flows. Described in docs/sections/shared.docs.yml and docs/schema.docs.yml.
+ * engine/layers.ts acts on it and re-exports it to the flows.
  *
  *   replace  -> the higher list replaces the whole lower list
  *   shallow  -> union by key; a same-key entry is swapped for the higher one
  *   deep     -> union by key; a same-key pair merges field by field, nested keyed lists included
  */
-export const LAYERINGS = ["replace", "shallow", "deep"] as const;
-
 export type Layering = (typeof LAYERINGS)[number];
 
+/** The directive's schema, shared by the top-level wrappers. */
 export const LayeringSchema = z.enum(LAYERINGS);
 
+/** The refusal of the pre-v3 `undeclared` spelling, which only the policy wrappers ever took (their `renamed`). */
 const renamedPolicyKeyError = renamedKeyError(
   "wrapper's policy",
   "undeclared",
@@ -66,16 +66,14 @@ const renamedPolicyKeyError = renamedKeyError(
   "in v3 (a directive, like _layering) - write _undeclared: keep or _undeclared: delete",
 );
 
-/**
- * The wrapper kinds, one per minting helper, each named as its published definition is (`<name><Entry>`) and with
- * the directives its key error names. Only a policy wrapper ever spelled the policy without its underscore, so only
- * those name the rename.
- */
+/** What the two policy wrappers share; only they ever spelled the policy without its underscore, so only they name the rename. */
 const POLICY_WRAPPER = {
   name: "UndeclaredPolicyList",
   directives: '"_undeclared" and, on a top-level section, "_layering"',
   renamed: true,
 } as const;
+
+/** The wrapper kinds, one per minting helper, each named as its published definition is (`<name><Entry>`) and with the directives its key error names. */
 const WRAPPER_KINDS = {
   knobbed: { kind: "knobbed", ...POLICY_WRAPPER },
   nestedKnobbed: { kind: "nestedKnobbed", ...POLICY_WRAPPER },
@@ -87,6 +85,7 @@ const WRAPPER_KINDS = {
     renamed: false,
   },
 } as const;
+
 type WrapperKind = (typeof WRAPPER_KINDS)[keyof typeof WRAPPER_KINDS];
 
 /**
@@ -232,6 +231,29 @@ function routeKnobs(schema: z.ZodType): z.ZodType {
   }
 }
 
+/** The form a value routes to: the list for an array, the wrapper for a mapping, null for anything else. */
+function formOf(value: unknown, list: z.ZodType, wrapper: z.ZodType): z.ZodType | null {
+  if (Array.isArray(value)) {
+    return list;
+  }
+  if (typeof value === "object" && value !== null) {
+    return wrapper;
+  }
+  return null;
+}
+
+/**
+ * The issue for a value that is neither a list nor a mapping. A null list has no empty state of its own, so the issue
+ * carries `legal`, from which engine/validate.ts names the fix instead of the type prose.
+ */
+function neitherFormIssue(value: unknown, beside: string): z.core.$ZodSuperRefineIssue {
+  const message = `Invalid input: expected a list of entries, or a mapping with "entries" (and ${beside}), but this section parsed as ${value === null ? "null" : typeof value}`;
+  if (value === null) {
+    return { code: "custom", message, params: { legal: "a list of entries ([] for none)" } };
+  }
+  return { code: "custom", message };
+}
+
 function routedForms(knob: Knob, list: z.ZodType, wrapper: z.ZodType): z.ZodType {
   const beside =
     knob.kind === "layered"
@@ -240,30 +262,21 @@ function routedForms(knob: Knob, list: z.ZodType, wrapper: z.ZodType): z.ZodType
   return z
     .custom<unknown>(() => true)
     .transform((value, ctx) => {
-      const form = Array.isArray(value)
-        ? list
-        : typeof value === "object" && value !== null
-          ? wrapper
-          : null;
+      const form = formOf(value, list, wrapper);
       if (form === null) {
-        ctx.addIssue({
-          code: "custom",
-          message: `Invalid input: expected a list of entries, or a mapping with "entries" (and ${beside}), but this section parsed as ${value === null ? "null" : typeof value}`,
-          // A null list has no empty state of its own: engine/validate.ts names the fix from this, not the type prose.
-          ...(value === null ? { params: { legal: "a list of entries ([] for none)" } } : {}),
-        });
+        ctx.addIssue(neitherFormIssue(value, beside));
         return z.NEVER;
       }
       const parsed = form.safeParse(value);
-      if (!parsed.success) {
-        for (const issue of parsed.error.issues) {
-          ctx.addIssue({ ...issue });
-        }
-        // The raw value, not z.NEVER: a rule the section composed onto the routed shape runs beside the failed
-        // entry (rule(), below) and must meet the entries, raw where they failed. The parse fails regardless.
-        return value;
+      if (parsed.success) {
+        return parsed.data;
       }
-      return parsed.data;
+      for (const issue of parsed.error.issues) {
+        ctx.addIssue({ ...issue });
+      }
+      // The raw value, not z.NEVER: a rule the section composed onto the routed shape runs beside the failed
+      // entry (rule(), below) and must meet the entries, raw where they failed. The parse fails regardless.
+      return value;
     });
 }
 
@@ -376,6 +389,7 @@ export function boundedString(
 /** GitHub's documented cap on one variable's value, 48 KB, counted in UTF-8 bytes as GitHub does. */
 export const MAX_VARIABLE_VALUE_BYTES = 48 * 1024;
 
+/** A variable's value, refused past the cap with the measured size and the way out. */
 const variableValue = boundedString(
   MAX_VARIABLE_VALUE_BYTES,
   "utf8 bytes",
@@ -383,11 +397,10 @@ const variableValue = boundedString(
     `the variable value is ${bytes} bytes of UTF-8; GitHub caps a variable at 48 KB (${MAX_VARIABLE_VALUE_BYTES} bytes). Shorten it, or move the content into a file the workflow reads`,
 );
 
-/**
- * The pattern doubles as the published schema's `pattern`, so it spells the case-insensitive prefix without a flag;
- * the API uppercases before it compares, so `github_token` is the reserved GITHUB_TOKEN.
- */
+/** Doubles as the published schema's `pattern`, so it spells the case-insensitive prefix without a flag; the API uppercases before it compares, so `github_token` is the reserved GITHUB_TOKEN. */
 const GITHUB_NAME_PATTERN = /^(?![Gg][Ii][Tt][Hh][Uu][Bb]_)[A-Za-z_][A-Za-z0-9_]*$/;
+
+/** The rule a refused name's message ends with, after the reason. */
 const GITHUB_NAME_RULE =
   "GitHub accepts ASCII letters, digits, and underscores, not starting with a digit or with the reserved GITHUB_ prefix (in any case: names are stored uppercased)";
 
@@ -412,4 +425,6 @@ function githubName(noun: "secret" | "variable") {
 
 /** Secret and variable names share GitHub's one rule; the noun only tells the problem line which it is reading. */
 export const secretName = githubName("secret");
+
+/** The same rule under the variable noun. */
 const variableName = githubName("variable");

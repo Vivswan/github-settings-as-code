@@ -51,6 +51,73 @@ export type PlainData =
   | readonly PlainData[]
   | { readonly [key: string]: PlainData | undefined };
 
+/** The path of a non-plain value as the BUG line spells it: `(root)`, `rules[0].check`, `["a.b"].c`. */
+function renderPath(path: readonly (string | number)[]): string {
+  if (path.length === 0) {
+    return "(root)";
+  }
+  return path
+    .map((segment, index) => {
+      if (typeof segment === "number") {
+        return `[${segment}]`;
+      }
+      const bare = /^[A-Za-z_$][\w$]*$/.test(segment);
+      return bare ? `${index === 0 ? "" : "."}${segment}` : `[${JSON.stringify(segment)}]`;
+    })
+    .join("");
+}
+
+function rejectPayload(path: readonly (string | number)[], reason: string): never {
+  throw new Error(
+    `BUG: a planned payload carries a value JSON cannot carry at ${renderPath(path)}: ${reason}; request data must be plain`,
+  );
+}
+
+/** Why JSON cannot carry a node, beyond what nonPlainReason names: a non-finite number, which JSON would turn into null. */
+function nonPlainAt(node: unknown, at: "item" | "field"): string | null {
+  const reason = nonPlainReason(node, at);
+  if (reason !== null) {
+    return reason;
+  }
+  if (typeof node === "number" && !Number.isFinite(node)) {
+    return "a non-finite number, which JSON would turn into null";
+  }
+  return null;
+}
+
+/**
+ * The walk below one node. A YAML alias to an ancestor parses to a cycle, which JSON cannot carry (a shared alias to
+ * a sibling is fine and is visited twice), so `ancestors` holds the containers on the path down to the node.
+ */
+function requirePlain(
+  node: unknown,
+  path: readonly (string | number)[],
+  at: "item" | "field",
+  ancestors: Set<object>,
+): void {
+  const reason = nonPlainAt(node, at);
+  if (reason !== null) {
+    rejectPayload(path, reason);
+  }
+  if (node === null || typeof node !== "object") {
+    return;
+  }
+  if (ancestors.has(node)) {
+    rejectPayload(path, "a reference back to one of its own containers (a cycle)");
+  }
+  ancestors.add(node);
+  if (Array.isArray(node)) {
+    for (const [index, item] of node.entries()) {
+      requirePlain(item, [...path, index], "item", ancestors);
+    }
+  } else {
+    for (const [key, item] of Object.entries(node)) {
+      requirePlain(item, [...path, key], "field", ancestors);
+    }
+  }
+  ancestors.delete(node);
+}
+
 /**
  * The runtime proof for a body the types cannot vouch for. A body built from declared values and literals is
  * PlainData by type alone (PlainTyped in ./declared.ts reads the validated document's `unknown` leaves as the walk
@@ -62,56 +129,10 @@ export type PlainData =
  *   a library caller's getter answering differently than under the walk  -> the same, after the proof
  */
 export function plainData(value: unknown): PlainData {
-  const render = (path: readonly (string | number)[]): string =>
-    path.length === 0
-      ? "(root)"
-      : path
-          .map((segment, index) => {
-            if (typeof segment === "number") {
-              return `[${segment}]`;
-            }
-            const bare = /^[A-Za-z_$][\w$]*$/.test(segment);
-            return bare ? `${index === 0 ? "" : "."}${segment}` : `[${JSON.stringify(segment)}]`;
-          })
-          .join("");
-  const reject = (path: readonly (string | number)[], reason: string): never => {
-    throw new Error(
-      `BUG: a planned payload carries a value JSON cannot carry at ${render(path)}: ${reason}; request data must be plain`,
-    );
-  };
-  // A YAML alias to an ancestor parses to a cycle, which JSON cannot carry (a shared alias to a sibling is fine and is visited twice).
-  const ancestors = new Set<object>();
-  const plain = (node: unknown, path: readonly (string | number)[], at: "item" | "field"): void => {
-    const reason =
-      nonPlainReason(node, at) ??
-      (typeof node === "number" && !Number.isFinite(node)
-        ? "a non-finite number, which JSON would turn into null"
-        : null);
-    if (reason !== null) {
-      reject(path, reason);
-    }
-    if (node === null || typeof node !== "object") {
-      return;
-    }
-    if (ancestors.has(node)) {
-      reject(path, "a reference back to one of its own containers (a cycle)");
-    }
-    ancestors.add(node);
-    if (Array.isArray(node)) {
-      for (const [index, item] of node.entries()) {
-        plain(item, [...path, index], "item");
-      }
-    } else {
-      for (const [key, item] of Object.entries(node)) {
-        plain(item, [...path, key], "field");
-      }
-    }
-    ancestors.delete(node);
-  };
   if (value === undefined) {
-    reject([], "undefined, which has no JSON form");
+    rejectPayload([], "undefined, which has no JSON form");
   }
-  plain(value, [], "field");
+  requirePlain(value, [], "field", new Set());
   return value as PlainData;
 }
 
@@ -325,7 +346,6 @@ export interface PlanContext<
   K extends SectionKey = SectionKey,
 > {
   readonly section: K;
-  /** The target repository, parsed once at the boundary (see RepoRef). */
   readonly repo: RepoRef;
   readonly read: BoundReads<E, G>;
 }
@@ -422,28 +442,19 @@ export interface SnapshotContext<
  * drift line (DriftFor), so "check reported clean while apply mutated" is unrepresentable.
  */
 export interface PlannedOpBase<D extends Justification = Justification> {
-  /**
-   * Check mode renders these; apply renders `change`.
-   *   labels[bug]: color d73a4a != live ffffff; apply will update it
-   */
+  /** Rendered by check mode (`labels[bug]: color d73a4a != live ffffff; apply will update it`); apply renders `change`. */
   readonly drift: D;
-  /**
-   * A thunk when the line depends on what the server echoed (one line or several, never none); its failure
-   * is the verification failure, reported beside the requests that landed.
-   */
+
+  /** A thunk when the line depends on what the server echoed (one line or several, never none); its failure is the verification failure, reported beside the requests that landed. */
   readonly change: string | ((response: unknown) => Result<ChangeLines, SectionFailure>);
+
   /** The operation in settings-file terms ("arming the interaction limit"), for the failure prose; the `describe` the request helpers take. */
   readonly describe?: string;
-  /**
-   * For a server-assigned value (a created environment's node id) a later operation's thunk reads from
-   * where the hook stores it. It must not render; its failure fails the operation.
-   */
+
+  /** Stores a server-assigned value (a created environment's node id) where a later operation's thunk reads it; it renders nothing, and its failure fails the operation. */
   readonly capture?: (response: unknown) => Result<void, SectionFailure>;
-  /**
-   * Execution-time reads before the request is sealed and issued (bypass actors' node ids, pinned ahead
-   * of the first write so a bad input fails while live state is untouched). Its failure fails the
-   * operation with its request never sent.
-   */
+
+  /** Execution-time reads ahead of the request (bypass actors' node ids, pinned before the first write so a bad input fails with live state untouched); its failure fails the operation with the request never sent. */
   readonly before?: Late<void>;
 }
 
@@ -537,7 +548,8 @@ type PlannedRestOp<E extends EndpointDict, R extends WriteRole<E>> = PlannedOpBa
 /**
  * A planned GraphQL mutation under one specific role of a literal dictionary. Always
  * drift-bearing: alwaysRewrite is a REST endpoint declaration and no GraphQL mutation writes
- * a value it cannot read back, so none is unconditional by contract.
+ * a value it cannot read back, so none is unconditional by contract. Tolerance is by HTTP status,
+ * which a GraphQL rejection has none of, so `tolerate` is never.
  */
 type PlannedGraphqlOp<G extends GraphqlDict, R extends GraphqlWriteRole<G>> = PlannedOpBase<
   readonly [string, ...string[]]
@@ -547,7 +559,6 @@ type PlannedGraphqlOp<G extends GraphqlDict, R extends GraphqlWriteRole<G>> = Pl
   readonly params?: never;
   readonly query?: never;
   readonly payload?: never;
-  /** Tolerance is by HTTP status, which a GraphQL rejection has none of. */
   readonly tolerate?: never;
 };
 
@@ -709,11 +720,7 @@ function boundReads<E extends EndpointDict, G extends GraphqlDict>(
   return Object.freeze(port) as BoundReads<E, G>;
 }
 
-/**
- * The client each context was minted over. A gate composed at the registry door (owner.ts) reads it
- * to share one probe across the sections of a run; the registry is private, so the port itself
- * stays the only thing a section body can reach.
- */
+/** The client each context was minted over; the owner gate (owner.ts) reads it to share one probe across a run's sections, while the port stays the only thing a section body can reach. */
 const clients = new WeakMap<PlanContext, GitHubClient>();
 
 /** The client a context reads through; a context not minted by planContext() or snapshotContext() is a BUG. */

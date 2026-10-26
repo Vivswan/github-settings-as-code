@@ -27,12 +27,13 @@ export function permissionForRole(role: string): string | undefined {
   return roleForPermission(permission) === role ? permission : undefined;
 }
 
-// Maps, not records: a declared permission named like a prototype member ("constructor") must
-// pass through, not resolve to Object.prototype's.
+/** Maps, not records: a declared permission named like a prototype member ("constructor") must pass through, not resolve to Object.prototype's. */
 export const ROLE_FOR_PERMISSION: ReadonlyMap<string, string> = new Map([
   ["push", "write"],
   ["pull", "read"],
 ]);
+
+/** The GET vocabulary back to the grant's. */
 const PERMISSION_FOR_ROLE: ReadonlyMap<string, string> = new Map(
   [...ROLE_FOR_PERMISSION].map(([permission, role]) => [role, permission]),
 );
@@ -40,20 +41,23 @@ const PERMISSION_FOR_ROLE: ReadonlyMap<string, string> = new Map(
 /** The grant PUT's own vocabulary; anything else it accepts is a custom org role, named exactly as the org spelled it. */
 const STANDARD_PERMISSIONS = ["pull", "triage", "push", "maintain", "admin"] as const;
 
-/**
- * A permission the file alone shows GitHub will not take is refused at parse; a custom org role name passes.
- * The two wrong spellings hide until apply: "write" on an existing Write collaborator converges with zero drift
- * (the live role_name IS "write") while the same entry on a new one PUTs {"permission":"write"} and 422s.
- *
- * One regex, so the published schema carries the same rule as a `pattern`; a pattern has no flags, hence the case classes.
- */
+/** The spellings the custom-role arm refuses in any case: the standard permissions, which pass lowercase alone, and the GET vocabulary (see permissionError). */
 const REFUSED_FOLDED = [...STANDARD_PERMISSIONS, ...PERMISSION_FOR_ROLE.keys()];
+
+/** A case class per letter, since a published-schema `pattern` has no flags. */
 const caseless = (word: string) => [...word].map((c) => `[${c.toUpperCase()}${c}]`).join("");
+
+/** One regex, so the published schema carries the same rule as a `pattern`: a standard permission, or one non-blank line that is no refused spelling. */
 const PERMISSION_PATTERN = new RegExp(
   `^(?:${STANDARD_PERMISSIONS.join("|")}|(?!(?:${REFUSED_FOLDED.map(caseless).join("|")})$)\\S(?:.*\\S)?)$`,
 );
 
-/** Every suggested fix is one the pattern accepts, so a reader never chases a second refusal. */
+/**
+ * The refusal of a permission the file alone shows GitHub will not take; a custom org role name passes. The GET
+ * vocabulary hides until apply: "write" on an existing Write collaborator converges with zero drift (the live
+ * role_name IS "write") while the same entry on a new one PUTs {"permission":"write"} and 422s. Every suggested
+ * fix is one the pattern accepts, so a reader never chases a second refusal.
+ */
 function permissionError(declared: string): string {
   const options = `${STANDARD_PERMISSIONS.map((p) => `"${p}"`).join(", ")}, or a custom org role name`;
   const shown = JSON.stringify(declared);

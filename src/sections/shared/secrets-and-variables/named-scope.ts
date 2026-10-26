@@ -25,10 +25,13 @@ export interface Named {
 export interface ScopeProse {
   /** The drift-line prefix, e.g. "actions_secrets" or "environments[prod].variables". */
   label: string;
+
   /** The noun for notes ("Actions secret"; a nested scope says "prod environment secret"). */
   noun: string;
+
   /** Where the values live when "the repo" understates it ("the environment"). */
   where?: string;
+
   /** Appended to change and describe lines (` in environment "prod"`). */
   suffix?: string;
 }
@@ -78,11 +81,16 @@ export function missingNamedDrift(scope: ScopeProse, name: string): string {
 }
 
 export interface UndeclaredDeletion {
-  /** The live name as the API listed it. */
+  /** The live name as the API listed it; the DELETE path takes it. */
   readonly name: string;
+
   /** What the write is doing, in settings-file terms, for its error prose. */
   readonly describe: string;
+
+  /** The one drift line, as undeclaredDrift words it. */
   readonly drift: readonly [string];
+
+  /** The change line (`DELETED undeclared <what> "NAME"`). */
   readonly change: string;
 }
 
@@ -103,20 +111,19 @@ export function undeclaredRemoval<
 export interface NamedScope<Live extends Named, Remove extends AnyPlannedOp> extends ScopeProse {
   /** The parsed identities of the enveloped list, all pages. */
   readonly list: () => PromiseLike<Result<Live[], SectionFailure>>;
-  /**
-   * The planned DELETE of an undeclared live item; function-valued so a builder demanding an unsupplied
-   * facet fails.
-   */
+
+  /** The planned DELETE of an undeclared live item; function-valued so a builder demanding an unsupplied facet fails. */
   readonly remove: (deletion: UndeclaredDeletion) => Remove;
 }
 
 export interface NamedPlanOpts<Entry extends Named> {
+  /** The declared entries, unwrapped from either form. */
   entries: readonly Entry[];
+
+  /** The policy in force: the wrapper's `_undeclared`, else the default. */
   policy: UndeclaredPolicy;
-  /**
-   * The DEFAULT `policy` was unwrapped against (the section's undeclaredDefault, or environments'
-   * fixed nested default); undeclaredDrift derives its knob clause from it.
-   */
+
+  /** The DEFAULT `policy` was unwrapped against (the section's undeclaredDefault, or environments' fixed nested default); undeclaredDrift derives its knob clause from it. */
   defaultPolicy: UndeclaredPolicy;
 }
 
@@ -124,8 +131,10 @@ export interface NamedPlanOpts<Entry extends Named> {
 export interface UndeclaredWords {
   /** The noun of the change and describe lines (`DELETED undeclared <what> "NAME"`). */
   readonly what: string;
+
   /** The keep-note's apply clause, after "to have apply". */
   readonly noteAction: string;
+
   /** The drift line's apply clause, after "so apply will". */
   readonly driftAction: string;
 }

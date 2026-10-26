@@ -24,41 +24,47 @@ export type HintableStatus = 400 | 412 | 422;
  * test pins every declaration against the e2e mock's denial responses.
  */
 export interface DefinitiveRejection {
+  /** A denial's status (403 or 404); the message is what tells the rejection apart. */
   readonly status: DenialStatus;
+
   /** Compared whole, never as a substring: "Not Found" is a fine-grained denial. */
   readonly message: string;
+
   /** What to fix, as a lowercase clause without a trailing period; failureFor starts a sentence with it. */
   readonly advice: string;
 }
 
 type GetRoute = Extract<Route, `GET ${string}`>;
 
+/** Overrides the section's permission; "none" means public. Resolved by endpointPermission(). */
+type PermissionOverride = SectionPermission | "none";
+
 /**
- * `statuses` keys are the outcomes the handler treats as normal (the e2e mock reads the keys); its 4xx keys
- * other than 401 and 429 are the tolerated errors (toleratedStatuses). The request helpers build paths from
- * these declarations via expand(), so a section can never call a path it has not declared.
+ * A read's phase. Omitted, the read is available to plan(), so check mode and preflight may meet it. "execution"
+ * gates it behind the ExecTools token only a thunk receives (ReadPort in ./plan.ts), so check mode never issues it.
+ *
+ *   e2e mock          -> treats an execution read in check mode as a violation
+ *   denialPosture()   -> rejects a primaryRead on it: no denied first read can be classified from it
+ */
+export type ReadPhase = "execution";
+
+/**
+ * The request helpers build paths from these declarations via expand(), so a section can never call a path it has
+ * not declared.
  */
 export type EndpointDecl =
   | (EndpointDeclFields & {
       readonly route: GetRoute;
-      readonly permission?: SectionPermission | "none";
+      readonly permission?: PermissionOverride;
       readonly accessGrade?: never;
       readonly alwaysRewrite?: never;
       readonly unverifiable?: never;
-      /**
-       * Omitted, the read is available to plan(), so check mode and preflight may meet it. "execution" gates it
-       * behind the ExecTools token only a thunk receives (ReadPort in ./plan.ts), so check mode never issues it.
-       *
-       *   e2e mock          -> treats an execution read in check mode as a violation
-       *   denialPosture()   -> rejects a primaryRead on it: no denied first read can be classified from it
-       */
-      readonly phase?: "execution";
+      readonly phase?: ReadPhase;
     })
   | (EndpointDeclFields &
       Recurrence & {
         readonly route: Exclude<Route, GetRoute>;
-        /** Overrides the section's permission; "none" means public. Resolved by endpointPermission(). */
-        readonly permission?: SectionPermission | "none";
+        readonly permission?: PermissionOverride;
         readonly accessGrade?: never;
         readonly phase?: never;
       })
@@ -84,43 +90,36 @@ export interface GatedReadDecl extends EndpointDeclFields {
   readonly accessGrade: "write";
   readonly alwaysRewrite?: never;
   readonly unverifiable?: never;
-  /** As on a plain GET: "execution" gates the read behind a thunk's token (the Codespaces sealing key). */
-  readonly phase?: "execution";
+  readonly phase?: ReadPhase;
 }
 
+/**
+ * The fields every arm of EndpointDecl shares. `primaryRead` marks the section's one primary read and what a
+ * fine-grained 404 on it means; the read port (ReadPort in ./plan.ts) and denialPosture() read it.
+ *
+ *   notFound: "denied"  -> a permission-denied failure that stops the section (an advisory read exposes only tryCall, which returns it as { error })
+ *   notFound: "absent"  -> a missing resource; the section proceeds
+ */
 interface EndpointDeclFields {
+  /** Keyed by the outcomes the handler treats as normal (the e2e mock reads the keys); the 4xx keys other than 401 and 429 are the tolerated errors (toleratedStatuses). */
   readonly statuses: Readonly<Record<number, string>>;
-  /**
-   * By default an advisory READ's failures come back as { error } instead of aborting the section; a rate
-   * limit still throws, and an explicit `tolerate` narrows the set (declaredTolerance). The e2e mock
-   * derives its advisory-read exemption from this flag via allEndpoints().
-   */
+
+  /** A read whose failures come back as { error } instead of ending the section (a rate limit still throws; declaredTolerance narrows); the e2e mock's denial barrier exempts it. */
   readonly advisory?: boolean;
-  /**
-   * Payloads pass through verbatim, so a hint names the failure CLASS and points at the docs, never valid
-   * values that could go stale; failureFor appends it to the status's rejection message. Style: one or two sentences, no trailing period.
-   */
+
+  /** Appended by failureFor to a rejection's message; since payloads pass through verbatim, a hint names the failure CLASS and points at the docs, never values that could go stale (no trailing period). */
   readonly hints?: Readonly<Partial<Record<HintableStatus, string>>>;
-  /**
-   * Appended to the permission-denied failure's message (which never reads `hints`) when a 403/404 can mean
-   * something other than a missing grant (Git LFS disabled account-wide) and the body does not tell
-   * the readings apart; a body that does is a `rejections` entry. One sentence, no trailing period.
-   */
+
+  /** Appended to a denial's message when its 403/404 can mean more than a missing grant (Git LFS disabled account-wide); a body that tells the readings apart is a `rejections` entry instead (no trailing period). */
   readonly denialHint?: string;
+
   /** The endpoint's definitive rejections (see DefinitiveRejection); the e2e mock serves the same declarations. */
   readonly rejections?: readonly DefinitiveRejection[];
-  /**
-   * When GitHub caps per_page below the standard 100 (the Actions variables list: 30). The page loop
-   * requests exactly this many and treats a shorter page as the last, so a request GitHub would silently
-   * clamp cannot truncate the walk after page one.
-   */
+
+  /** GitHub's per_page cap where it is below 100 (the Actions variables list: 30); the page loop asks for exactly this many, so a silently clamped request cannot truncate the walk after page one. */
   readonly pageSize?: number;
-  /**
-   * The section's PRIMARY READ and what a fine-grained 404 on it means: "denied" classifies as
-   * a permission-denied failure and stops the section (an advisory read only exposes tryCall, which returns it as
-   * { error }), "absent" reads as a missing resource and proceeds. At most one per section; the read port
-   * (ReadPort in ./plan.ts) and denialPosture() read it.
-   */
+
+  /** The section's one primary read, with what its fine-grained 404 means (the rows above). */
   readonly primaryRead?: { readonly notFound: "denied" | "absent" };
 }
 

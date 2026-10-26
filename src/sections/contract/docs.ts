@@ -14,10 +14,7 @@ const Role = z.string().regex(/^[A-Za-z][A-Za-z0-9]*$/, "a role is the declarati
 /** One fact, rendered as one bullet on the coverage page; a line break would end the bullet early. */
 const Fact = z.string().regex(/^\S(?:[^\r\n]*\S)?$/, "a fact is one non-blank line");
 
-/**
- * One row of the coverage page's Supported table: the GitHub surface it covers, the calls that serve it, and
- * the facts a reader needs about how the section handles it.
- */
+/** One row of the coverage page's Supported table: the GitHub surface, the calls serving it, and the facts about how the section handles it. */
 const CoverageRow = z
   .strictObject({
     /** The Area cell: the GitHub feature as a docs link, and nothing else (the fields it spans are facts). */
@@ -33,14 +30,13 @@ const CoverageRow = z
     notes: z.tuple([Fact], Fact).readonly(),
   })
   .readonly();
+
 export type CoverageRow = z.infer<typeof CoverageRow>;
 
-/**
- * Keyed as .github/scripts/lib/schema-descriptions.ts spells a site (`LabelConfig.color`,
- * `SettingsFile.labels`, `UndeclaredPolicyList<*>.entries`).
- */
+/** Keyed as .github/scripts/lib/schema-descriptions.ts spells a site (`LabelConfig.color`, `SettingsFile.labels`, `UndeclaredPolicyList<*>.entries`). */
 const SchemaDescriptions = z.record(z.string().min(1), z.string().min(1)).readonly();
 
+/** The shape of one section's docs/sections/<key>.docs.yml. */
 export const SectionDocs = z
   .strictObject({
     /** The section's two authored cells in the Sections table on docs/reference/sections.md. */
@@ -58,6 +54,7 @@ export const SectionDocs = z
     schema: SchemaDescriptions,
   })
   .readonly();
+
 export type SectionDocs = z.infer<typeof SectionDocs>;
 
 /** A docs file carrying schema descriptions only: the shared factories' and the document root's. */

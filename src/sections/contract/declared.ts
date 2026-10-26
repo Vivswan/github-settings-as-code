@@ -135,7 +135,6 @@ export function duplicateFieldIssues<F extends string, E extends Record<F, strin
   declared: readonly E[] | UndeclaredPolicyList<E>,
   identity: {
     readonly field: F;
-    /** Folds the field to the key GitHub matches it by; omitted, GitHub matches exactly. */
     readonly fold?: (name: string) => string;
   },
   what: string,

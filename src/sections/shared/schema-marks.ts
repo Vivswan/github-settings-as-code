@@ -16,13 +16,13 @@ export interface Knob {
   readonly wrapper: z.ZodObject;
 }
 
-/**
- * Keyed by the minted wrapper, not the union: a union's clones (.meta(), .describe(), .check()) keep its options by
- * reference, so the pair resolves through them. A WeakMap, not z.registry: the registry's metadata type is mapped
- * through zod's `$replace`, which recurses into a schema held as a value until tsc gives up (TS2589).
- */
+/** A WeakMap, not z.registry: the registry's metadata type is mapped through zod's `$replace`, which recurses into a schema held as a value until tsc gives up (TS2589). */
 const KNOBS = new WeakMap<z.core.$ZodType, Knob>();
 
+/**
+ * Keyed by the minted wrapper, not the union: a union's clones (.meta(), .describe(), .check()) keep its options by
+ * reference, so knobOf() resolves the pair through them.
+ */
 export function markKnob(knob: Knob): void {
   KNOBS.set(knob.wrapper, knob);
 }

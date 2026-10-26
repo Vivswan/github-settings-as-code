@@ -33,6 +33,7 @@ export interface SecretEntry {
 
 /** One live secret's identity, the item schema every family's list reads with. */
 export const LiveSecretName = z.looseObject({ name: z.string() });
+
 export type LiveSecretName = z.infer<typeof LiveSecretName>;
 
 /** The sealed PUT body; an alias (not an interface) so it is JSON-plain to the plan contract. */
@@ -48,28 +49,32 @@ export type SealedSecretPayload = {
 interface SealedSecretWrite {
   /** The secret's uppercase name - the write path's {secret_name}. */
   readonly name: string;
+
   /** What the write is doing, in settings-file terms, for its error prose. */
   readonly describe: string;
+
   /** Reads the scope's sealing key (once per plan) and seals the resolved plaintext, at execution time. */
   readonly payload: (exec: ExecTools) => Promise<Result<SealedSecretPayload, SectionFailure>>;
+
   /** The missing-secret line, or empty when the name exists (the PUT recurs by declaration). */
   readonly drift: readonly string[];
+
+  /** The change line; its verb follows the listing, since the executor does not surface the PUT's 201/204. */
   readonly change: string;
 }
 
 /** `Put`/`Remove` are the section's exact PlannedOp arms, so a wrong role or params fails to compile. */
 export interface SecretsPlanScope<Put extends AnyPlannedOp, Remove extends AnyPlannedOp>
   extends NamedScope<LiveSecretName, Remove> {
-  /**
-   * GET the {key_id, key} sealing key for this scope, at EXECUTION time: an environment's key exists
-   * only once the PUT that creates the environment has landed, so the read rides the first PUT's thunk.
-   */
+  /** GET the {key_id, key} sealing key for this scope at EXECUTION time: an environment's key exists only once the PUT creating the environment has landed, so the read rides the first PUT's thunk. */
   readonly publicKey: (
     exec: ExecTools,
     describe: string,
   ) => PromiseLike<Result<unknown, SectionFailure>>;
+
   /** The declaration behind `publicKey`, named in the prose of a key the endpoint cannot supply. */
   readonly publicKeyEndpoint: EndpointDecl;
+
   /** The planned sealed PUT; function-valued so a builder demanding an unsupplied facet fails. */
   readonly put: (write: SealedSecretWrite) => Put;
 }
@@ -101,8 +106,23 @@ export function listSecretValues(
 
 export interface SealingKey {
   readonly keyId: string;
+
   /** Seal one ALREADY-RESOLVED plaintext into the {encrypted_value, key_id} PUT body. */
   seal(plaintext: string): SealedSecretPayload;
+}
+
+/** Why a sealing-key field is unusable, or null for a non-empty string. */
+function fieldDefect(label: string, value: unknown): string | null {
+  if (value === undefined) {
+    return `${label} is missing`;
+  }
+  if (typeof value !== "string") {
+    return `${label} is not a string`;
+  }
+  if (value === "") {
+    return `${label} is empty`;
+  }
+  return null;
 }
 
 /**
@@ -133,14 +153,6 @@ export function parseSealingKey(
     typeof publicKey !== "string" ||
     publicKey === ""
   ) {
-    const fieldDefect = (label: string, value: unknown): string | null =>
-      value === undefined
-        ? `${label} is missing`
-        : typeof value !== "string"
-          ? `${label} is not a string`
-          : value === ""
-            ? `${label} is empty`
-            : null;
     const defect = fieldDefect("key_id", keyId) ?? fieldDefect("key", publicKey);
     return unusable(`no usable {key_id, key} pair (${defect})`);
   }

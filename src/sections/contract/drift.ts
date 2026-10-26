@@ -20,8 +20,10 @@ export function cannotVerifyNote(
   opts: {
     /** Why GitHub cannot show the value ("GitHub never reveals a webhook secret"). */
     why: string;
+
     /** What stays unverified ("the declared value", "them"). */
     what: string;
+
     /** Apply's every-run verb phrase ("re-sends it", "re-asserts the declared preferences"). */
     reasserts: string;
   },
@@ -54,12 +56,16 @@ export function undeclaredPolicy<E>(
 export function undeclaredNote(opts: {
   /** The subject naming the live resource: `label "stale"`, `autolink JIRA-`. */
   subject: string;
+
   /** How the resource presents; the common case is the default. */
   state?: string;
+
   /** The pronoun for "add ... to the settings file" ("it" unless plural). */
   add?: string;
+
   /** What adding it would manage ("it", or "their access" for people). */
   manage?: string;
+
   /** What `_undeclared: delete` would make apply do, with any consequence. */
   action: string;
 }): string {
@@ -80,6 +86,7 @@ export function valueDrift(
   opts: {
     /** Qualifies the live value, in parentheses: a raw state behind the compared one, why order counts. */
     qualifier?: string;
+
     /** The apply clause; null when a generic line beside it already names the remedy (a recreate's field lines). */
     remedy?: string | null;
   } = {},
@@ -100,12 +107,16 @@ export function undeclaredDrift(
   opts: {
     /** The drift-line prefix with the natural key: `labels[stale]`. */
     label: string;
+
     /** What apply will do, with any consequence worth naming. */
     action: string;
+
     /** When "not in the settings file" understates it (a PENDING INVITATION rather than a collaborator); the knob clause follows it. */
     state?: string;
+
     /** The pronoun for "add ... to the settings file" ("it" unless plural). */
     add?: string;
+
     /** What adding it would keep ("it", or "their access" for people). */
     keep?: string;
   },

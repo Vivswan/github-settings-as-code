@@ -30,7 +30,6 @@ import type { PlanContext, PlannedOp, SectionPlan, SnapshotContext } from "./pla
 
 interface SectionContextBase {
   api: GitHubClient;
-  /** The target repository, parsed once at the boundary (see RepoRef). */
   repo: RepoRef;
 }
 
@@ -46,10 +45,7 @@ export type EndpointDict = Readonly<Record<string, EndpointDecl>>;
 
 export type GraphqlDict = Readonly<Record<string, GraphqlOpDecl>>;
 
-/**
- * GET /orgs/{org} is public, so no token permission; its 404 is the personal-account signal. A section whose
- * other reads can never be denied marks it the primary read (`primaryRead: { notFound: "absent" }`).
- */
+/** GET /orgs/{org} is public, so no token permission, and its 404 is the personal-account signal; a section with no deniable read marks it the primary read (`primaryRead: { notFound: "absent" }`). */
 export const ORG_PROBE = {
   route: "GET /orgs/{org}",
   statuses: { 200: "the organization", 404: "not an organization (a personal account)" },
@@ -59,71 +55,63 @@ export const ORG_PROBE = {
 /**
  * `E` and `G` must be the module's LITERAL (`as const`) dictionaries: ../registry.ts derives the
  * `${key}.${role}` unions from them, and the e2e mock's handler tables are typed by those unions.
+ *
+ * `undeclaredDefault` is what the section does with the live resources the file omits; the wrapped
+ * `{_undeclared, entries}` form overrides it per run, and the conditional type pins "untouched" to a section
+ * outside UNDECLARED_POLICY_SECTIONS:
+ *
+ *   "delete"     -> lists live resources and DELETES undeclared ones; `_undeclared: keep` softens to notes
+ *   "keep"       -> lists live resources and KEEPS undeclared ones as notes; `_undeclared: delete` hardens
+ *   "untouched"  -> takes no `_undeclared` knob; the section applies no undeclared policy
  */
 export interface SectionMeta<
   K extends SectionKey = SectionKey,
   E extends EndpointDict = EndpointDict,
   G extends GraphqlDict = GraphqlDict,
 > {
+  /** The document key the section owns; PlanContext brands a plan() call by it (./plan.ts). */
   readonly key: K;
+
   /** Drives the grant prose (sectionGrant), the e2e mock's permission gate, and the fuzz oracle. */
   readonly permission: SectionPermission;
+
   /** Appended to the derived grant advice when a denial can mean more than a missing grant (an ambiguous 403). */
   readonly grantCaveat?: string;
-  /**
-   * "org": the resources exist only under an ORGANIZATION owner. The registry wraps the module's plan() and
-   * snapshot() in the owner gate (./owner.ts), which probes the `org` role (ORG_PROBE, 404 tolerated) and
-   * no-ops with a note on a personal account, so no section body spells the probe; the registry's lockstep
-   * type admits the flag only beside that role. The single source of owner-kind modeling: the fuzz oracle's
-   * personal-account fold reads it, and test/sections/registry.test.ts pins it to the probe endpoint.
-   */
+
+  /** "org": the resources exist only under an organization owner, so the registry wraps plan() and snapshot() in the owner gate (./owner.ts); the fuzz oracle's personal-account fold reads it too. */
   readonly ownerSensitivity?: "org";
+
   /** Every REST endpoint the section may call, by role; the e2e mock's routes and USED_PATHS derive from it. */
   readonly endpoints: E;
-  /**
-   * Every GraphQL operation the section may issue, by role; the e2e mock, the coverage tripwire, and the
-   * fuzz generators iterate allGraphqlOps().
-   */
+
+  /** Every GraphQL operation the section may issue, by role; the e2e mock, the coverage tripwire, and the fuzz generators iterate allGraphqlOps(). */
   readonly graphql?: G;
-  /**
-   * The generated Sections table's Undeclared-default column derives from it, and test/sections/docs-registry.test.ts
-   * fails a coverage note that contradicts it; the wrapped `{_undeclared, entries}` form overrides it per run.
-   *
-   *   "delete"     -> lists live resources and DELETES undeclared ones; `_undeclared: keep` softens to notes
-   *   "keep"       -> lists live resources and KEEPS undeclared ones as notes; `_undeclared: delete` hardens
-   *   "untouched"  -> takes no `_undeclared` knob; the section applies no undeclared policy
-   *
-   * The conditional type pins the pairing: a section in UNDECLARED_POLICY_SECTIONS says "delete" or "keep", one outside it "untouched".
-   */
+
+  /** The undeclared policy (the rows above); the generated Sections table's Undeclared-default column derives from it, and test/sections/docs-registry.test.ts fails a coverage note that contradicts it. */
   readonly undeclaredDefault: K extends UndeclaredPolicySection ? UndeclaredPolicy : "untouched";
-  /**
-   * Read by engine/layers.ts for the layered merge. Optional on the interface for the sections that take no
-   * list; ../registry.ts requires it of every list section, so a list module omitting it fails to compile.
-   */
+
+  /** Read by engine/layers.ts for the layered merge; optional here for the sections that take no list, while ../registry.ts requires it of every list section. */
   readonly layering?: K extends ListSection ? KeyedListLayering : never;
 }
 
+/**
+ * The handlers beside the declarations. `closedSurface` is declared only by CLOSED sections, whose API calls never
+ * forward extra entry keys (collaborators, teams, workflows), so an unrecognized key would apply "successfully" and
+ * never converge; an open passthrough section must NOT declare it, since its extra keys reach GitHub.
+ *
+ *   `known` mapped over EVERY entry key          -> a new schema field forces a decision here; a phantom key is an excess property
+ *   EntryOf sees through the wrapped form        -> a closed section that also takes the knob (collaborators) stays closed in both forms
+ *   validateSectionShapes (engine/validate.ts)   -> rejects before any section writes
+ */
 interface SectionModuleBase<
   K extends SectionKey = SectionKey,
   E extends EndpointDict = EndpointDict,
   G extends GraphqlDict = GraphqlDict,
 > extends SectionMeta<K, E, G> {
-  /**
-   * Declared fields are checked and unknown fields pass through, so validation does not fight
-   * passthrough-first forward compatibility. STRICT nested sub-shapes are sanctioned only where the
-   * endpoint offers no passthrough destination (actions.cache, the environment secrets and
-   * deployment_protection_rules entries), where an extra key can only be a typo.
-   */
+  /** Checks the declared fields and passes unknown ones through (forward compatibility); a STRICT nested shape is sanctioned only where the endpoint has no passthrough destination (actions.cache), where an extra key can only be a typo. */
   shape: z.ZodType;
-  /**
-   * Declared only by CLOSED sections, whose API calls never forward extra entry keys (collaborators, teams,
-   * workflows), so an unrecognized key would apply "successfully" and never converge; open passthrough
-   * sections must NOT declare it, since their extra keys reach GitHub.
-   *
-   *   `known` mapped over EVERY entry key          -> a new schema field forces a decision here; a phantom key is an excess property
-   *   EntryOf sees through the wrapped form        -> a closed section that also takes the knob (collaborators) stays closed in both forms
-   *   validateSectionShapes (engine/validate.ts)   -> rejects before any section writes
-   */
+
+  /** The closed section's known entry keys and the consequence of a stray one (the rows above). */
   closedSurface?: [EntryOf<NonNullable<SettingsFile[K]>>] extends [never]
     ? never
     : {
@@ -131,9 +119,11 @@ interface SectionModuleBase<
         known: {
           readonly [P in Extract<keyof EntryOf<NonNullable<SettingsFile[K]>>, string>]: true;
         };
+
         /** What the unrecognized key would silently do, as message prose. */
         consequence: string;
       };
+
   /**
    * Declared only by sections with designated secret fields (every webhooks entry's config.secret); the
    * values are returned raw, and nothing here reads the environment.
@@ -196,6 +186,7 @@ export type SectionModule<
       ctx: PlanContext<E, G, K>,
       desired: ValidatedInput<K>,
     ): Promise<Result<SectionPlan<PlannedOp<E, G>>, SectionFailure>>;
+
     /** Pinned so a non-literal object carrying a run() handler is not assignable either. */
     run?: never;
   };
