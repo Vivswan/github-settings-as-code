@@ -1,7 +1,7 @@
 /**
  * The seal's symbol and the one capability that opens it, kept apart from the
  * brand so biome's noRestrictedImports can confine this module's importers to
- * the brand itself and the projections (biome.json overrides, test/private.test.ts).
+ * the brand itself and the projections (biome.local.jsonc overrides, test/private.test.ts).
  */
 
 import type { Private } from "./private.js";

@@ -1,6 +1,6 @@
 // Every refinement under src/ is authored through rule() (src/sections/shared/schema-helpers.ts): zod skips a bare
 // .refine() or .superRefine() once a nested value failed, so a section's own rule would go silent exactly when the
-// document has a second mistake. Reach and the one exemption are the plugin's `overrides` entry in biome.json (see
+// document has a second mistake. Reach and the one exemption are the plugin's `overrides` entry in biome.local.jsonc (see
 // never-throw.grit for why):
 //   src/sections/shared/schema-helpers.ts  -> rule() itself is the one superRefine
 

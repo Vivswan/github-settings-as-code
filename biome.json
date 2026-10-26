@@ -1,122 +1,33 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
-  "vcs": {
-    "enabled": true,
-    "clientKind": "git",
-    "useIgnoreFile": true
-  },
-  "files": {
-    "includes": ["**", "!lib", "!.github/repo-platform-manifest.json"]
-  },
-  "formatter": {
-    "enabled": true,
-    "includes": ["**", "!src/generated/upstream-gaps.ts"],
-    "indentStyle": "space",
-    "indentWidth": 2,
-    "lineWidth": 100
-  },
+  "$schema": "https://biomejs.dev/schemas/2.5.11/schema.json",
+  "extends": ["./biome.local.jsonc"],
   "linter": {
     "enabled": true,
     "rules": {
-      "preset": "recommended",
-      "correctness": {
-        "noUnusedImports": "error",
-        "noUnusedVariables": "error"
+      "complexity": {
+        "noExcessiveCognitiveComplexity": {
+          "level": "error",
+          "options": { "maxAllowedComplexity": 15 }
+        },
+        "noExcessiveLinesPerFunction": { "level": "error", "options": { "maxLines": 80 } },
+        "useMaxParams": { "level": "error", "options": { "max": 6 } }
       },
       "style": {
-        "noNonNullAssertion": "error",
-        "noRestrictedImports": {
-          "level": "error",
-          "options": {
-            "paths": {
-              "@actions/core": "Only src/action/ implements the Io port over @actions/core; every other layer takes an Io."
-            },
-            "patterns": [
-              {
-                "group": ["**/private-open", "**/private-open.*"],
-                "message": "Only the redaction projections may open a Private<T> seal; render through publicDetail/toPublicView, or compose the private report."
-              }
-            ]
-          }
-        }
-      }
-    }
-  },
-  "javascript": {
-    "formatter": {
-      "quoteStyle": "double"
+        "noNestedTernary": "error",
+        "noUselessElse": "error",
+        "noNegationElse": "error",
+        "noParameterAssign": "error"
+      },
+      "suspicious": { "noAssignInExpressions": "error", "noUnusedExpressions": "error" },
+      "performance": { "noBarrelFile": "error", "noReExportAll": "error" },
+      "correctness": { "noInvalidUseBeforeDeclaration": "error" }
     }
   },
   "overrides": [
     {
-      "includes": ["src/generated/upstream-gaps.ts"],
-      "assist": {
-        "actions": {
-          "source": {
-            "organizeImports": "off"
-          }
-        }
-      }
-    },
-    {
-      "includes": ["src/**"],
-      "plugins": ["./lint/never-throw.grit"]
-    },
-    {
-      "includes": ["src/**", "!src/sections/shared/schema-helpers.ts"],
-      "plugins": ["./lint/rule-gate.grit"]
-    },
-    {
-      "includes": ["src/action/**"],
-      "linter": {
-        "rules": {
-          "style": {
-            "noRestrictedImports": {
-              "level": "error",
-              "options": {
-                "patterns": [
-                  {
-                    "group": ["**/private-open", "**/private-open.*"],
-                    "message": "Only the redaction projections may open a Private<T> seal; render through publicDetail/toPublicView, or compose the private report."
-                  }
-                ]
-              }
-            }
-          }
-        }
-      }
-    },
-    {
-      "includes": ["src/flows/redact.ts"],
-      "linter": {
-        "rules": {
-          "style": {
-            "noRestrictedImports": "off"
-          }
-        }
-      }
-    },
-    {
-      "includes": [
-        "src/private.ts",
-        "src/discovery/discover.ts",
-        "src/report/delivery.ts",
-        "test/private.test.ts"
-      ],
-      "linter": {
-        "rules": {
-          "style": {
-            "noRestrictedImports": {
-              "level": "error",
-              "options": {
-                "paths": {
-                  "@actions/core": "Only src/action/ implements the Io port over @actions/core; every other layer takes an Io."
-                }
-              }
-            }
-          }
-        }
-      }
+      "includes": ["biome.json", ".github/repo-platform-manifest.json"],
+      "formatter": { "enabled": false },
+      "assist": { "enabled": false }
     }
   ]
 }

@@ -1,5 +1,5 @@
 /**
- * The rule-gate plugin's verdict on each refinement form, and its biome.json wiring, pinned by linting a fixture tree
+ * The rule-gate plugin's verdict on each refinement form, and its biome.local.jsonc wiring, pinned by linting a fixture tree
  * with the repository's own configuration; a snippet that silently stopped matching would let a bare refinement
  * ship, and zod would skip it once a nested value failed.
  */
