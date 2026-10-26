@@ -24,20 +24,13 @@ import { SCHEMA_ID } from "./lib/schema-id.js";
 /** This script lives at .github/scripts/, two levels below the repository root. */
 const REPO_ROOT = join(import.meta.dir, "..", "..");
 
+/** The name the consumer imports, as package.json publishes it. */
 const PACKAGE = "@vivswan/github-settings-as-code";
 
-/**
- * The node that runs the consumer. The build tooling (tsdown) needs a newer
- * node than the engines floor package.json advertises, so CI builds on the
- * PATH node and names the floor's binary here for the consumer alone.
- */
+/** The consumer's node: tsdown needs a newer node than the engines floor package.json advertises, so CI builds on the PATH node and names the floor's binary here for the consumer alone. */
 const CONSUMER_NODE = process.env.SMOKE_CONSUMER_NODE ?? "node";
 
-/**
- * The consumer's runtime import. The section list and the schema id are
- * pinned from this checkout's source, so the tarball's bundle must expose
- * exactly what src/ declares, not merely something.
- */
+/** The consumer's runtime import; the section list and the schema id are pinned from this checkout's source, so the tarball's bundle must expose exactly what src/ declares. */
 const NODE_CONSUMER = `import { deepStrictEqual } from "node:assert/strict";
 import { SECTION_KEYS, validateSettings } from "${PACKAGE}";
 import { INPUT_DECLS } from "${PACKAGE}/internal";
@@ -51,11 +44,7 @@ deepStrictEqual(INPUT_DECLS["on-missing-permission"].default, "fail");
 console.log("imported " + SECTION_KEYS.length + " section keys, the internal entry, and the schema");
 `;
 
-/**
- * The consumer compiled against index.d.ts and internal.d.ts, no client behind it. The expect-error lines are the
- * controls that the bundle keeps DenialPolicy nominal (the literal is its public shape, so only the
- * private member rejects it) and keeps the context branded with its section's key.
- */
+/** Compiled against index.d.ts and internal.d.ts with no client behind it; the expect-error lines are the controls that the bundle keeps DenialPolicy nominal (only its private member rejects the literal) and the context branded with its section's key. */
 const TS_CONSUMER = `import {
   type GitHubClient,
   planContext,

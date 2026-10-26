@@ -23,7 +23,10 @@ export const ARCHITECTURE_PATH = "architecture.yml";
 export interface Architecture {
   /** layer -> the src/ paths it owns (a `/` suffix means a directory). */
   readonly layers: Readonly<Record<string, readonly string[]>>;
+
+  /** Glob patterns of the src/ files outside the lint. */
   readonly exclude: readonly string[];
+
   /** from -> the layers it may import. */
   readonly edges: Readonly<Record<string, readonly string[]>>;
 }
@@ -38,13 +41,16 @@ const ARCHITECTURE = z.strictObject({
 /** `layers.engine[0]`, `edges["plain-data"]`: the yaml key as a reader would write it in code. */
 function keyPath(path: readonly PropertyKey[]): string {
   return path
-    .map((segment, index) =>
-      typeof segment === "number"
-        ? `[${segment}]`
-        : /^[A-Za-z_]\w*$/.test(String(segment))
-          ? `${index === 0 ? "" : "."}${String(segment)}`
-          : `[${JSON.stringify(String(segment))}]`,
-    )
+    .map((segment, index) => {
+      if (typeof segment === "number") {
+        return `[${segment}]`;
+      }
+      const name = String(segment);
+      if (/^[A-Za-z_]\w*$/.test(name)) {
+        return index === 0 ? name : `.${name}`;
+      }
+      return `[${JSON.stringify(name)}]`;
+    })
     .join("");
 }
 
@@ -179,17 +185,21 @@ function isModuleLoad(node: Node): boolean {
   }
 }
 
+/** The expression naming the module a load reads: `require`'s first argument, else the node's source. */
+function requestExpression(node: Node): Node | null | undefined {
+  if (node.type === "TSExternalModuleReference") {
+    return node.expression;
+  }
+  if (node.type === "CallExpression") {
+    return node.arguments[0];
+  }
+  return "source" in node ? node.source : undefined;
+}
+
 /** The module a load names, or undefined when the specifier is computed (`import(x)`, `require(x)`, a template
  * with expressions), which the graph cannot follow. */
 function literalModuleRequest(node: Node): string | undefined {
-  const raw =
-    node.type === "TSExternalModuleReference"
-      ? node.expression
-      : node.type === "CallExpression"
-        ? node.arguments[0]
-        : "source" in node
-          ? node.source
-          : undefined;
+  const raw = requestExpression(node);
   const request = raw === undefined || raw === null ? undefined : unwrapped(raw);
   if (request?.type === "Literal" && typeof request.value === "string") {
     return request.value;
@@ -255,7 +265,11 @@ function* sourceFiles(root: string, arch: Architecture): Generator<string> {
   }
 }
 
-export function lintArchitecture(root: string, arch = readArchitecture(root)): string[] {
+/** The cross-layer edges src/ draws, keyed `from -> to` with the imports drawing each, and the files no layer owns. */
+function drawnEdges(
+  root: string,
+  arch: Architecture,
+): { drawn: Map<string, string[]>; problems: string[] } {
   const drawn = new Map<string, string[]>();
   const problems: string[] = [];
   for (const file of sourceFiles(root, arch)) {
@@ -272,12 +286,20 @@ export function lintArchitecture(root: string, arch = readArchitecture(root)): s
         problems.push(
           `${target} (imported by ${file}) belongs to no layer in ${ARCHITECTURE_PATH}`,
         );
-      } else if (to !== from) {
-        const key = `${from} -> ${to}`;
-        drawn.set(key, [...(drawn.get(key) ?? []), `${file} -> ${target}`]);
+        continue;
       }
+      if (to === from) {
+        continue;
+      }
+      const key = `${from} -> ${to}`;
+      drawn.set(key, [...(drawn.get(key) ?? []), `${file} -> ${target}`]);
     }
   }
+  return { drawn, problems };
+}
+
+export function lintArchitecture(root: string, arch = readArchitecture(root)): string[] {
+  const { drawn, problems } = drawnEdges(root, arch);
   const declared = new Set(
     Object.entries(arch.edges).flatMap(([from, targets]) =>
       targets.map((to) => `${from} -> ${to}`),

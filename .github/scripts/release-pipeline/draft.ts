@@ -6,9 +6,9 @@
 import { capture } from "../lib/workflow-step.js";
 import { FULL_SHA } from "./git.js";
 
-/** What each subcommand writes to GITHUB_OUTPUT: the release hook's later steps and jobs read the resolved merge
- * commit from it, and test/workflows/post-green-workflow.test.ts judges those reads against this table. */
+/** What each subcommand writes to GITHUB_OUTPUT; test/workflows/post-green-workflow.test.ts judges the release hook's later reads of the resolved merge commit against this table. */
 export const STEP_OUTPUTS = { "resolve-source": ["sha"] } as const;
+
 /** What the package job uploads to the draft; the managed publish stage attaches attestation.json after the check. */
 export const RELEASE_ASSETS = ["index.js", "settings.schema.json"];
 

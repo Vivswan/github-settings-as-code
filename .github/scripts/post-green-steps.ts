@@ -11,13 +11,10 @@ import { randomBytes } from "node:crypto";
 import { dispatch, type Handler } from "./lib/entry.js";
 import { attempt, requireEnv, setOutput } from "./lib/workflow-step.js";
 
-/** What each subcommand writes to GITHUB_OUTPUT; test/workflows/post-green-workflow.test.ts judges the job's wiring
- * from it, as it does from the shell steps' echo lines. */
+/** What each subcommand writes to GITHUB_OUTPUT; test/workflows/post-green-workflow.test.ts judges the job's wiring from it, as from the shell steps' echo lines. */
 export const STEP_OUTPUTS = { probe: ["proceed"] } as const;
 
-/** A dry-run push asks origin for its receive-pack advertisement over the channel the real push uses, which a token
- * without write access is refused; nothing is created. The target is a ref that never exists, so the dry run judges
- * the token alone: against an existing tag git would refuse the non-fast-forward locally whatever the token. */
+/** Refused for a token without write access and creates nothing, against a ref that never exists, so git cannot refuse a non-fast-forward locally whatever the token. */
 const DRY_RUN_PUSH = [
   "git",
   "push",

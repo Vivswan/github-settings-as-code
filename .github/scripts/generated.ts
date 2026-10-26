@@ -1,6 +1,10 @@
 /**
  * The one table of committed generated output, derived from the generators' own registries, and the drift check
  * behind `bun run build:check`: every generator script runs, then every registered path must be tracked and unchanged.
+ *
+ * The table is in dependency order, each artifact before its readers, or a new gap file would leave a run stale:
+ *   the descriptor-derived files -> imported through src/ by everything below
+ *   the gaps index               -> imported through src/ by the docs and action.yml generators
  */
 
 import { join } from "node:path";
@@ -16,8 +20,10 @@ const ROOT = join(import.meta.dir, "..", "..");
 export interface GeneratedOutput {
   /** The committed output, repo-relative. */
   readonly path: string;
+
   /** The package.json script that writes it; `bun run <generator>` regenerates it in place. */
   readonly generator: string;
+
   /** Marker-delimited regions inside an authored file (lib/generated-regions.ts), or the whole file. */
   readonly kind: "regions" | "file";
 }
@@ -26,12 +32,7 @@ function regions(generator: string, paths: readonly string[]): GeneratedOutput[]
   return paths.map((path) => ({ path, generator, kind: "regions" }));
 }
 
-/**
- * A page two generators write into (docs/reference/inputs.md) has one row per generator. Rows stay in dependency
- * order, each artifact before its readers, or a new gap file would leave a run stale.
- *   the descriptor-derived files -> imported through src/ by everything below
- *   the gaps index               -> imported through src/ by the docs and action.yml generators
- */
+/** In the module doc's dependency order; a page two generators write into (docs/reference/inputs.md) has one row per generator. */
 export const GENERATED_OUTPUTS: readonly GeneratedOutput[] = [
   ...OPENAPI_OUTPUTS.map(
     ({ path }): GeneratedOutput => ({ path, generator: "build:openapi", kind: "file" }),

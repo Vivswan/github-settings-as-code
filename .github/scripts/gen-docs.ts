@@ -32,11 +32,13 @@ import {
 } from "./lib/generated-regions.js";
 import { type GeneratedFile, type GeneratedFiles, regenerateFiles } from "./lib/region-driver.js";
 
+/** The repository root, two levels above this script. */
 const ROOT = join(import.meta.dir, "..", "..");
 
 /** The repository these pages document; the token form's name and description derive from it. */
 const REPO_SLUG = "Vivswan/github-settings-as-code";
 
+/** The Undeclared default cell by policy; sectionsRow() recognizes a row of the table by it. */
 const UNDECLARED_DEFAULT_DISPLAY: Record<UndeclaredPolicy | "untouched", string> = {
   delete: "deleted (settable)",
   keep: "kept (settable)",
@@ -188,13 +190,13 @@ const OUT_OF_SCOPE_HEADING = "## Out of scope (user or org account surface)";
 const SUPPORTED_HEADER = "| Area | Key in settings.yml | Endpoints |\n|---|---|---|";
 const GAPS_HEADER = "| Area | Endpoints | Why it matters |\n|---|---|---|";
 
-/** The Sections table's page, the one reference page a settings key has; the coverage page sits beside it. */
 const SECTIONS_PAGE = "sections.md";
+
 /** The Endpoints cell of a row that lists no calls of its own, naming the row whose calls it rides. */
 function sharedCalls(label: string): string {
   return `shares the calls of the ${label} row`;
 }
-/** The calls in a cell, one per rendered line. */
+
 const CALL_SEPARATOR = "<br>";
 
 /** What the coverage page reads off a section module: its key and the routes and operations it declares. */
@@ -414,7 +416,7 @@ function coveragePage(
   };
 }
 
-/** The key cell of a Supported row: the section key linking to the Sections page, then the row's keys in a code span. */
+/** The key cell of a Supported row: the section key linking to the Sections page (the one reference page a settings key has; the coverage page sits beside it), then the row's keys in a code span. */
 function keyCell(row: Pick<SupportedRow, "key" | "keys">): string {
   return `[\`${row.key}\`](${SECTIONS_PAGE})${row.keys === undefined ? "" : ` (\`${row.keys}\`)`}`;
 }
@@ -468,10 +470,7 @@ export function renderCoverage(
   return renderCoveragePage(coveragePage(sections, docs, data, anchors));
 }
 
-/**
- * The key cell as keyCell() writes it, read back.
- * The dotAll flag is for the two Unicode line separators cellFault() admits inside the keys: without it `.` would not match them.
- */
+/** The key cell as keyCell() writes it, read back; the dotAll flag is for the two Unicode line separators cellFault() admits inside the keys, which `.` would not match without it. */
 const KEY_CELL = new RegExp(
   String.raw`^\[\x60([a-z_]+)\x60\]\(${RegExp.escape(SECTIONS_PAGE)}\)(?: \(\x60(.*)\x60\))?$`,
   "s",
@@ -490,135 +489,172 @@ function supportedRow(cells: readonly string[]): Result<Omit<SupportedRow, "note
   return faulty === undefined ? ok(row) : err(`${faulty.field} ${faulty.fault}`);
 }
 
-/**
- * A committed page read back into the shape renderCoveragePage() prints from, or why it is not one the printer
- * wrote, naming the line as renderedMismatch() numbers it. Prose slots (a paragraph, a bullet, an Area or an
- * Endpoints cell) are opaque and kept, so what the guard refuses here is structure the printer never writes.
- */
-function parseCoveragePage(body: string): Result<CoveragePage, string> {
-  const lines = body.split("\n");
-  let at = 0;
+/** A cursor over a page body's lines: each read admits what the printer writes there, or refuses naming the line as
+ * renderedMismatch() numbers it. */
+class PageReader {
+  private at = 0;
+
+  constructor(private readonly lines: readonly string[]) {}
+
   /** The line under the cursor, or "" past the end: the printer never writes past the body. */
-  const current = (): string => lines[at] ?? "";
-  const refusal = (what: string): Result<never, string> => err(`line ${at} ${what}`);
-  const literal = (text: string, what: string): Result<void, string> => {
-    if (current() !== text) {
-      return refusal(what);
+  current(): string {
+    return this.lines[this.at] ?? "";
+  }
+
+  refusal(what: string): Result<never, string> {
+    return err(`line ${this.at} ${what}`);
+  }
+
+  literal(text: string, what: string): Result<void, string> {
+    if (this.current() !== text) {
+      return this.refusal(what);
     }
-    at += 1;
+    this.at += 1;
     return ok();
-  };
-  const blank = (): Result<void, string> =>
-    literal("", "is not the blank line the generator writes there");
-  const heading = (text: string): Result<void, string> =>
-    literal(text, `is not the "${text}" heading`);
-  const prose = (what: string): Result<string, string> => {
-    const line = current();
+  }
+
+  blank(): Result<void, string> {
+    return this.literal("", "is not the blank line the generator writes there");
+  }
+
+  heading(text: string): Result<void, string> {
+    return this.literal(text, `is not the "${text}" heading`);
+  }
+
+  prose(what: string): Result<string, string> {
+    const line = this.current();
     const fault = proseFault(line);
     if (fault !== undefined) {
-      return refusal(`should hold ${what} but ${fault}`);
+      return this.refusal(`should hold ${what} but ${fault}`);
     }
-    at += 1;
+    this.at += 1;
     return ok(line);
-  };
+  }
+
   /** The `- ` bullets up to the next blank line, at least one. */
-  const items = (what: string): Result<string[], string> => {
+  items(what: string): Result<string[], string> {
     const found: string[] = [];
-    while (current().startsWith("- ")) {
-      const text = current().slice(2);
+    while (this.current().startsWith("- ")) {
+      const text = this.current().slice(2);
       const fault = proseFault(text);
       if (fault !== undefined) {
-        return refusal(`should hold ${what} bullet but ${fault}`);
+        return this.refusal(`should hold ${what} bullet but ${fault}`);
       }
       found.push(text);
-      at += 1;
+      this.at += 1;
     }
-    return found.length === 0 ? refusal(`is not the first ${what} bullet`) : ok(found);
-  };
+    return found.length === 0 ? this.refusal(`is not the first ${what} bullet`) : ok(found);
+  }
+
   /** `header`'s lines, then the rows up to the next blank line under the cell rule, each through `parseRow`. */
-  const table = <Row>(
+  table<Row>(
     header: string,
     what: string,
     parseRow: (cells: readonly string[]) => Result<Row, string>,
-  ): Result<Row[], string> => {
+  ): Result<Row[], string> {
     for (const line of header.split("\n")) {
-      if (current() !== line) {
-        return refusal(`is not the ${what} table's header`);
+      if (this.current() !== line) {
+        return this.refusal(`is not the ${what} table's header`);
       }
-      at += 1;
+      this.at += 1;
     }
-    const start = at;
-    while (current() !== "") {
-      at += 1;
+    const start = this.at;
+    while (this.current() !== "") {
+      this.at += 1;
     }
     const line = (row: number): string => `line ${start + row}`;
-    return tableRows(header, lines.slice(start, at), "cells")
+    return tableRows(header, this.lines.slice(start, this.at), "cells")
       .mapErr((faulty) => `${line(faulty.row)} ${faulty.fault}`)
       .andThen((rows) =>
         Result.combine(
           rows.map((cells, row) => parseRow(cells).mapErr((fault) => `${line(row)} ${fault}`)),
         ),
       );
-  };
+  }
+
   /** Whether `texts` sit at the cursor, line for line: a paragraph may repeat one structural line, never a run of them. */
-  const ahead = (...texts: string[]): boolean =>
-    texts.every((text, offset) => lines[at + offset] === text);
-  const [gapsHeaderLine, gapsSeparator] = GAPS_HEADER.split("\n");
+  ahead(...texts: string[]): boolean {
+    return texts.every((text, offset) => this.lines[this.at + offset] === text);
+  }
+
+  /** Whether the cursor sits on the body's last line and that line is empty: the line break that closes the body. */
+  atClose(): boolean {
+    return this.at === this.lines.length - 1 && this.current() === "";
+  }
+}
+
+/** The gaps section read back: the rows, or the empty-state note over a bare header, under which a row is refused. */
+function parseGaps(page: PageReader): Result<Gaps, string> {
+  const [gapsHeaderLine = "", gapsSeparator = ""] = GAPS_HEADER.split("\n");
+  if (page.ahead(gapsHeaderLine, gapsSeparator)) {
+    return page
+      .table(GAPS_HEADER, "gaps", (cells) => ok(cells))
+      .andThen(
+        (rows): Result<Gaps, string> =>
+          rows.length === 0
+            ? page.refusal("is not the first gap row, and no empty-state note precedes the table")
+            : ok({ rows }),
+      );
+  }
   return safeTry(function* () {
-    yield* blank();
+    const emptyNote = yield* page.prose("the gaps section's empty-state note");
+    yield* page.blank();
+    yield* page.table(GAPS_HEADER, "gaps", () =>
+      err("is a gap row under the empty-state note, which stands only over an empty table"),
+    );
+    return ok<Gaps, string>({ emptyNote });
+  });
+}
+
+/**
+ * A committed page read back into the shape renderCoveragePage() prints from, or why it is not one the printer
+ * wrote, naming the line as renderedMismatch() numbers it. Prose slots (a paragraph, a bullet, an Area or an
+ * Endpoints cell) are opaque and kept, so what the guard refuses here is structure the printer never writes.
+ */
+function parseCoveragePage(body: string): Result<CoveragePage, string> {
+  const page = new PageReader(body.split("\n"));
+  return safeTry(function* () {
+    yield* page.blank();
     const intro: string[] = [];
     do {
-      intro.push(yield* prose("an intro paragraph"));
-      yield* blank();
-    } while (!ahead(SUPPORTED_HEADING, "", ...SUPPORTED_HEADER.split("\n")));
-    yield* heading(SUPPORTED_HEADING);
-    yield* blank();
-    const rows = yield* table(SUPPORTED_HEADER, "Supported", supportedRow);
+      intro.push(yield* page.prose("an intro paragraph"));
+      yield* page.blank();
+    } while (!page.ahead(SUPPORTED_HEADING, "", ...SUPPORTED_HEADER.split("\n")));
+    yield* page.heading(SUPPORTED_HEADING);
+    yield* page.blank();
+    const rows = yield* page.table(SUPPORTED_HEADER, "Supported", supportedRow);
     if (rows.length === 0) {
-      return refusal("is not the first Supported row");
+      return page.refusal("is not the first Supported row");
     }
-    yield* blank();
-    yield* heading(NOTES_HEADING);
-    yield* blank();
+    yield* page.blank();
+    yield* page.heading(NOTES_HEADING);
+    yield* page.blank();
     const supported: SupportedRow[] = [];
     for (const row of rows) {
-      yield* literal(
+      yield* page.literal(
         notesLabel(row),
         `is not the notes label of the "${areaLabel(row.area)}" Supported row`,
       );
-      yield* blank();
-      const notes = yield* items("a note");
-      yield* blank();
+      yield* page.blank();
+      const notes = yield* page.items("a note");
+      yield* page.blank();
       supported.push({ ...row, notes });
     }
-    yield* heading(GAPS_HEADING);
-    yield* blank();
-    let gaps: Gaps;
-    if (ahead(gapsHeaderLine ?? "", gapsSeparator ?? "")) {
-      const gapRows = yield* table(GAPS_HEADER, "gaps", (cells) => ok(cells));
-      if (gapRows.length === 0) {
-        return refusal("is not the first gap row, and no empty-state note precedes the table");
-      }
-      gaps = { rows: gapRows };
-    } else {
-      gaps = { emptyNote: yield* prose("the gaps section's empty-state note") };
-      yield* blank();
-      yield* table(GAPS_HEADER, "gaps", () =>
-        err("is a gap row under the empty-state note, which stands only over an empty table"),
-      );
-    }
-    yield* blank();
-    yield* heading(NO_API_HEADING);
-    yield* blank();
-    const noApiIntro = yield* prose("the no-public-API intro");
-    yield* blank();
-    const noApiItems = yield* items("a no-public-API");
-    yield* blank();
-    yield* heading(OUT_OF_SCOPE_HEADING);
-    yield* blank();
-    const outOfScope = yield* items("an out-of-scope");
-    if (at !== lines.length - 1 || current() !== "") {
-      return refusal("is not the line break that closes the body");
+    yield* page.heading(GAPS_HEADING);
+    yield* page.blank();
+    const gaps = yield* parseGaps(page);
+    yield* page.blank();
+    yield* page.heading(NO_API_HEADING);
+    yield* page.blank();
+    const noApiIntro = yield* page.prose("the no-public-API intro");
+    yield* page.blank();
+    const noApiItems = yield* page.items("a no-public-API");
+    yield* page.blank();
+    yield* page.heading(OUT_OF_SCOPE_HEADING);
+    yield* page.blank();
+    const outOfScope = yield* page.items("an out-of-scope");
+    if (!page.atClose()) {
+      return page.refusal("is not the line break that closes the body");
     }
     return ok({
       intro,
@@ -761,44 +797,54 @@ function patUrlRegion(name: string): GeneratedRegion {
 const MERMAID_OPEN = "```mermaid";
 const FENCE = "```";
 const GRAPH_LINE = "graph TD";
-// A node id is whatever the renderer makes of a layer name (only "-" is rewritten), so the byte compare judges it.
 const NODE_LINE = /^ {2}(\S+)\["([^"]*)"\]$/;
 const EDGE_LINE = /^ {2}(\S+) --> (\S+)$/;
 
 /** What the module map draws: the layers with their paths and the import edges; the lint's exclusions are not drawn. */
 type ArchitectureMap = Pick<Architecture, "layers" | "edges">;
 
-/**
- * The diagram read back into the layers and edges it draws, under the node ids the renderer writes; a line that is
- * neither a node nor an edge is authored. Entries are collected before the records are built, so an id such as
- * `__proto__` is a key and not a prototype write.
- */
+/** Why `lines` are not a mermaid fence around a graph, or undefined. */
+function fenceFault(lines: readonly string[]): string | undefined {
+  if (lines[0] !== MERMAID_OPEN) {
+    return "line 1 does not open the mermaid fence";
+  }
+  if (lines[1] !== GRAPH_LINE) {
+    return `line 2 is not the "${GRAPH_LINE}" line`;
+  }
+  if (lines.length < 3 || lines.at(-1) !== FENCE) {
+    return `line ${lines.length} does not close the mermaid fence`;
+  }
+  return undefined;
+}
+
+/** The layers and edges the lines between the fences draw (the first of them is line 3); a line that is neither a
+ * node nor an edge is authored. Entries are collected before the records are built, so an id such as `__proto__` is
+ * a key and not a prototype write. */
+function mapEntries(lines: readonly string[]): Result<ArchitectureMap, string> {
+  const layers: Array<[string, readonly string[]]> = [];
+  const edges = new Map<string, string[]>();
+  for (const [index, line] of lines.entries()) {
+    const node = NODE_LINE.exec(line);
+    if (node !== null) {
+      layers.push([node[1] ?? "", (node[2] ?? "").split("<br>")]);
+      continue;
+    }
+    const edge = EDGE_LINE.exec(line);
+    if (edge === null) {
+      return err(`line ${index + 3} is neither a layer node nor an import edge`);
+    }
+    const from = edge[1] ?? "";
+    edges.set(from, [...(edges.get(from) ?? []), edge[2] ?? ""]);
+  }
+  return ok({ layers: Object.fromEntries(layers), edges: Object.fromEntries(edges) });
+}
+
+/** The diagram read back into the layers and edges it draws, under the node ids the renderer writes: whatever it
+ * makes of a layer name (only "-" is rewritten), so the byte compare judges them. */
 function parseArchitectureMap(body: string): Result<ArchitectureMap, string> {
   return blockLines(body).andThen((lines) => {
-    if (lines[0] !== MERMAID_OPEN) {
-      return err("line 1 does not open the mermaid fence");
-    }
-    if (lines[1] !== GRAPH_LINE) {
-      return err(`line 2 is not the "${GRAPH_LINE}" line`);
-    }
-    if (lines.length < 3 || lines.at(-1) !== FENCE) {
-      return err(`line ${lines.length} does not close the mermaid fence`);
-    }
-    const layers: Array<[string, readonly string[]]> = [];
-    const edges = new Map<string, string[]>();
-    for (const [index, line] of lines.slice(2, -1).entries()) {
-      const node = NODE_LINE.exec(line);
-      const edge = EDGE_LINE.exec(line);
-      if (node !== null) {
-        layers.push([node[1] ?? "", (node[2] ?? "").split("<br>")]);
-      } else if (edge !== null) {
-        const from = edge[1] ?? "";
-        edges.set(from, [...(edges.get(from) ?? []), edge[2] ?? ""]);
-      } else {
-        return err(`line ${index + 3} is neither a layer node nor an import edge`);
-      }
-    }
-    return ok({ layers: Object.fromEntries(layers), edges: Object.fromEntries(edges) });
+    const fault = fenceFault(lines);
+    return fault === undefined ? mapEntries(lines.slice(2, -1)) : err(fault);
   });
 }
 

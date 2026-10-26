@@ -22,8 +22,7 @@ import { dispatch } from "./lib/entry.js";
 import { configureBotIdentity, leasePush } from "./lib/pr-branch.js";
 import { capture, requireEnv, run, setOutput, status } from "./lib/workflow-step.js";
 
-/** In generated.ts table order: the later generators import the descriptor-derived files and the gaps index
- * through src/, and the inputs table reads action.yml, so each source renders first. */
+/** In generated.ts table order, each generator after its sources: the descriptor-derived files and the gaps index are imported through src/, and the inputs table reads action.yml. */
 export const GENERATORS = [
   "build:openapi",
   "build:gaps-index",
@@ -40,6 +39,7 @@ const GENERATED_FILES = [
   "src/generated/upstream-gaps.ts",
 ] as const;
 
+/** With its slash: a directory entry of FIX_OWNED_PATHS, and the pathspec the pruned verdict reads. */
 export const GAPS_DIR = "src/upstream-gaps/";
 
 /** A `dir/` entry covers everything under it, deletions included (a graduated gap file is a deletion). */

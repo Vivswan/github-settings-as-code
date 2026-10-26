@@ -19,25 +19,38 @@ import {
   tryGit,
 } from "./git.js";
 
+/** The file whose preparation scripts a packaged commit drops. */
 const MANIFEST = "package.json";
+
 /** What a packaged commit carries beyond its source (a directory entry stages every file under it). */
 const PACKAGED_PATHS = ["lib/index.js", "lib/settings.schema.json", "lib/pkg/"] as const;
+
 /** What every packaged commit must carry as non-empty regular files. */
 const REQUIRED_BUILT_FILES = [
   "lib/index.js",
   "lib/settings.schema.json",
   "lib/pkg/index.js",
 ] as const;
+
+/** PACKAGED_PATHS as the refusals spell them. */
 const PACKAGED = "lib/index.js, lib/settings.schema.json, and lib/pkg/";
+
+/** The pointer every green main commit's package moves forward. */
 const LATEST_REF = "refs/tags/latest";
+
+/** Under it, `<position>.<sha7>` names a main commit's package. */
 const BUILD_TAG_PREFIX = "refs/tags/build/";
+
+/** A build tag this pipeline names; the prune stops at anything else under the prefix. */
 const BUILD_TAG = /^refs\/tags\/build\/([1-9]\d*)\.[0-9a-f]{7}$/;
+
 /** How many build tags stay; releases and latest keep their own commits. */
 export const KEPT_BUILD_TAGS = 10;
-/** Never --depth: a depth-limited fetch marks the commit it lands on shallow and cuts the parent link every package
- * check reads. Blobs arrive on demand, or with the commit on a server without filter support. */
+
+/** Never --depth: a depth-limited fetch marks the commit it lands on shallow and cuts the parent link every package check reads; blobs arrive on demand, or with the commit on a server without filter support. */
 const TAG_FETCH = ["--filter=blob:none"];
 
+/** Reads of a ref that keeps moving before a run gives up. */
 const PUSH_ATTEMPTS = 3;
 
 /** Every ref derivation passes through this parse, so a malformed tag stops the pipeline instead of minting "v2"
@@ -66,8 +79,7 @@ function assertCarries(cwd: string, treeish: string, what: string, remedy: strin
   }
 }
 
-/** The scripts npm's git fetcher (pacote) takes as a signal to run `npm install --include=dev` and the prepare
- * lifecycle in a `github:` dependency's checkout; the packaged commit ships the build already. */
+/** The scripts npm's git fetcher (pacote) takes as a signal to run `npm install --include=dev` and the prepare lifecycle in a `github:` dependency's checkout; the packaged commit ships the build already. */
 const PREPARATION_SCRIPTS = ["prepare", "prepack", "build", "preinstall", "install", "postinstall"];
 
 /** sourceSha's tree plus `addBuild`'s entries, with package.json's preparation scripts removed, assembled in a
@@ -325,11 +337,56 @@ export function pruneBuildTags(cwd: string, keep = KEPT_BUILD_TAGS): string[] {
 }
 
 export interface PointerMove {
+  /** The pointer, as refs/tags/... */
   ref: string;
+
   /** Where the pointer is when the move ends. */
   sha: string;
+
+  /** Whether this run pushed it. */
   changed: boolean;
+
+  /** The one line the step logs. */
   reason: string;
+}
+
+/** The pointer left where it is: `at` packages a main commit at or past the candidate's source. Undefined when there
+ * is no pointer yet, when the candidate is newer, or when the pointer's commit is no child of a main commit (the
+ * retired chain's tip, a hand-pushed bare root), which is replaced, not judged. Main's head is read here, AFTER the
+ * pointer: a pointer a rival moved to a newer commit's package has that commit on main by then. */
+function alreadyPast(
+  cwd: string,
+  ref: string,
+  at: string,
+  candidate: Packaged,
+): PointerMove | undefined {
+  if (at === "") {
+    return undefined;
+  }
+  const mainHead = fetchMainHead(cwd);
+  const parents = git(cwd, "log", "-1", "--format=%P", at).split(" ").filter(Boolean);
+  const current = parents.length === 1 ? parents[0] : undefined;
+  if (current === undefined || !isAncestor(cwd, current, mainHead)) {
+    return undefined;
+  }
+  if (!isAncestor(cwd, candidate.source, current)) {
+    return undefined;
+  }
+  assertPackageOf(cwd, at, current, `${ref} (${at})`, "inspect it by hand.");
+  if (
+    current === candidate.source &&
+    git(cwd, "rev-parse", `${at}^{tree}`) !== git(cwd, "rev-parse", `${candidate.commit}^{tree}`)
+  ) {
+    throw new Error(
+      `${ref} is at ${at}, another package of ${candidate.source} than ${candidate.commit} with another tree; two builds of one main commit exist - inspect both by hand.`,
+    );
+  }
+  return {
+    ref,
+    sha: at,
+    changed: false,
+    reason: `${ref} already at ${at}, packaging ${current}, which is ${candidate.source} or past it`,
+  };
 }
 
 /**
@@ -344,34 +401,12 @@ export function movePointer(cwd: string, ref: string, candidate: Packaged): Poin
   for (let attempt = 1; attempt <= PUSH_ATTEMPTS; attempt++) {
     const observed = observeRemote(cwd, ref);
     const at = observed.peeled;
-    if (observed.id !== "") {
-      if (!fetchObserved(cwd, ref, observed.id)) {
-        continue;
-      }
-      const mainHead = fetchMainHead(cwd);
-      const parents = git(cwd, "log", "-1", "--format=%P", at).split(" ").filter(Boolean);
-      const current = parents.length === 1 ? parents[0] : undefined;
-      // A pointer whose commit is no child of a main commit (the retired chain's tip, a hand-pushed bare root) is replaced, not judged.
-      if (current !== undefined && isAncestor(cwd, current, mainHead)) {
-        if (isAncestor(cwd, candidate.source, current)) {
-          assertPackageOf(cwd, at, current, `${ref} (${at})`, "inspect it by hand.");
-          if (
-            current === candidate.source &&
-            git(cwd, "rev-parse", `${at}^{tree}`) !==
-              git(cwd, "rev-parse", `${candidate.commit}^{tree}`)
-          ) {
-            throw new Error(
-              `${ref} is at ${at}, another package of ${candidate.source} than ${candidate.commit} with another tree; two builds of one main commit exist - inspect both by hand.`,
-            );
-          }
-          return {
-            ref,
-            sha: at,
-            changed: false,
-            reason: `${ref} already at ${at}, packaging ${current}, which is ${candidate.source} or past it`,
-          };
-        }
-      }
+    if (observed.id !== "" && !fetchObserved(cwd, ref, observed.id)) {
+      continue;
+    }
+    const past = alreadyPast(cwd, ref, at, candidate);
+    if (past !== undefined) {
+      return past;
     }
     const refused = push(
       cwd,
@@ -397,9 +432,12 @@ export function movePointer(cwd: string, ref: string, candidate: Packaged): Poin
 }
 
 interface PackageCommitOptions {
+  /** The checkout, at `sourceSha` with the bundle built. */
   cwd: string;
+
   /** The green main commit this run judged; the checkout must be at it with the bundle built. */
   sourceSha: string;
+
   /** Provenance trailer for a packaged commit this run mints (the workflow run URL). */
   runUrl?: string;
 }
@@ -407,6 +445,8 @@ interface PackageCommitOptions {
 interface PackageCommitResult extends EnsuredTag {
   /** The build tags this run deleted, beyond the kept window. */
   pruned: string[];
+
+  /** latest's move: forward to this package, or left where it is. */
   latest: PointerMove;
 }
 
@@ -426,19 +466,30 @@ export function packageCommit(options: PackageCommitOptions): PackageCommitResul
 }
 
 interface PackageOptions {
+  /** The checkout, at the merge commit with the bundle built. */
   cwd: string;
+
+  /** The release's vX.Y.Z tag, as release-please cut the draft. */
   tag: string;
+
   /** The release's merge commit, resolved from the draft (not necessarily this run's own push); the tag's recorded source. */
   sourceSha: string;
+
   /** Provenance trailer for a packaged commit this run has to mint (the workflow run URL). */
   runUrl?: string;
 }
 
 interface PackagedRelease {
+  /** Whether this run minted the version tag, or found and verified it. */
   created: boolean;
+
+  /** The packaged commit the version tag names. */
   packagedSha: string;
+
   /** The build tags this run deleted, beyond the kept window. */
   pruned: string[];
+
+  /** latest's move: forward to this package, or left where it is. */
   latest: PointerMove;
 }
 
