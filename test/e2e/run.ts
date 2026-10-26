@@ -82,7 +82,9 @@ function applyFlag(flags: Flags, token: OptionToken): string | undefined {
     flags.printStdout = true;
     return undefined;
   }
-  if (token.value === undefined) {
+  // parseArgs hands a string flag the next word whatever it is, so a flag or "--" standing where the value
+  // belongs is the value missing, not a value; an inline "--scenario=-name" keeps its dash.
+  if (token.value === undefined || (!token.inlineValue && token.value.startsWith("-"))) {
     return `${token.rawName} needs a value`;
   }
   if (token.name === "scenario") {

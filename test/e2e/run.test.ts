@@ -55,6 +55,18 @@ test.each<[label: string, args: string[], error: string]>([
     `--sections got an empty list; name at least one section, or all; ${USAGE}`,
   ],
   ["a misspelled flag", ["--section", "labels"], `unknown flag --section; ${USAGE}`],
+  // parseArgs hands a string flag the next word whatever it is, so a "--" or a flag standing where the value
+  // belongs would otherwise become the value: here the later "all" would clear the filter and run the corpus.
+  [
+    "--sections swallowing a --",
+    ["--sections", "--", "--sections", "all"],
+    `--sections needs a value; ${USAGE}`,
+  ],
+  [
+    "--sections swallowing the next flag",
+    ["--sections", "--print-stdout"],
+    `--sections needs a value; ${USAGE}`,
+  ],
   ["a stray argument", ["labels"], `unexpected argument "labels"; ${USAGE}`],
   // bun drops a "--" that directly follows the script path, so the row puts a flag ahead of it.
   [
