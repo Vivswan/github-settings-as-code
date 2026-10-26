@@ -12,6 +12,9 @@
  */
 
 import { parseArgs } from "node:util";
+import { fromMarkdown } from "mdast-util-from-markdown";
+import { gfmTableFromMarkdown } from "mdast-util-gfm-table";
+import { gfmTable } from "micromark-extension-gfm-table";
 import { canonicalDocument } from "../../src/engine/canonical.js";
 import { describeRemoval } from "../../src/engine/layers.js";
 import { MAX_RETRIES } from "../../src/github/api.js";
@@ -292,51 +295,31 @@ const REQUIRED_CLASSES: Record<WitnessSection, MutationClass[]> = {
 };
 
 /**
- * A pipe is a delimiter only after an EVEN run of backslashes: the engine escapes cells with
- * backslash-then-pipe (markdownCell, src/report/markdown.ts); under HOSTILE_NAMES a broken escape changes a row's separator count.
+ * The engine escapes a cell's pipes and backslashes (markdownCell, src/report/markdown.ts), so under HOSTILE_NAMES a
+ * broken escape surfaces as a row whose cell count differs from the header's; the GFM grammar reads the table as
+ * GitHub renders it, and a malformed delimiter row leaves no table at all.
  */
 function summaryTableProblems(summary: string, expectedRows: number): string[] {
-  const lines = summary.split("\n").map((line) => line.trim());
-  const start = lines.findIndex((line) => line.startsWith("|"));
-  if (start === -1) {
-    // A completed run renders the header and separator even with zero data rows, so absence is an error at any expectedRows.
+  const tree = fromMarkdown(summary, {
+    extensions: [gfmTable()],
+    mdastExtensions: [gfmTableFromMarkdown()],
+  });
+  const table = tree.children.find((node) => node.type === "table");
+  if (table === undefined) {
+    // A completed run renders the header and delimiter row even with zero data rows, so absence is an error at any expectedRows.
     return ["summary carries no markdown table"];
   }
-  const table: string[] = [];
-  for (let i = start; i < lines.length && lines[i]?.startsWith("|"); i++) {
-    table.push(lines[i] as string);
-  }
-  const separators = (row: string): number => {
-    let count = 0;
-    let backslashes = 0;
-    for (const ch of row) {
-      if (ch === "\\") {
-        backslashes++;
-        continue;
-      }
-      if (ch === "|" && backslashes % 2 === 0) {
-        count++;
-      }
-      backslashes = 0;
-    }
-    return count;
-  };
+  const [width = 0, ...rowWidths] = table.children.map((row) => row.children.length);
   const problems: string[] = [];
-  if (table.length < 2 + expectedRows) {
+  if (rowWidths.length < expectedRows) {
     problems.push(
-      `summary table has ${table.length} row(s), expected a header + separator + at least ${expectedRows} data row(s)`,
+      `summary table has ${rowWidths.length} data row(s), expected at least ${expectedRows}`,
     );
   }
-  // The loose "any of -:| whitespace" form would accept an empty separator cell.
-  const separatorCells = (table[1] ?? "").split("|").slice(1, -1);
-  if (separatorCells.length === 0 || !separatorCells.every((cell) => /^\s*:?-+:?\s*$/.test(cell))) {
-    problems.push(`summary table separator row is malformed: "${table[1] ?? "(absent)"}"`);
-  }
-  const headerCount = separators(table[0] ?? "");
-  for (const [index, row] of table.entries()) {
-    if (separators(row) !== headerCount) {
+  for (const [index, cells] of rowWidths.entries()) {
+    if (cells !== width) {
       problems.push(
-        `summary table row ${index} has ${separators(row)} cell separator(s), the header has ${headerCount} - a broken pipe escape?`,
+        `summary table data row ${index + 1} has ${cells} cell(s), the header has ${width} - a broken pipe escape?`,
       );
       break;
     }
