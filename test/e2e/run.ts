@@ -9,17 +9,37 @@
  *                        runner registers no mask, so the echo redacts on its own); a failure's
  *                        artifact directory holds the whole of it anyway, a pass otherwise leaves no
  *                        trace of it
+ *
+ * An unknown flag, a stray argument, a flag without its value, or an empty section list is refused at
+ * the entry with exit 2, before any scenario runs.
  */
 
+import { parseArgs } from "node:util";
+import { quote } from "../../src/text.js";
 import { corpusUnwitnessedExemptEndpoints } from "./runner/apply-idempotence-proof.js";
 import { indentedStdout, runScenario, type ScenarioReport } from "./runner/runner.js";
 import { loadScenarios, type Scenario, scenarioRoots } from "./scenario.js";
+
+const FLAGS = {
+  sections: { type: "string" },
+  scenario: { type: "string" },
+  "print-stdout": { type: "boolean" },
+} as const;
+const USAGE = "the flags are --sections <key,key|all>, --scenario <name>, --print-stdout";
 
 interface Flags {
   sections?: string[];
   scenario?: string;
   printStdout?: boolean;
 }
+
+type ParsedFlags = { ok: true; flags: Flags } | { ok: false; error: string };
+
+/** parseArgs's option token, which node:util declares but does not export. */
+type OptionToken = Extract<
+  ReturnType<typeof parseArgs<{ tokens: true; strict: false }>>["tokens"][number],
+  { kind: "option" }
+>;
 
 /** The run's result table and counts, grown one scenario at a time. */
 interface Tally {
@@ -29,22 +49,69 @@ interface Tally {
   failed: number;
 }
 
-function parseFlags(argv: string[]): Flags {
+function refuse(error: string): ParsedFlags {
+  return { ok: false, error: `e2e: ${error}; ${USAGE}` };
+}
+
+/** `all` clears an earlier list, so the last `--sections` wins whichever word it carries. */
+function applySections(flags: Flags, value: string): string | undefined {
+  if (value === "all") {
+    flags.sections = undefined;
+    return undefined;
+  }
+  const keys = value
+    .split(",")
+    .map((key) => key.trim())
+    .filter((key) => key !== "");
+  if (keys.length === 0) {
+    return "--sections got an empty list; name at least one section, or all";
+  }
+  flags.sections = keys;
+  return undefined;
+}
+
+/** One flag applied to `flags`, or the refusal it earns. */
+function applyFlag(flags: Flags, token: OptionToken): string | undefined {
+  if (!Object.hasOwn(FLAGS, token.name)) {
+    return `unknown flag ${token.rawName}`;
+  }
+  if (token.name === "print-stdout") {
+    if (token.value !== undefined) {
+      return "--print-stdout takes no value";
+    }
+    flags.printStdout = true;
+    return undefined;
+  }
+  if (token.value === undefined) {
+    return `${token.rawName} needs a value`;
+  }
+  if (token.name === "scenario") {
+    flags.scenario = token.value;
+    return undefined;
+  }
+  return applySections(flags, token.value);
+}
+
+function parseFlags(argv: readonly string[]): ParsedFlags {
+  const { tokens } = parseArgs({
+    args: [...argv],
+    options: FLAGS,
+    strict: false,
+    allowPositionals: true,
+    tokens: true,
+  });
   const flags: Flags = {};
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    if (arg === "--sections") {
-      const value = argv[++i] ?? "";
-      if (value && value !== "all") {
-        flags.sections = value.split(",").map((s) => s.trim());
-      }
-    } else if (arg === "--scenario") {
-      flags.scenario = argv[++i];
-    } else if (arg === "--print-stdout") {
-      flags.printStdout = true;
+  for (const token of tokens) {
+    if (token.kind !== "option") {
+      const argument = token.kind === "positional" ? token.value : "--";
+      return refuse(`unexpected argument ${quote(argument)}`);
+    }
+    const problem = applyFlag(flags, token);
+    if (problem !== undefined) {
+      return refuse(problem);
     }
   }
-  return flags;
+  return { ok: true, flags };
 }
 
 /**
@@ -169,7 +236,12 @@ function addCorpusWitness(tally: Tally): void {
 }
 
 async function main(): Promise<number> {
-  const flags = parseFlags(process.argv.slice(2));
+  const parsed = parseFlags(process.argv.slice(2));
+  if (!parsed.ok) {
+    console.error(parsed.error);
+    return 2;
+  }
+  const { flags } = parsed;
   const roots = scenarioRoots();
   const all = loadScenarios(roots);
   const scenarios = selectScenarios(all, flags);
