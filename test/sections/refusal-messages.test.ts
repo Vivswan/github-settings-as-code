@@ -171,7 +171,7 @@ const DATA_CONSTANTS: ReadonlySet<string> = new Set([
   // deploy_keys/schema.ts
   "PUBLIC_KEY_ALGORITHMS",
   "BASE64_QUARTET",
-  "BASE64_BLOB",
+  "BASE64_PATTERN",
   "FIELD_SEPARATOR",
   "PRIVATE_KEY_FRAMING",
   // repository/schema.ts

@@ -2,6 +2,11 @@
  * The `deploy_keys:` section's schema slice; root src/schema.ts composes the SettingsFile property from it.
  * PUBLIC_KEY_ALGORITHMS is listed by hand in the docs field note and leaves out DSA (ssh-dss): GitHub stopped
  * accepting it on 2022-03-15, so a DSA key passing the parse would only fail at the create.
+ *
+ * PUBLIC_KEY_PATTERN is the published JSON Schema twin of parsePublicKey, which judges the blob with zod's base64
+ * check; test/sections/deploy_keys/published-pattern.test.ts holds the two to one verdict. Its base64 grammar is
+ * spelled by hand because zod's own published pattern opens with `^$|`, which no larger pattern can embed.
+ * PRIVATE_KEY_FRAMING is assembled at runtime so no source line holds the string a secret scanner flags.
  */
 
 import { err, ok, type Result } from "neverthrow";
@@ -18,43 +23,23 @@ export const PUBLIC_KEY_ALGORITHMS = [
   "sk-ecdsa-sha2-nistp256@openssh.com",
 ] as const;
 const ALGORITHMS = new Set<string>(PUBLIC_KEY_ALGORITHMS);
-
-const BASE64_QUARTET = "[A-Za-z0-9+/]{4}";
-const BASE64_BLOB = `(?:${BASE64_QUARTET})*(?:${BASE64_QUARTET}|[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)`;
+const ALGORITHM_ALTERNATION = PUBLIC_KEY_ALGORITHMS.map((algorithm) =>
+  algorithm.replaceAll(".", "\\."),
+).join("|");
 
 const FIELD_SEPARATOR = String.raw`[ \t]`;
-
-/** A second line is refused rather than dropped, so nothing pasted after a valid key is silently normalized away. */
-function materialPattern(algorithms: string): RegExp {
-  return new RegExp(
-    `^${FIELD_SEPARATOR}*(${algorithms})${FIELD_SEPARATOR}+(${BASE64_BLOB})(?:${FIELD_SEPARATOR}[^\\r\\n]*)?$`,
-  );
-}
-
 const FIELDS = new RegExp(`${FIELD_SEPARATOR}+`);
 const LINE_BREAK = /[\r\n]/;
 const ODD_WHITESPACE = /[^\S \t\r\n]/;
 
-/** Splits on FIELD_SEPARATOR, so the rejection helpers see the fields the pattern saw. */
-function fieldsOf(raw: string): string[] {
-  return raw.split(FIELDS).filter((field) => field !== "");
-}
-
-// The ONE acceptance rule for DECLARED material: the runtime parses through it and the published JSON schema carries its source as the field's pattern, so an editor and the run agree.
-const PUBLIC_KEY_PATTERN = materialPattern(
-  PUBLIC_KEY_ALGORITHMS.map((algorithm) => algorithm.replaceAll(".", "\\.")).join("|"),
+const BASE64_QUARTET = "[A-Za-z0-9+/]{4}";
+const BASE64_PATTERN = `(?:${BASE64_QUARTET})*(?:${BASE64_QUARTET}|[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)`;
+const PUBLIC_KEY_PATTERN = new RegExp(
+  `^${FIELD_SEPARATOR}*(?:${ALGORITHM_ALTERNATION})${FIELD_SEPARATOR}+${BASE64_PATTERN}(?:${FIELD_SEPARATOR}[^\\r\\n]*)?$`,
 );
+const base64Blob = z.base64();
 
-// The rule for material GitHub STORED, any algorithm token: GitHub validated the key when it accepted it, so a live key under an algorithm PUBLIC_KEY_ALGORITHMS lacks must not abort the section.
-const STORED_KEY_PATTERN = materialPattern(String.raw`\S+`);
-
-// The header and footer framing of every PEM and OpenSSH private key, assembled at runtime so no source line holds the string a secret scanner flags.
 const PRIVATE_KEY_FRAMING = ["PRIVATE", "KEY-----"].join(" ");
-
-/** Whether the settings file can declare a key under this algorithm; a live key under any other is outside the section. */
-export function declaresAlgorithm(algorithm: string): boolean {
-  return ALGORITHMS.has(algorithm);
-}
 
 const PUBLIC_KEY_FORM = `one line, "<algorithm> <base64> [comment]", with the algorithm one of ${PUBLIC_KEY_ALGORITHMS.join(", ")}`;
 const FEWER_THAN_TWO_FIELDS = "the key has fewer than two fields separated by a space or tab";
@@ -70,38 +55,19 @@ export interface PublicKeyMaterial {
   readonly material: string;
 }
 
-/**
- * Names what PUBLIC_KEY_PATTERN refused. The reason never quotes the input: it may be a pasted PRIVATE key, and a
- * refusal that echoed it would put it in the log and the step summary.
- */
-function declaredRejection(raw: string): string {
-  if (raw.trimStart().startsWith("-----BEGIN")) {
-    return raw.includes(PRIVATE_KEY_FRAMING)
-      ? "this is a private key; a deploy key takes the public half (the .pub file)"
-      : 'this is a PEM block; a deploy key takes the OpenSSH one-line public form, "ssh-ed25519 AAAA... comment" (the .pub file; ssh-keygen -i converts a PEM public key)';
-  }
-  if (LINE_BREAK.test(raw)) {
-    return `${HAS_LINE_BREAK} (a YAML | block keeps its trailing newline; |- drops it); a public SSH key reads ${PUBLIC_KEY_FORM}`;
-  }
-  const fields = fieldsOf(raw);
-  const form = formRejection(raw, fields);
-  if (form !== undefined) {
-    return `${form}; a public SSH key reads ${PUBLIC_KEY_FORM}`;
-  }
-  const [algorithm = ""] = fields;
-  if (algorithm === "ssh-dss") {
-    return `the key is DSA, which GitHub no longer accepts (since 2022-03-15); a public SSH key reads ${PUBLIC_KEY_FORM}`;
-  }
-  if (!ALGORITHMS.has(algorithm)) {
-    return `the key's first field is not an algorithm GitHub accepts; a public SSH key reads ${PUBLIC_KEY_FORM}`;
-  }
-  // A known algorithm with two fields on one line fails the pattern on its blob alone.
-  return `${BLOB_NOT_BASE64}; a public SSH key reads ${PUBLIC_KEY_FORM}`;
+/** Splits on FIELD_SEPARATOR, the separator the published pattern spells, so the parse and an editor see the same fields. */
+function fieldsOf(raw: string): string[] {
+  return raw.split(FIELDS).filter((field) => field !== "");
+}
+
+/** Whether the settings file can declare a key under this algorithm; a live key under any other is outside the section. */
+export function declaresAlgorithm(algorithm: string): boolean {
+  return ALGORITHMS.has(algorithm);
 }
 
 /**
  * The shape rules both readings share, in the order a reader fixes them; undefined once the value is two or more
- * fields on one line, so that only the algorithm or the blob can have failed the pattern. Only those two fields are
+ * fields on one line, so that only the algorithm or the blob can still be refused. Only those two fields are
  * tested for odd whitespace (a non-breaking space, for one), since a comment may hold it.
  */
 function formRejection(
@@ -117,30 +83,71 @@ function formRejection(
   return blob === "" ? FEWER_THAN_TWO_FIELDS : undefined;
 }
 
-/** Names what STORED_KEY_PATTERN refused; the algorithm is never the reason on the live side. */
-function storedRejection(raw: string): string {
-  return formRejection(raw, fieldsOf(raw)) ?? BLOB_NOT_BASE64;
+/** Why the settings file cannot declare a key under `algorithm`, or undefined when it can. */
+function declaredAlgorithmRejection(algorithm: string): string | undefined {
+  if (algorithm === "ssh-dss") {
+    return "the key is DSA, which GitHub no longer accepts (since 2022-03-15)";
+  }
+  return ALGORITHMS.has(algorithm)
+    ? undefined
+    : "the key's first field is not an algorithm GitHub accepts";
 }
 
+/**
+ * The reading both sides share: the form, the algorithm under the side's rule, then the blob under zod's base64
+ * check, which takes the empty string too; the form check ahead of it is what makes an empty blob a missing field.
+ * A reason never quotes the input: it may be a pasted PRIVATE key, and a refusal that echoed it would put it in
+ * the log and the step summary.
+ */
 function parseMaterial(
-  pattern: RegExp,
   raw: string,
-  rejection: (raw: string) => string,
+  algorithmRejection: (algorithm: string) => string | undefined,
 ): Result<PublicKeyMaterial, string> {
-  const match = pattern.exec(raw);
-  return match === null
-    ? err(rejection(raw))
-    : ok({ algorithm: match[1] ?? "", material: `${match[1]} ${match[2]}` });
+  const fields = fieldsOf(raw);
+  const [algorithm = "", blob = ""] = fields;
+
+  const form = formRejection(raw, fields);
+  if (form !== undefined) {
+    return err(form);
+  }
+
+  const refusedAlgorithm = algorithmRejection(algorithm);
+  if (refusedAlgorithm !== undefined) {
+    return err(refusedAlgorithm);
+  }
+
+  if (!base64Blob.safeParse(blob).success) {
+    return err(BLOB_NOT_BASE64);
+  }
+
+  return ok({ algorithm, material: `${algorithm} ${blob}` });
 }
 
-/** The one reading of DECLARED deploy key material, shared by the schema and the planner so the two cannot disagree. */
+/**
+ * The one reading of DECLARED deploy key material, shared by the schema and the planner so the two cannot disagree.
+ * A second line is refused rather than dropped, so nothing pasted after a valid key is silently normalized away.
+ */
 export function parsePublicKey(raw: string): Result<PublicKeyMaterial, string> {
-  return parseMaterial(PUBLIC_KEY_PATTERN, raw, declaredRejection);
+  if (raw.trimStart().startsWith("-----BEGIN")) {
+    return err(
+      raw.includes(PRIVATE_KEY_FRAMING)
+        ? "this is a private key; a deploy key takes the public half (the .pub file)"
+        : 'this is a PEM block; a deploy key takes the OpenSSH one-line public form, "ssh-ed25519 AAAA... comment" (the .pub file; ssh-keygen -i converts a PEM public key)',
+    );
+  }
+  if (LINE_BREAK.test(raw)) {
+    return err(
+      `${HAS_LINE_BREAK} (a YAML | block keeps its trailing newline; |- drops it); a public SSH key reads ${PUBLIC_KEY_FORM}`,
+    );
+  }
+  return parseMaterial(raw, declaredAlgorithmRejection).mapErr(
+    (reason) => `${reason}; a public SSH key reads ${PUBLIC_KEY_FORM}`,
+  );
 }
 
 /** The reading of material GitHub returned: the same comparable form, with GitHub the authority on the algorithm. */
 export function parseStoredKey(raw: string): Result<PublicKeyMaterial, string> {
-  return parseMaterial(STORED_KEY_PATTERN, raw, storedRejection);
+  return parseMaterial(raw, () => undefined);
 }
 
 /** The check is entry-level so the refusal can name the entry by title; a field-level one would know only the index. */
