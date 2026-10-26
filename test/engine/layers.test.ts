@@ -443,7 +443,7 @@ const SHARED_KEY_LAYERS: {
     /** A second lower entry under another key: it survives a union and goes with the list under replace. */
     other: Record<string, unknown>;
 
-    /** The higher layer's entry under the same key, spelled as the section's planner folds it: case for labels, collaborators, teams, and environments, case for the uppercased secret and variable names, a workflow's bare file name against its .github/workflows/ path, verbatim elsewhere. */
+    /** The higher layer's entry under the same key, spelled as the section's planner folds it: case-folded for labels, collaborators, teams, environments, secrets, and variables, a workflow's bare file name against its path, verbatim elsewhere. */
     higher: Record<string, unknown>;
 
     /** The entry a deep merge of the two yields: the higher's spelling of the key, the lower-only fields kept. */

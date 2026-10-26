@@ -141,6 +141,20 @@
           }
         }
       }
+    },
+    // normalizePlainData keeps one stack frame per nesting level on purpose (a helper for the container body would halve the depth a valid payload may reach); a split keeping that triplicates the scalar and container guards in each loop for no reading gain.
+    {
+      "includes": ["src/github/secret-scan.ts"],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noExcessiveCognitiveComplexity": {
+              "level": "error",
+              "options": { "maxAllowedComplexity": 30 }
+            }
+          }
+        }
+      }
     }
   ]
 }

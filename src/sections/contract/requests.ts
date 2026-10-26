@@ -437,9 +437,10 @@ async function connectionPage(
   }
   const page = connectionOf(result.data, op.connection.path);
   if (page === null) {
+    const path = op.connection.path.join(".");
     return err({
       kind: "malformed",
-      message: `${section.key}: GRAPHQL ${op.name} returned a response without a "${op.connection.path.join(".")}" connection carrying nodes and pageInfo{hasNextPage, endCursor}, so the list cannot be paginated. The operation's query must select both under that path`,
+      message: `${section.key}: GRAPHQL ${op.name} returned a response without a "${path}" connection carrying nodes and pageInfo{hasNextPage, endCursor}, so the list cannot be paginated. The operation's query must select both under that path`,
     });
   }
   return ok({ page });

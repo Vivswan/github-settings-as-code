@@ -277,7 +277,7 @@ export function transportReason(error: unknown, withholdReason: string | undefin
  */
 export type ApiErrorKind = "rate-limit" | "permission" | "other";
 
-/** GitHub's primary limit answers 403 with "API rate limit exceeded ..." and neither retry-after nor errors[].type, so a readable message is the one signal left for it, and the one channel a GitHubClient without headers has; a withheld message is a constant that never matches. */
+/** GitHub's primary limit answers 403 with "API rate limit exceeded" and neither retry-after nor errors[].type, so the message is the one signal (and the one channel a headerless GitHubClient has); a withheld message is a constant that never matches. */
 const RATE_LIMIT_PHRASE = /rate limit/i;
 
 export function classifyApiError(error: ApiError): ApiErrorKind {

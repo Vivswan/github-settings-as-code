@@ -16,7 +16,7 @@ export interface StepResult {
   outputs: string[];
 }
 
-/** Runs git as a runner would: GIT_AUTHOR_* and GIT_COMMITTER_* outrank the config configureBotIdentity writes (a developer shell exporting them would sign the bot's commits as the developer), and no global or system config is read, so the step's own cwd config is the one git sees. */
+/** Git as a runner sees it: GIT_AUTHOR_* and GIT_COMMITTER_* outrank the config configureBotIdentity writes (a developer shell exporting them would sign the bot's commits as the developer), and no global or system config is read. */
 const AMBIENT_GIT_CLEARED: Record<string, string | undefined> = {
   GIT_AUTHOR_NAME: undefined,
   GIT_AUTHOR_EMAIL: undefined,

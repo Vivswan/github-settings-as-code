@@ -36,7 +36,7 @@ export interface InputDecl {
   readonly list?: true;
 }
 
-/** The single source action.yml (bun run build:action-docs) and the inputs reference page's table (bun run build:inputs-table) are generated from, in its listing order; adding an input here is the whole declaration, and a new mode's inputs go beside their mode's. */
+/** The one source action.yml (build:action-docs) and the inputs reference table (build:inputs-table) are generated from, in listing order; adding an input here is the whole declaration, and a new mode's inputs go beside their mode's. */
 export const INPUT_DECLS = {
   token: {
     description:
@@ -244,7 +244,7 @@ export const SNAPSHOT_ONLY_INPUTS = [
   "snapshot-dir",
 ] as const satisfies readonly InputName[];
 
-/** `token` is tolerated unread (a workflow commonly sets it on every step); every declared input NOT listed here is an apply/check control, which the merge rejects unless it holds its declared default, supplied by the runner whether or not the workflow set it. */
+/** `token` is tolerated unread (a workflow commonly sets it on every step); every declared input NOT listed here is an apply/check control, which the merge rejects unless it holds its declared default, which the runner supplies either way. */
 export const RENDER_INPUTS = [
   "mode",
   "settings-file",

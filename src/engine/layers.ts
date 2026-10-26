@@ -424,7 +424,7 @@ function mergeStep(acc: unknown, layer: AdmittedLayer, step: Step): unknown {
   return out;
 }
 
-/** The layer as its own validation sees it, and `asWritten`, the way back from what that validation says to the layer as written: `SeparatedRemovals.asWritten` for the layer, since the view dropped its removal entries and validation counts what it sees. */
+/** The layer as its own validation sees it, and `asWritten`, the way back from what that validation says to the layer as written (`SeparatedRemovals.asWritten`: the view dropped the removal entries, and validation counts what it sees). */
 export interface StandaloneView {
   readonly doc: unknown;
   readonly asWritten: (issue: string) => string;

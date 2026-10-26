@@ -44,7 +44,7 @@ import { canonicalPath, landingNames, renameTarget, writeReplacing } from "./set
 import { openSingleRepoChannel } from "./single.js";
 import { snapshotTakenLine, writeSnapshotDirSummary, writeSummary } from "./summary.js";
 
-/** The schema the written file's editor hint points at: the schema of this release line, spelled as the README's quick start spells it. The release-please block markers let a major release rewrite the tag (release-please-config.json lists this file), and test/docs/readme.test.ts pins it to the README's hint. */
+/** The schema the written file's editor hint points at, spelled as the README's quick start does; the release-please block markers let a major release rewrite the tag, and test/docs/readme.test.ts pins it to the README's hint. */
 
 // x-release-please-start-major
 export const SNAPSHOT_SCHEMA_URL =

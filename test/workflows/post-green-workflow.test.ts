@@ -395,7 +395,7 @@ describe("the library page's publishing claims", () => {
   });
 });
 
-/** One bun invocation of a steps script's subcommand, as the probe and the pipeline steps are (variable assignments may sit ahead of bun, arguments after the subcommand), capturing the script's name and the subcommand; tokens part by spaces or tabs only, since bash ends the command at a newline. */
+/** A bun invocation of a steps script's subcommand (assignments may sit ahead of bun, arguments after it), capturing the script's name and the subcommand; tokens part by spaces or tabs only, since bash ends a command at a newline. */
 const SCRIPT_STEP =
   /^(?:[A-Za-z_]\w*="[^"]*"[ \t]+)*bun[ \t]+\.github\/scripts\/([\w-]+)\.ts[ \t]+([\w-]+)(?:[ \t]+[\w-]+)*$/;
 

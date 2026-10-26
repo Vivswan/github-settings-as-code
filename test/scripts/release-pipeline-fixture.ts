@@ -689,7 +689,7 @@ export const deleteOf = (...refs: string[]): string[] => [
 /** The commit a logged create push carried (its objects exist in the pushing clone). */
 export const createdSha = (push: string[]): string => (push[2] ?? "").split(":")[0] ?? "";
 
-/** Remotes a file:// origin cannot play, as git words them, each replayed with the ref UNMOVED on origin so none is a lost compare-and-set and the pipeline must judge origin's ref, not git's words; a ruleset's refusal (GH013) takes the token's path and is not replayed. */
+/** Refusals a file:// origin cannot play, in git's words, each replayed with the ref UNMOVED on origin, so the pipeline must judge origin's ref and not git's words; a ruleset refusal (GH013) takes the token's path and is not replayed. */
 export const PERMANENT: [string, string][] = [
   [
     "a token without write access",

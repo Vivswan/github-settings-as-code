@@ -12,7 +12,7 @@ import { describeKind } from "./plain-data.js";
 import type { SectionKey } from "./schema.js";
 import { agree, countNoun, quote } from "./text.js";
 
-/** Appended to a transient (non-permission) API failure, a network blip or a 5xx that survived the retries; one source for the discovery problems here and multi.ts's remote-file read failure, so the "not a permission problem" wording cannot drift between the two faces. */
+/** Appended to a transient (non-permission) API failure, a network blip or a 5xx that survived the retries; one source for the discovery problems here and multi.ts's remote-file read failure, so the wording cannot drift between the two faces. */
 export const RERUN_ADVICE =
   "This is not a permission problem; re-run, and retry later if it persists";
 

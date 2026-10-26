@@ -196,7 +196,7 @@ export const UNDECLARED_POLICY_SECTIONS = [
 
 export type UndeclaredPolicySection = (typeof UNDECLARED_POLICY_SECTIONS)[number];
 
-/** Every list section, in execution order: the knobbed ones and the plain lists whose wrapper takes `_layering` alone; the fold unions each by the key its module declares, and ./sections/registry.ts requires that declaration, so a member added here without one fails to compile. */
+/** Every list section in execution order, the knobbed ones and the plain lists whose wrapper takes `_layering` alone; the fold unions each by the key its module declares (registry.ts requires it), so a member added here without one fails to compile. */
 export const LIST_SECTIONS = [
   "labels",
   "rulesets",
