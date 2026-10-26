@@ -6,12 +6,18 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { fromMarkdown } from "mdast-util-from-markdown";
+import { gfmTableFromMarkdown } from "mdast-util-gfm-table";
+import { gfmTable } from "micromark-extension-gfm-table";
 import { parseSync } from "oxc-parser";
+import { visitParents } from "unist-util-visit-parents";
 import { ROOT } from "../root.js";
 
 const ENTRY = "src/index.ts";
 const INTERNAL_ENTRY = "src/internal.ts";
 const PAGE = "docs/reference/library.md";
+
+const API_HEADING = "## The API by group";
 
 /** Every name an entry exports, runtime and type-only alike, sorted; a star re-export has no names to pin and is refused. */
 export function exportedNames(
@@ -32,124 +38,75 @@ export function exportedNames(
     .sort();
 }
 
-/** The heading the API tables sit under, up to the next second-level heading. */
-const API_HEADING = "## The API by group";
+type Root = ReturnType<typeof fromMarkdown>;
+type Block = Root["children"][number];
+type Table = Extract<Block, { type: "table" }>;
+type TableRow = Table["children"][number];
 
-/** The header row of an API table, as GFM reads it (the leading pipe and the padding optional); the knob table's header is `| Knob |`. */
-const NAME_TABLE_HEADER = /^\|?\s*Name\s*\|/;
-
-/** A table row's first cell, when it is one code span: `| \`name\` | kind | says |`. */
-const NAME_ROW = /^\|?\s*`([^`\s]+)`\s*\|/;
-
-/** The header's delimiter row: dashes per column, the colons, the outer pipes, and the padding optional. */
-const DELIMITER_ROW = /^\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
-
-/** A line as GFM reads it: its blockquote depth and the text under the markers. */
-interface QuotedLine {
-  /** How many `>` markers (each with any spaces after it) open the line; nested markers stack. */
-  readonly depth: number;
-
-  /** The text under the markers, trimmed. */
-  readonly text: string;
-}
-
-/** The line `raw` as GFM reads it. */
-function quotedLine(raw: string): QuotedLine {
-  let text = raw.trim();
-  let depth = 0;
-  for (let marker = text.match(/^>\s*/); marker; marker = text.match(/^>\s*/)) {
-    depth++;
-    text = text.slice(marker[0].length);
+function sourceOf(node: Block | TableRow, markdown: string): string {
+  const start = node.position?.start.offset;
+  const end = node.position?.end.offset;
+  if (start === undefined || end === undefined) {
+    throw new Error(`BUG: mdast-util-from-markdown left a ${node.type} node without a position`);
   }
-  return { depth, text: text.trim() };
+  return markdown.slice(start, end);
 }
 
-/**
- * The lines of `section` outside its fences, each with its offset; a fence opener is yielded as a blank line, which
- * ends a table as the opener does. The open fence is its mark and the quote depth it opened at. A closer is the whole
- * line at that depth; a `>` line inside a fence at depth 0 is fence text, and so is a table. A line below the fence's
- * depth ends the blockquote, and the fence with it.
- */
-function* outsideFences(
-  section: readonly QuotedLine[],
-): Generator<{ offset: number; text: string }> {
-  let fence: { mark: string; depth: number } | null = null;
-  for (const [offset, { depth, text }] of section.entries()) {
-    // A backtick fence's info string carries no backtick, so a triple-backtick inline span is not an opener.
-    const opener = text.match(/^(`{3,})(?![^`]*`)|^(~{3,})/)?.[0];
-    if (fence !== null && depth < fence.depth) {
-      fence = null;
-    }
-    if (fence !== null) {
-      if (depth === fence.depth && text.startsWith(fence.mark) && /^(`+|~+)$/.test(text)) {
-        fence = null;
-      }
-      continue;
-    }
-    if (opener !== undefined) {
-      fence = { mark: opener, depth };
-      yield { offset, text: "" };
-      continue;
-    }
-    yield { offset, text };
-  }
-}
-
-/** Whether the line at `offset` is a Name table's header: the header row with the delimiter row under it. */
-function opensNameTable(section: readonly QuotedLine[], offset: number): boolean {
-  return (
-    NAME_TABLE_HEADER.test(section[offset]?.text ?? "") &&
-    DELIMITER_ROW.test(section[offset + 1]?.text ?? "")
+/** The blocks under "## The API by group" up to the next second-level heading of the page's own outline; a heading inside a blockquote or a code block is content. */
+function apiSection(root: Root, markdown: string): Block[] {
+  const blocks = root.children;
+  const start = blocks.findIndex(
+    (block) =>
+      block.type === "heading" && block.depth === 2 && sourceOf(block, markdown) === API_HEADING,
   );
-}
-
-/** Whether the line at `offset` is the delimiter row under a Name table's header. */
-function isNameTableDelimiter(section: readonly QuotedLine[], offset: number): boolean {
-  return (
-    offset > 0 &&
-    NAME_TABLE_HEADER.test(section[offset - 1]?.text ?? "") &&
-    DELIMITER_ROW.test(section[offset]?.text ?? "")
-  );
-}
-
-/**
- * The names the page documents: the first column of every `| Name |` table between "## The API by group" and the
- * next second-level heading, sorted. A table starts where a Name header is followed by a delimiter row and runs to
- * the next blank line, whatever its rows' leading whitespace or pipes, so every line in that span is a body row:
- * one whose first cell is not one code span is refused, so a misspelled row cannot read as absent, and a duplicate
- * row is kept, so the equality below reports it.
- */
-export function documentedNames(markdown: string): string[] {
-  const lines = markdown.split("\n");
-  const start = lines.indexOf(API_HEADING);
-  if (start < 0) {
+  if (start === -1) {
     throw new Error(`${PAGE} has no "${API_HEADING}" heading`);
   }
-  const section = lines.slice(start + 1).map(quotedLine);
+  const rest = blocks.slice(start + 1);
+  const end = rest.findIndex((block) => block.type === "heading" && block.depth === 2);
+  return end === -1 ? rest : rest.slice(0, end);
+}
+
+/** Whether `header` opens a Name table: its first cell is the plain text `Name`; the knob table's is `Knob`. */
+function isNameHeader(header: TableRow | undefined): boolean {
+  const cell = header?.children[0];
+  const [only] = cell?.children ?? [];
+  return cell?.children.length === 1 && only?.type === "text" && only.value === "Name";
+}
+
+/** The name a Name table's body row documents: its first cell as one code span; any other first cell is refused by row, so a misspelled row cannot read as absent. */
+function nameOf(row: TableRow, markdown: string): string {
+  const [cell] = row.children;
+  const [only] = cell?.children ?? [];
+  if (cell?.children.length !== 1 || only?.type !== "inlineCode") {
+    throw new Error(
+      `${PAGE}:${row.position?.start.line}: a Name table row must start with one code span, got: ${sourceOf(row, markdown)}`,
+    );
+  }
+  return only.value;
+}
+
+/**
+ * The names the page documents: the first column of every `| Name |` table under "## The API by group", sorted, with
+ * the page parsed as GitHub renders it (a table inside a blockquote or a list item counts; one inside a fence, an
+ * indented code block, or an HTML block is shown text). A duplicate row is kept, so the equality below reports it.
+ */
+export function documentedNames(markdown: string): string[] {
+  const root = fromMarkdown(markdown, {
+    extensions: [gfmTable()],
+    mdastExtensions: [gfmTableFromMarkdown()],
+  });
   const names: string[] = [];
-  let inNameTable = false;
-  for (const { offset, text: line } of outsideFences(section)) {
-    if (line.startsWith("## ")) {
-      break;
-    }
-    if (line === "") {
-      inNameTable = false;
-      continue;
-    }
-    if (!inNameTable) {
-      inNameTable = opensNameTable(section, offset);
-      continue;
-    }
-    if (isNameTableDelimiter(section, offset)) {
-      continue;
-    }
-    const match = line.match(NAME_ROW);
-    if (match?.[1] === undefined) {
-      throw new Error(
-        `${PAGE}:${start + 2 + offset}: a Name table row must start with one code span, got: ${line}`,
-      );
-    }
-    names.push(match[1]);
+  for (const block of apiSection(root, markdown)) {
+    visitParents(block, "table", (table) => {
+      const [header, ...rows] = table.children;
+      if (!isNameHeader(header)) {
+        return;
+      }
+      for (const row of rows) {
+        names.push(nameOf(row, markdown));
+      }
+    });
   }
   return names.sort();
 }
@@ -182,12 +139,15 @@ describe("the public entry", () => {
     expect(documentedNames(afterSection)).toEqual(documentedNames(page));
   });
 
-  // A fence shows its text; a table inside one renders as code, so it is not a documented name.
+  // Shown text (a fence, four-space indented code, an HTML block) renders as code or raw HTML, so a table inside it is
+  // not a documented name.
   const FENCED_TABLE =
     "| Name | Kind | Says |\n|---|---|---|\n| `notExported` | function | Fenced |";
   test.each([
     ["a backtick fence", `\`\`\`md\n${FENCED_TABLE}\n\`\`\``],
     ["a tilde fence", `~~~\n${FENCED_TABLE}\n~~~`],
+    ["an indented code block", FENCED_TABLE.replaceAll(/^/gm, "    ")],
+    ["an HTML block", `<div>\n${FENCED_TABLE}\n</div>`],
     ["a fence whose body opens another fence", `\`\`\`md\n\`\`\`ts\n${FENCED_TABLE}\n\n\`\`\``],
     [
       "a fence inside a blockquote",
@@ -244,6 +204,16 @@ describe("the public entry", () => {
       "a table after a triple-backtick inline span, which opens no fence",
       "### Io\n",
       "### Io\n\n```an inline `code` span```\n\n| Name | Kind | Says |\n|---|---|---|\n| `notExported` | function | Extra |\n\n",
+    ],
+    [
+      "a table whose rows run into a heading, which ends the table",
+      "### Io\n",
+      "### Io\n\n| Name | Kind | Says |\n|---|---|---|\n| `notExported` | function | Extra |\n#### Not a row\n\n",
+    ],
+    [
+      "a table after a quoted second-level heading, which is content and not the section's end",
+      "### Io\n",
+      "### Io\n\n> ## Quoted\n\n| Name | Kind | Says |\n|---|---|---|\n| `notExported` | function | Extra |\n\n",
     ],
   ])("%s is read as a documented name (negative control)", (_form, anchor, replacement) => {
     const variant = page.replace(anchor, replacement);
