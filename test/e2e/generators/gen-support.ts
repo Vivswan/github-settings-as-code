@@ -16,6 +16,7 @@ import type { Rng } from "./prng.js";
 
 export type Json = Record<string, unknown>;
 
+/** The knob's key on a wrapped entries form, in the harness's own words. */
 export const UNDECLARED_KEY = "_undeclared";
 
 /** The knob's values in the harness's own words: a value the engine adds or drops is a disagreement the fuzz surfaces. */
@@ -62,10 +63,7 @@ export function maybeWrapUndeclared(rng: Rng, entries: Json[]): EntriesForm {
     : { entries };
 }
 
-/**
- * Names that reach URLs, step-summary cells, and request paths: pipes and backslashes hit summary-table escaping,
- * quotes, spaces, percent signs, and slashes hit URL encoding, plus unicode and a near-limit length.
- */
+/** Names that reach URLs, step-summary cells, and request paths: pipes and backslashes hit summary-table escaping, quotes, spaces, percent signs, and slashes hit URL encoding, plus unicode and a near-limit length. */
 const HOSTILE_NAMES = [
   "plain",
   "with space",
@@ -112,10 +110,7 @@ export function uniqueBy(
   });
 }
 
-/**
- * The ONE pool secret references draw from; scenarioSecretEnv() (test/e2e/generators/settings.ts) builds the child env from the
- * same map, so a reference never names a variable the env lacks. Distinctive values, so leak checks can hunt them.
- */
+/** The ONE pool secret references draw from; scenarioSecretEnv() (generators/settings.ts) builds the child env from the same map, so a reference never names a variable the env lacks, and the distinctive values let leak checks hunt them. */
 export const E2E_SECRET_ENV = {
   E2E_SECRET_A: "e2e-hook-secret-alpha",
   E2E_SECRET_B: "e2e-hook-secret-bravo",
@@ -135,6 +130,8 @@ export type LiveWitnessKind = "matching" | "drift-update" | "extra-undeclared";
 export interface LiveWitness {
   /** The kind the state actually witnesses: "matching" when "drift-update" was requested but no entry declares a perturbable field. */
   kind: LiveWitnessKind;
+
+  /** The state to seed the mock with, keyed by its collection names. */
   state: LiveState;
 }
 
@@ -153,6 +150,7 @@ export function assertSentinelDisjoint(condition: boolean, detail: string): void
 export interface SliceSeed {
   /** Per field, the pool to draw its value from; a field not named here draws a type-derived value. */
   readonly fields?: Readonly<Record<string, (rng: Rng) => unknown>>;
+
   /** Per OPTIONAL field, the probability it is present; 0.5 when not named. */
   readonly present?: Readonly<Record<string, number>>;
 }
@@ -241,9 +239,12 @@ export interface LensWitnessSpec<
   Key extends string,
   M extends string,
 > {
+  /** The list section whose identity and lens the witness is built through. */
   readonly section: ListSectionModule<K, Ends, Live, F, Key, M>;
+
   /** Per write field, the value a drift-update witness stores instead; each disjoint from every generator pool. */
   readonly sentinels: Readonly<Record<string, unknown>>;
+
   /** The live item an extra-undeclared witness adds; absent when the section models no such kind. */
   readonly undeclared?: Json;
 }

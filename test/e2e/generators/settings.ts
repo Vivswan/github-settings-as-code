@@ -43,12 +43,7 @@ import {
 } from "./gen-support.js";
 import type { Rng } from "./prng.js";
 
-/**
- * A fixed age recipient, so scenarios and the fuzzer share one hermetic key; runner.test.ts re-validates it against
- * src's parseRecipient so it cannot rot silently. The matching identity is never needed.
- *   the harness never decrypts  -> the upload fails with a safe warning (no runner token)
- *   what the run proves         -> a real key keeps the run green and leaks nothing
- */
+/** A fixed age recipient shared by the scenarios and the fuzzer; runner.test.ts holds it valid for parseRecipient, and no identity exists since the harness never decrypts (the upload fails with a safe warning, lacking a runner token). */
 export const ARTIFACT_TEST_RECIPIENT =
   "age1wshulnlu6mpa4rx54w6xs9kscqw7uqem3fh748xsrfyqusgmfv2qfca3qt";
 
@@ -90,12 +85,42 @@ export const SECRET_LIST_SECTIONS = [
   "agents_secrets",
 ] as const satisfies readonly SectionKey[];
 
+/** The entries a declared list holds, none for an absent or null section. */
+function declaredEntries(value: unknown): Json[] {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  return entriesOf(value);
+}
+
+/** Every value drawn as a secret reference, in the harness's fixed order: webhook secrets, the secret lists in SECRET_LIST_SECTIONS order, then environment secrets. */
+function secretReferences(settings: Json): unknown[] {
+  const references: unknown[] = [];
+  for (const entry of declaredEntries(settings.webhooks)) {
+    references.push((entry.config as Json | undefined)?.secret);
+  }
+  for (const key of SECRET_LIST_SECTIONS) {
+    for (const entry of declaredEntries(settings[key])) {
+      references.push(entry.value);
+    }
+  }
+  const environments = Array.isArray(settings.environments)
+    ? (settings.environments as Json[])
+    : [];
+  for (const entry of environments) {
+    for (const secret of declaredEntries(entry.secrets)) {
+      references.push(secret.value);
+    }
+  }
+  return references;
+}
+
 export function scenarioSecretEnv(settings: Json): Record<string, string> | undefined {
   const env: Record<string, string> = {};
   let found = false;
-  const collect = (reference: unknown): void => {
+  for (const reference of secretReferences(settings)) {
     if (typeof reference !== "string") {
-      return;
+      continue;
     }
     const name = reference.slice(1);
     const value = E2E_SECRET_ENV[name as keyof typeof E2E_SECRET_ENV];
@@ -104,27 +129,6 @@ export function scenarioSecretEnv(settings: Json): Record<string, string> | unde
     }
     env[name] = value;
     found = true;
-  };
-  if (settings.webhooks !== undefined && settings.webhooks !== null) {
-    for (const entry of entriesOf(settings.webhooks)) {
-      collect((entry.config as Json | undefined)?.secret);
-    }
-  }
-  for (const key of SECRET_LIST_SECTIONS) {
-    if (settings[key] !== undefined && settings[key] !== null) {
-      for (const entry of entriesOf(settings[key])) {
-        collect(entry.value);
-      }
-    }
-  }
-  if (Array.isArray(settings.environments)) {
-    for (const entry of settings.environments as Json[]) {
-      if (entry.secrets !== undefined && entry.secrets !== null) {
-        for (const secret of entriesOf(entry.secrets)) {
-          collect(secret.value);
-        }
-      }
-    }
   }
   return found ? env : undefined;
 }
@@ -214,6 +218,7 @@ export function genSettings(rng: Rng, key: SectionKey): unknown {
 
 /** repository has no witness yet: a matching one needs normalized topics, the enable_* toggles, and fixture-aware absent fields. */
 export const WITNESS_SECTIONS = ["labels", "autolinks", "milestones", "deploy_keys"] as const;
+
 export type WitnessSection = (typeof WITNESS_SECTIONS)[number];
 
 /** The witness kinds each modeled section supports; extra-undeclared only where the default deletes. */
@@ -224,6 +229,7 @@ export const WITNESS_KINDS: Record<WitnessSection, readonly LiveWitnessKind[]> =
   deploy_keys: ["matching", "drift-update"],
 };
 
+/** One builder per WITNESS_SECTIONS member, each from its section's generators.ts. */
 const WITNESS_BUILDERS: Record<
   WitnessSection,
   (rng: Rng, declared: Json[], kind: LiveWitnessKind) => LiveWitness

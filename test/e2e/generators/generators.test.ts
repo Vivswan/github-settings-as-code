@@ -10,7 +10,7 @@ import { describeProblem } from "../../../src/problem.js";
 import { SECTION_KEYS, type SectionKey } from "../../../src/schema.js";
 import { allEndpoints, sectionShape } from "../../../src/sections/registry.js";
 import { grantablePermission } from "../mock/state.js";
-import { collectYmlFiles, MASK_KEYS, parseScenario } from "../scenario.js";
+import { collectYmlFiles, MASK_KEYS, parseScenario, type Scenario } from "../scenario.js";
 import { genDiscoveryScenario } from "./discovery-scenario.js";
 import { SECTION_PRIMARY_READ } from "./fault-targets.js";
 import {
@@ -34,7 +34,12 @@ import {
   mergeFeaturesOf,
   standaloneViewOf,
 } from "./merge-scenario.js";
-import { canariesOf, genMultiScenario, ORG_GATED_SECTIONS } from "./multi-scenario.js";
+import {
+  canariesOf,
+  genMultiScenario,
+  type MultiRepoMeta,
+  ORG_GATED_SECTIONS,
+} from "./multi-scenario.js";
 import { predictDiscovery, predictMerge } from "./oracle.js";
 import { Rng } from "./prng.js";
 import {
@@ -45,41 +50,306 @@ import {
   WITNESS_KINDS,
   WITNESS_SECTIONS,
 } from "./settings.js";
-import { genScenario } from "./single-scenario.js";
+import { genScenario, type ScenarioMeta } from "./single-scenario.js";
+
+/** The protection keys the branches generator may draw; an unknown one is a generator edit the mock and oracle never saw. */
+const KNOWN_PROTECTION_KEYS = new Set([
+  "required_status_checks",
+  "enforce_admins",
+  "required_pull_request_reviews",
+  "restrictions",
+  "required_signatures",
+  "required_linear_history",
+  "force_push_bypassers",
+  "required_deployments",
+]);
+
+/** Wildcard entries reconcile through GraphQL, whose translation table has no `restrictions`, so the generator must never draw these onto one. */
+const WILDCARD_FORBIDDEN_KEYS = new Set(["restrictions", "required_signatures"]);
+
+type Label = { name: string; color?: string; description?: string | null; new_name?: string };
+
+type Milestone = { title: string; description?: string | null; state?: string; due_on?: string };
+
+type Branch = { name: string; protection: Record<string, unknown> | null };
+
+/** The minority draws of the branches generator, each of which must fire across seeds or its path would go unfuzzed without anything failing. */
+interface BranchDraws {
+  signatures: number;
+  wildcards: number;
+  bypassers: number;
+  deployments: number;
+}
+
+/**
+ * The three-way drift offenders of one generated section doc: the published schema, validateSettingsDoc, and the
+ * section's zod shape; a witness section must also draw the bare list its live witness mirrors entry by entry,
+ * never the wrapped form.
+ */
+function driftOffenders(key: SectionKey, seed: number): string[] {
+  const value = genSettings(new Rng(seed * 7 + key.length), key);
+  const doc = { [key]: value };
+  const offenders: string[] = [];
+  try {
+    validateAgainstPublishedSchema(doc);
+  } catch (error) {
+    offenders.push(
+      `${key} seed ${seed}: published schema rejected the doc: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  const verdict = validateSettingsDoc(doc, "fuzz", SectionSelection.ALL, silentIo());
+  if ("error" in verdict) {
+    offenders.push(`${key} seed ${seed}: validateSettingsDoc rejected the doc: ${verdict.error}`);
+  }
+  const parsed = sectionShape(key).safeParse(value);
+  if (!parsed.success) {
+    offenders.push(
+      `${key} seed ${seed}: zod shape rejected the generated value ${JSON.stringify(value)}: ${JSON.stringify(parsed.error.issues)}`,
+    );
+  }
+  if ((WITNESS_SECTIONS as readonly string[]).includes(key) && !Array.isArray(value)) {
+    offenders.push(
+      `${key} seed ${seed}: witness section drew the wrapped form ${JSON.stringify(value)}`,
+    );
+  }
+  return offenders;
+}
+
+/** Every protection key is a known one, and a wildcard entry carries none without a GraphQL translation. */
+function expectKnownProtectionKeys(branch: Branch, wildcard: boolean, seed: number): void {
+  for (const key of Object.keys(branch.protection ?? {})) {
+    expect(
+      KNOWN_PROTECTION_KEYS.has(key),
+      `seed ${seed} branch "${branch.name}": generator drew unknown protection key "${key}"; add it to the allowed set or fix genSettings(branches)`,
+    ).toBe(true);
+    if (wildcard) {
+      expect(
+        WILDCARD_FORBIDDEN_KEYS.has(key),
+        `seed ${seed} wildcard branch "${branch.name}": protection key "${key}" has no GraphQL translation, so a wildcard rule cannot carry it`,
+      ).toBe(false);
+    }
+  }
+}
+
+/** One branches document's draws counted into `draws`, each protection asserted against the known keys. */
+function countBranchDraws(seed: number, draws: BranchDraws): void {
+  const branches = genSettings(new Rng(seed), "branches") as Branch[];
+  for (const branch of branches) {
+    const wildcard = /[*?[]/.test(branch.name);
+    if (wildcard) {
+      draws.wildcards++;
+    }
+    if (!branch.protection) {
+      continue;
+    }
+    expectKnownProtectionKeys(branch, wildcard, seed);
+    if ("required_signatures" in branch.protection) {
+      expect(typeof branch.protection.required_signatures).toBe("boolean");
+      draws.signatures++;
+    }
+    if ("force_push_bypassers" in branch.protection) {
+      draws.bypassers++;
+    }
+    if ("required_deployments" in branch.protection) {
+      draws.deployments++;
+    }
+  }
+}
+
+/** Exactly one field diverges, measured against the POST-rename state; a diverging name flips the final name's case only. */
+function expectOneLabelDivergence(declared: Label[], live: Label[]): void {
+  let diverged = 0;
+  for (const [j, label] of declared.entries()) {
+    const entry = live[j] as Label;
+    const finalName = label.new_name ?? label.name;
+    if (entry.name !== finalName) {
+      expect(entry.name.toLowerCase()).toBe(finalName.toLowerCase());
+      diverged++;
+    }
+    if (label.color !== undefined && entry.color !== label.color) {
+      diverged++;
+    }
+    if (label.description !== undefined && entry.description !== label.description) {
+      diverged++;
+    }
+  }
+  expect(diverged).toBe(1);
+}
+
+/**
+ * An allowlist is a STRICT nonempty subset of the declared sections, so the excluded outcome is always reachable.
+ * Input validation rejects a required section the allowlist excludes, so the generator must never pair the two.
+ */
+function expectAllowlistConsistent(
+  scenario: Scenario,
+  meta: ScenarioMeta,
+  declared: Set<SectionKey>,
+  seed: number,
+): void {
+  if (meta.onlySections === undefined) {
+    return;
+  }
+  expect(meta.onlySections.length).toBeGreaterThan(0);
+  expect(meta.onlySections.length).toBeLessThan(meta.sections.length);
+  for (const key of meta.onlySections) {
+    expect(declared.has(key)).toBe(true);
+  }
+  expect(scenario.inputs?.sections).toBe(meta.onlySections.join(","));
+  for (const key of meta.requiredSections) {
+    expect(
+      meta.onlySections.includes(key),
+      `seed ${seed}: required section "${key}" is excluded by the generated allowlist`,
+    ).toBe(true);
+  }
+}
+
+/**
+ * A wildcard entry is a RULE (creatable through GraphQL), never a git branch; a declared literal branch must be
+ * seeded, and a required-deployment environment must exist live, or the mock's silent-drop mimicry fails a
+ * fully-granted apply.
+ */
+function expectBranchesSeeded(scenario: Scenario, seed: number): void {
+  const branches = scenario.settings?.branches as Branch[] | undefined;
+  if (!branches) {
+    return;
+  }
+  const live = new Set((scenario.live_state?.branches as string[] | undefined) ?? []);
+  const liveEnvironments = scenario.live_state?.environments ?? {};
+  for (const b of branches) {
+    if (/[*?[]/.test(b.name)) {
+      expect(
+        live.has(b.name),
+        `seed ${seed}: wildcard branch "${b.name}" is a rule and must never be seeded as a git branch in live_state.branches`,
+      ).toBe(false);
+    } else {
+      expect(
+        live.has(b.name),
+        `seed ${seed}: declared branch "${b.name}" is not seeded in live_state.branches, so the scenario would permanently drift`,
+      ).toBe(true);
+    }
+    const deployments = b.protection?.required_deployments as
+      | { environments: string[] }
+      | null
+      | undefined;
+    for (const env of deployments?.environments ?? []) {
+      expect(
+        Object.keys(liveEnvironments),
+        `seed ${seed}: branch "${b.name}" requires deployment environment "${env}" that live_state.environments never seeds`,
+      ).toContain(env);
+    }
+  }
+}
+
+/** A declared workflow whose file is absent live would drift forever, so every declared path is seeded. */
+function expectWorkflowsSeeded(scenario: Scenario, seed: number): void {
+  const workflows = scenario.settings?.workflows as Array<{ path: string }> | undefined;
+  if (!workflows) {
+    return;
+  }
+  const livePaths = new Set(
+    ((scenario.live_state?.workflows as Array<{ path: string }> | undefined) ?? []).map(
+      (w) => w.path,
+    ),
+  );
+  for (const w of workflows) {
+    expect(
+      livePaths.has(w.path),
+      `seed ${seed}: declared workflow "${w.path}" is not seeded in live_state.workflows, so the scenario would permanently drift`,
+    ).toBe(true);
+  }
+}
+
+/** A raw-invalid target serves a settings_raw string of its kind, no settings object, and no canaries. */
+function expectRawTargetSpec(
+  scenario: Scenario,
+  repo: MultiRepoMeta,
+  raw: "unparseable" | "non-mapping",
+  seed: number,
+): void {
+  const spec = scenario.repos?.[repo.slug] as {
+    settings?: unknown;
+    settings_raw?: string;
+  };
+  expect(
+    typeof spec.settings_raw,
+    `seed ${seed}: raw-invalid target ${repo.slug} serves no settings_raw string`,
+  ).toBe("string");
+  expect(
+    spec.settings,
+    `seed ${seed}: raw-invalid target ${repo.slug} also carries a settings object`,
+  ).toBeUndefined();
+  if (raw === "unparseable") {
+    expect(() => parseYaml(spec.settings_raw as string)).toThrow();
+  } else {
+    const parsed: unknown = parseYaml(spec.settings_raw as string);
+    expect(typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)).toBe(false);
+  }
+  expect(canariesOf(repo)).toEqual([]);
+}
+
+/** A missing target serves `settings: null`; a normal target's meta names exactly the sections its own file declares. */
+function expectTargetSections(scenario: Scenario, repo: MultiRepoMeta, seed: number): void {
+  const spec = scenario.repos?.[repo.slug] as { settings?: Record<string, unknown> | null };
+  if (repo.target.kind === "missing") {
+    expect(spec.settings, `seed ${seed}: ${repo.slug}`).toBeNull();
+    return;
+  }
+  if (repo.target.kind !== "normal") {
+    return;
+  }
+  expect([...repo.target.meta.sections].sort() as string[], `seed ${seed}: ${repo.slug}`).toEqual(
+    Object.keys(spec.settings ?? {}).sort(),
+  );
+}
+
+/**
+ * The canary label is declared and mirrored live by NAME with a DIFFERENT description, so it drifts (check) or
+ * updates (apply): the name reaches the apply change detail and the descriptions the check drift detail. The repo
+ * canary is the live description, and the labels section must be predicted so the oracle expects the canary.
+ */
+function expectCanariesPlanted(scenario: Scenario, repo: MultiRepoMeta, canaries: string[]): void {
+  const spec = scenario.repos?.[repo.slug] as {
+    settings: Record<string, unknown> | null;
+    live_state?: {
+      labels?: Array<{ name?: string; description?: string }>;
+      repo?: { description?: string };
+    };
+  };
+  const nameCanary = canaries.find((c) => c.endsWith("-name"));
+  const declaredDescCanary = canaries.find((c) => c.endsWith("-declared"));
+  const liveDescCanary = canaries.find((c) => c.endsWith("-live"));
+  const repoCanary = canaries.find((c) => c.endsWith("-repo"));
+  const declared = spec.settings?.labels as
+    | Array<{ name?: string; description?: string }>
+    | undefined;
+  const declaredCanary = declared?.find((l) => l.name === nameCanary);
+  const liveCanary = spec.live_state?.labels?.find((l) => l.name === nameCanary);
+  expect(declaredCanary?.description).toBe(declaredDescCanary);
+  expect(liveCanary?.description).toBe(liveDescCanary);
+  expect(declaredDescCanary).not.toBe(liveDescCanary); // guarantees drift
+  expect(spec.live_state?.repo?.description).toBe(repoCanary);
+  expect(repo.target.kind).toBe("normal");
+  if (repo.target.kind === "normal") {
+    expect(repo.target.meta.sections).toContain("labels");
+  }
+}
+
+/** The directives address the fold; none may reach the written document. */
+function expectNoDirectiveReaches(merged: Json): void {
+  expect(merged._layering).toBeUndefined();
+  for (const value of Object.values(merged)) {
+    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+      expect((value as Record<string, unknown>)._layering).toBeUndefined();
+    }
+  }
+}
 
 describe("three-way drift detection", () => {
   test("every generated section doc passes schema, validateSettingsDoc, and its zod shape", () => {
     const offenders: string[] = [];
     for (const key of SECTION_KEYS) {
-      const shape = sectionShape(key);
       for (let i = 0; i < 200; i++) {
-        const value = genSettings(new Rng(i * 7 + key.length), key);
-        const doc = { [key]: value };
-        try {
-          validateAgainstPublishedSchema(doc);
-        } catch (error) {
-          offenders.push(
-            `${key} seed ${i}: published schema rejected the doc: ${error instanceof Error ? error.message : String(error)}`,
-          );
-        }
-        const verdict = validateSettingsDoc(doc, "fuzz", SectionSelection.ALL, silentIo());
-        if ("error" in verdict) {
-          offenders.push(
-            `${key} seed ${i}: validateSettingsDoc rejected the doc: ${verdict.error}`,
-          );
-        }
-        const parsed = shape.safeParse(value);
-        if (!parsed.success) {
-          offenders.push(
-            `${key} seed ${i}: zod shape rejected the generated value ${JSON.stringify(value)}: ${JSON.stringify(parsed.error.issues)}`,
-          );
-        }
-        // A witness section draws the bare list its live witness mirrors entry by entry, never the wrapped form.
-        if ((WITNESS_SECTIONS as readonly string[]).includes(key) && !Array.isArray(value)) {
-          offenders.push(
-            `${key} seed ${i}: witness section drew the wrapped form ${JSON.stringify(value)}`,
-          );
-        }
+        offenders.push(...driftOffenders(key, i));
       }
     }
     expect(
@@ -105,63 +375,14 @@ describe("generator couplings and pools", () => {
   });
 
   test("branches protection payloads only use known keys, wildcards only translated ones", () => {
-    const allowed = new Set([
-      "required_status_checks",
-      "enforce_admins",
-      "required_pull_request_reviews",
-      "restrictions",
-      "required_signatures",
-      "required_linear_history",
-      "force_push_bypassers",
-      "required_deployments",
-    ]);
-    // Wildcard entries reconcile through GraphQL, whose translation table has no `restrictions`, so the generator must never draw it onto one.
-    const wildcardForbidden = new Set(["restrictions", "required_signatures"]);
-    let signatureDraws = 0;
-    let wildcardDraws = 0;
-    let bypasserDraws = 0;
-    let deploymentDraws = 0;
+    const draws: BranchDraws = { signatures: 0, wildcards: 0, bypassers: 0, deployments: 0 };
     for (let i = 0; i < 200; i++) {
-      const branches = genSettings(new Rng(i), "branches") as Array<{
-        name: string;
-        protection: Record<string, unknown> | null;
-      }>;
-      for (const branch of branches) {
-        const wildcard = /[*?[]/.test(branch.name);
-        if (wildcard) {
-          wildcardDraws++;
-        }
-        if (branch.protection) {
-          for (const key of Object.keys(branch.protection)) {
-            expect(
-              allowed.has(key),
-              `seed ${i} branch "${branch.name}": generator drew unknown protection key "${key}"; add it to the allowed set or fix genSettings(branches)`,
-            ).toBe(true);
-            if (wildcard) {
-              expect(
-                wildcardForbidden.has(key),
-                `seed ${i} wildcard branch "${branch.name}": protection key "${key}" has no GraphQL translation, so a wildcard rule cannot carry it`,
-              ).toBe(false);
-            }
-          }
-          if ("required_signatures" in branch.protection) {
-            expect(typeof branch.protection.required_signatures).toBe("boolean");
-            signatureDraws++;
-          }
-          if ("force_push_bypassers" in branch.protection) {
-            bypasserDraws++;
-          }
-          if ("required_deployments" in branch.protection) {
-            deploymentDraws++;
-          }
-        }
-      }
+      countBranchDraws(i, draws);
     }
-    // Each minority draw must fire across seeds, or its path would go unfuzzed without anything failing.
-    expect(signatureDraws).toBeGreaterThan(0);
-    expect(wildcardDraws).toBeGreaterThan(0);
-    expect(bypasserDraws).toBeGreaterThan(0);
-    expect(deploymentDraws).toBeGreaterThan(0);
+    expect(draws.signatures).toBeGreaterThan(0);
+    expect(draws.wildcards).toBeGreaterThan(0);
+    expect(draws.bypassers).toBeGreaterThan(0);
+    expect(draws.deployments).toBeGreaterThan(0);
   });
 
   test("labels never collide on name identities", () => {
@@ -208,9 +429,6 @@ describe("generator couplings and pools", () => {
 });
 
 describe("genLiveWitness", () => {
-  type Label = { name: string; color?: string; description?: string | null; new_name?: string };
-  type Milestone = { title: string; description?: string | null; state?: string; due_on?: string };
-
   test("matching labels mirror every field the labels handler diffs", () => {
     for (let i = 0; i < 200; i++) {
       const declared = genSettings(new Rng(i), "labels") as Label[];
@@ -244,27 +462,10 @@ describe("genLiveWitness", () => {
     expect(matchingLive[0]?.color).toBe("d73a4a");
     expect(matchingLive[0]?.description).toBe("broken");
     expect(matchingLive[1]?.name).toBe("keep");
-    // drift-update diverges in exactly one field measured against the POST-rename state; the name candidate flips the final name's case.
     for (let i = 0; i < 50; i++) {
       const drift = genLiveWitness(new Rng(i), "labels", declared, "drift-update");
       expect(drift.kind).toBe("drift-update");
-      const live = drift.state.labels as Label[];
-      let diverged = 0;
-      for (const [j, label] of declared.entries()) {
-        const entry = live[j] as Label;
-        const finalName = label.new_name ?? label.name;
-        if (entry.name !== finalName) {
-          expect(entry.name.toLowerCase()).toBe(finalName.toLowerCase());
-          diverged++;
-        }
-        if (label.color !== undefined && entry.color !== label.color) {
-          diverged++;
-        }
-        if (label.description !== undefined && entry.description !== label.description) {
-          diverged++;
-        }
-      }
-      expect(diverged).toBe(1);
+      expectOneLabelDivergence(declared, drift.state.labels as Label[]);
     }
     const extra = genLiveWitness(new Rng(2), "labels", declared, "extra-undeclared");
     expect((extra.state.labels as Label[])[0]?.name).toBe("defect");
@@ -507,22 +708,7 @@ describe("genScenario", () => {
       expect([...meta.sections].sort()).toEqual([...declared].sort());
       expect(meta.sections.length).toBeGreaterThan(0);
       expect([403, 404, "fine_grained"]).toContain(meta.denialStyle);
-      // An allowlist is a STRICT nonempty subset of the declared sections, so the excluded outcome is always reachable.
-      if (meta.onlySections !== undefined) {
-        expect(meta.onlySections.length).toBeGreaterThan(0);
-        expect(meta.onlySections.length).toBeLessThan(meta.sections.length);
-        for (const key of meta.onlySections) {
-          expect(declared.has(key)).toBe(true);
-        }
-        expect(scenario.inputs?.sections).toBe(meta.onlySections.join(","));
-        // Input validation rejects a required section the allowlist excludes, so the generator must never pair the two.
-        for (const key of meta.requiredSections) {
-          expect(
-            meta.onlySections.includes(key),
-            `seed ${i}: required section "${key}" is excluded by the generated allowlist`,
-          ).toBe(true);
-        }
-      }
+      expectAllowlistConsistent(scenario, meta, declared, i);
     }
   });
 
@@ -586,54 +772,10 @@ describe("genScenario", () => {
   });
 
   test("declared branches and workflows are present in live_state so they converge", () => {
-    // A wildcard entry is a RULE (creatable through GraphQL), never a git branch; a required-deployment environment
-    // must exist live, or the mock's silent-drop mimicry fails a fully-granted apply.
     for (let i = 0; i < 200; i++) {
       const { scenario } = genScenario(new Rng(i));
-      const branches = scenario.settings?.branches as
-        | Array<{ name: string; protection: Record<string, unknown> | null }>
-        | undefined;
-      if (branches) {
-        const live = new Set((scenario.live_state?.branches as string[] | undefined) ?? []);
-        const liveEnvironments = scenario.live_state?.environments ?? {};
-        for (const b of branches) {
-          if (/[*?[]/.test(b.name)) {
-            expect(
-              live.has(b.name),
-              `seed ${i}: wildcard branch "${b.name}" is a rule and must never be seeded as a git branch in live_state.branches`,
-            ).toBe(false);
-          } else {
-            expect(
-              live.has(b.name),
-              `seed ${i}: declared branch "${b.name}" is not seeded in live_state.branches, so the scenario would permanently drift`,
-            ).toBe(true);
-          }
-          const deployments = b.protection?.required_deployments as
-            | { environments: string[] }
-            | null
-            | undefined;
-          for (const env of deployments?.environments ?? []) {
-            expect(
-              Object.keys(liveEnvironments),
-              `seed ${i}: branch "${b.name}" requires deployment environment "${env}" that live_state.environments never seeds`,
-            ).toContain(env);
-          }
-        }
-      }
-      const workflows = scenario.settings?.workflows as Array<{ path: string }> | undefined;
-      if (workflows) {
-        const livePaths = new Set(
-          ((scenario.live_state?.workflows as Array<{ path: string }> | undefined) ?? []).map(
-            (w) => w.path,
-          ),
-        );
-        for (const w of workflows) {
-          expect(
-            livePaths.has(w.path),
-            `seed ${i}: declared workflow "${w.path}" is not seeded in live_state.workflows, so the scenario would permanently drift`,
-          ).toBe(true);
-        }
-      }
+      expectBranchesSeeded(scenario, i);
+      expectWorkflowsSeeded(scenario, i);
     }
   });
 });
@@ -664,27 +806,7 @@ describe("genMultiScenario", () => {
         } else {
           sawNonMapping++;
         }
-        const spec = scenario.repos?.[repo.slug] as {
-          settings?: unknown;
-          settings_raw?: string;
-        };
-        expect(
-          typeof spec.settings_raw,
-          `seed ${i}: raw-invalid target ${repo.slug} serves no settings_raw string`,
-        ).toBe("string");
-        expect(
-          spec.settings,
-          `seed ${i}: raw-invalid target ${repo.slug} also carries a settings object`,
-        ).toBeUndefined();
-        if (repo.target.raw === "unparseable") {
-          expect(() => parseYaml(spec.settings_raw as string)).toThrow();
-        } else {
-          const parsed: unknown = parseYaml(spec.settings_raw as string);
-          expect(typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)).toBe(
-            false,
-          );
-        }
-        expect(canariesOf(repo)).toEqual([]);
+        expectRawTargetSpec(scenario, repo, repo.target.raw, i);
       }
     }
     expect(sawUnparseable).toBeGreaterThan(0);
@@ -707,18 +829,7 @@ describe("genMultiScenario", () => {
         orgMask: meta.globalMask,
       });
       for (const repo of meta.repos) {
-        const spec = scenario.repos?.[repo.slug] as { settings?: Record<string, unknown> | null };
-        if (repo.target.kind === "missing") {
-          expect(spec.settings, `seed ${i}: ${repo.slug}`).toBeNull();
-          continue;
-        }
-        if (repo.target.kind !== "normal") {
-          continue;
-        }
-        expect(
-          [...repo.target.meta.sections].sort() as string[],
-          `seed ${i}: ${repo.slug}`,
-        ).toEqual(Object.keys(spec.settings ?? {}).sort());
+        expectTargetSections(scenario, repo, i);
       }
     }
   });
@@ -827,33 +938,7 @@ describe("genMultiScenario", () => {
           continue;
         }
         sawCanary = true;
-        const spec = scenario.repos?.[repo.slug] as {
-          settings: Record<string, unknown> | null;
-          live_state?: {
-            labels?: Array<{ name?: string; description?: string }>;
-            repo?: { description?: string };
-          };
-        };
-        const nameCanary = canaries.find((c) => c.endsWith("-name"));
-        const declaredDescCanary = canaries.find((c) => c.endsWith("-declared"));
-        const liveDescCanary = canaries.find((c) => c.endsWith("-live"));
-        const repoCanary = canaries.find((c) => c.endsWith("-repo"));
-        // The canary label is declared and mirrored live by NAME with a DIFFERENT description, so it drifts (check) or
-        // updates (apply): the name reaches the apply change detail and the descriptions the check drift detail.
-        const declared = spec.settings?.labels as
-          | Array<{ name?: string; description?: string }>
-          | undefined;
-        const declaredCanary = declared?.find((l) => l.name === nameCanary);
-        const liveCanary = spec.live_state?.labels?.find((l) => l.name === nameCanary);
-        expect(declaredCanary?.description).toBe(declaredDescCanary);
-        expect(liveCanary?.description).toBe(liveDescCanary);
-        expect(declaredDescCanary).not.toBe(liveDescCanary); // guarantees drift
-        expect(spec.live_state?.repo?.description).toBe(repoCanary);
-        // The labels section must be predicted so the oracle expects the canary.
-        expect(repo.target.kind).toBe("normal");
-        if (repo.target.kind === "normal") {
-          expect(repo.target.meta.sections).toContain("labels");
-        }
+        expectCanariesPlanted(scenario, repo, canaries);
       }
     }
     expect(sawCanary).toBe(true);
@@ -1109,13 +1194,7 @@ describe("genMergeScenario", () => {
         );
         expect("error" in verdict ? verdict.error : undefined, `seed ${seed}`).toBeUndefined();
         expect(parseYaml(stringifyYaml(prediction.merged))).toEqual(prediction.merged);
-        // The directives address the fold; none may reach the written document.
-        expect(prediction.merged._layering).toBeUndefined();
-        for (const value of Object.values(prediction.merged)) {
-          if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-            expect((value as Record<string, unknown>)._layering).toBeUndefined();
-          }
-        }
+        expectNoDirectiveReaches(prediction.merged);
       }
       expect(merged).toBeGreaterThan(150);
     },

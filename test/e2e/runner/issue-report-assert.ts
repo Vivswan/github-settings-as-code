@@ -4,6 +4,20 @@ import { MARKER_LABEL } from "../../../src/report/issue-report.js";
 import type { LoggedRequest } from "../mock/contract.js";
 import type { Expect } from "../scenario.js";
 
+const ISSUE_WRITE = /^\/repos\/([^/]+\/[^/]+)\/issues(?:\/\d+)?$/;
+
+type IssueReportSpec = NonNullable<Expect["issue_report"]>;
+
+/** The accepted writes of one slug's report issue, which every assertion below reads. */
+interface IssueWrites {
+  spec: IssueReportSpec;
+  requests: LoggedRequest[];
+  issuesPath: string;
+  creates: LoggedRequest[];
+  patches: LoggedRequest[];
+  created: { title?: unknown; labels?: unknown } | undefined;
+}
+
 function stringBody(request: LoggedRequest | undefined): string | undefined {
   const body = (request?.body as { body?: unknown } | undefined)?.body;
   return typeof body === "string" ? body : undefined;
@@ -34,8 +48,6 @@ function deliveredIssueBodies(requests: LoggedRequest[], slug: string): string[]
 export function deliveredIssueBody(requests: LoggedRequest[], slug: string): string | undefined {
   return deliveredIssueBodies(requests, slug).at(-1);
 }
-
-const ISSUE_WRITE = /^\/repos\/([^/]+\/[^/]+)\/issues(?:\/\d+)?$/;
 
 /**
  * Every report body the run TRANSMITTED, whichever target it went to and whether or not GitHub accepted it: the create
@@ -75,75 +87,91 @@ export function checkReportLeaks(requests: LoggedRequest[], secrets: string[]): 
   return failures;
 }
 
-export function assertIssueReport(
-  spec: NonNullable<Expect["issue_report"]>,
-  requests: LoggedRequest[],
-): string[] {
+function createdCountFailures({ spec, creates }: IssueWrites): string[] {
+  if (spec.created_count === undefined || creates.length === spec.created_count) {
+    return [];
+  }
+  return [
+    `issue_report: created ${creates.length} report issue(s) for ${spec.slug}, expected ${spec.created_count}`,
+  ];
+}
+
+function titleFailures({ spec, created }: IssueWrites): string[] {
+  if (spec.title === undefined || !created || created.title === spec.title) {
+    return [];
+  }
+  return [`issue_report: title "${String(created.title)}" != expected "${spec.title}"`];
+}
+
+/**
+ * The marker label is the lookup key for one-issue-per-repo reuse. A reuse PATCH re-sends labels only when
+ * the title fallback scan found the marker stripped (labelsFailures pins that), so the create carries the assertion.
+ */
+function markerLabelFailures({ spec, created }: IssueWrites): string[] {
+  if (!created) {
+    return [];
+  }
+  const labels = Array.isArray(created.labels) ? created.labels.map(String) : [];
+  if (labels.includes(MARKER_LABEL)) {
+    return [];
+  }
+  return [
+    `issue_report: created issue for ${spec.slug} is missing the marker label "${MARKER_LABEL}"`,
+  ];
+}
+
+/** Pins that the label-filtered lookup happened at all; the title scan is a fallback after a miss, not a replacement. */
+function lookupFailures({ spec, requests, issuesPath }: IssueWrites): string[] {
+  if (!spec.lookup_by_label) {
+    return [];
+  }
+  const listedByLabel = requests.some(
+    (r) =>
+      r.method === "GET" &&
+      r.pathname === issuesPath &&
+      (r.query ?? "").includes(`labels=${MARKER_LABEL}`),
+  );
+  if (listedByLabel) {
+    return [];
+  }
+  return [
+    `issue_report: no issues list GET for ${spec.slug} used the labels=${MARKER_LABEL} filter`,
+  ];
+}
+
+/**
+ * The marker-reattach witness: a fallback-scan hit must reattach the stripped marker without
+ * clobbering human-added labels, so order and content are both pinned.
+ */
+function labelsFailures({ spec, creates, patches }: IssueWrites): string[] {
+  if (!spec.labels) {
+    return [];
+  }
+  const labelWrites = [...creates, ...patches]
+    .map((r) => (r.body as { labels?: unknown } | undefined)?.labels)
+    .filter((l): l is unknown[] => Array.isArray(l));
+  const written = labelWrites.at(-1)?.map(String);
+  if (written === undefined) {
+    return [
+      `issue_report: no issue write for ${spec.slug} carried a labels array, expected [${spec.labels.join(", ")}]`,
+    ];
+  }
+  if (written.length !== spec.labels.length || spec.labels.some((name, i) => written[i] !== name)) {
+    return [
+      `issue_report: issue labels written for ${spec.slug} were [${written.join(", ")}], expected [${spec.labels.join(", ")}]`,
+    ];
+  }
+  return [];
+}
+
+/**
+ * body_contains reads the final delivered body. body_lacks reads every accepted body, not only the final one: an
+ * earlier write already published what a later one replaced. An undelivered report lacks everything; body_contains,
+ * or created_count, is what pins delivery.
+ */
+function bodyFailures({ spec, requests }: IssueWrites): string[] {
   const failures: string[] = [];
-  const issuesPath = `/repos/${spec.slug}/issues`;
-  const creates = requests.filter(
-    (r) => accepted(r) && r.method === "POST" && r.pathname === issuesPath,
-  );
-  const patches = requests.filter(
-    (r) => accepted(r) && r.method === "PATCH" && r.pathname.startsWith(`${issuesPath}/`),
-  );
-
-  if (spec.created_count !== undefined && creates.length !== spec.created_count) {
-    failures.push(
-      `issue_report: created ${creates.length} report issue(s) for ${spec.slug}, expected ${spec.created_count}`,
-    );
-  }
-
-  const created = creates[0]?.body as { title?: unknown; labels?: unknown } | undefined;
   const deliveredBody = deliveredIssueBody(requests, spec.slug);
-
-  if (spec.title !== undefined && created && created.title !== spec.title) {
-    failures.push(`issue_report: title "${String(created.title)}" != expected "${spec.title}"`);
-  }
-  // The marker label is the lookup key for one-issue-per-repo reuse. A reuse PATCH re-sends labels only when
-  // the title fallback scan found the marker stripped (the labels check below pins that), so the create carries the assertion.
-  if (created) {
-    const labels = Array.isArray(created.labels) ? created.labels.map(String) : [];
-    if (!labels.includes(MARKER_LABEL)) {
-      failures.push(
-        `issue_report: created issue for ${spec.slug} is missing the marker label "${MARKER_LABEL}"`,
-      );
-    }
-  }
-  // Pins that the label-filtered lookup happened at all; the title scan is a fallback after a miss, not a replacement.
-  if (spec.lookup_by_label) {
-    const listedByLabel = requests.some(
-      (r) =>
-        r.method === "GET" &&
-        r.pathname === issuesPath &&
-        (r.query ?? "").includes(`labels=${MARKER_LABEL}`),
-    );
-    if (!listedByLabel) {
-      failures.push(
-        `issue_report: no issues list GET for ${spec.slug} used the labels=${MARKER_LABEL} filter`,
-      );
-    }
-  }
-  // The marker-reattach witness: a fallback-scan hit must reattach the stripped marker without
-  // clobbering human-added labels, so order and content are both pinned.
-  if (spec.labels) {
-    const labelWrites = [...creates, ...patches]
-      .map((r) => (r.body as { labels?: unknown } | undefined)?.labels)
-      .filter((l): l is unknown[] => Array.isArray(l));
-    const written = labelWrites.at(-1)?.map(String);
-    if (written === undefined) {
-      failures.push(
-        `issue_report: no issue write for ${spec.slug} carried a labels array, expected [${spec.labels.join(", ")}]`,
-      );
-    } else if (
-      written.length !== spec.labels.length ||
-      spec.labels.some((name, i) => written[i] !== name)
-    ) {
-      failures.push(
-        `issue_report: issue labels written for ${spec.slug} were [${written.join(", ")}], expected [${spec.labels.join(", ")}]`,
-      );
-    }
-  }
   for (const needle of spec.body_contains ?? []) {
     if (deliveredBody === undefined) {
       failures.push(
@@ -153,23 +181,54 @@ export function assertIssueReport(
       failures.push(`issue_report: report body for ${spec.slug} missing "${needle}"`);
     }
   }
-  // Every accepted body, not only the final one: an earlier write already published what a later one replaced. An
-  // undelivered report lacks everything; body_contains, or created_count, is what pins delivery.
   for (const needle of spec.body_lacks ?? []) {
     if (deliveredIssueBodies(requests, spec.slug).some((body) => body.includes(needle))) {
       failures.push(`issue_report: report body for ${spec.slug} must not contain "${needle}"`);
     }
   }
-  if (spec.state !== undefined) {
-    const stateWrites = [...creates, ...patches]
-      .map((r) => (r.body as { state?: unknown } | undefined)?.state)
-      .filter((s): s is string => typeof s === "string");
-    const finalState = stateWrites.at(-1) ?? (creates.length > 0 ? "open" : undefined);
-    if (finalState !== spec.state) {
-      failures.push(
-        `issue_report: final issue state "${finalState ?? "(none)"}" != expected "${spec.state}"`,
-      );
-    }
-  }
   return failures;
+}
+
+/** The final state is the last write that set one; a create without a later state write leaves the issue open. */
+function stateFailures({ spec, creates, patches }: IssueWrites): string[] {
+  if (spec.state === undefined) {
+    return [];
+  }
+  const stateWrites = [...creates, ...patches]
+    .map((r) => (r.body as { state?: unknown } | undefined)?.state)
+    .filter((s): s is string => typeof s === "string");
+  const finalState = stateWrites.at(-1) ?? (creates.length > 0 ? "open" : undefined);
+  if (finalState === spec.state) {
+    return [];
+  }
+  return [
+    `issue_report: final issue state "${finalState ?? "(none)"}" != expected "${spec.state}"`,
+  ];
+}
+
+export function assertIssueReport(spec: IssueReportSpec, requests: LoggedRequest[]): string[] {
+  const issuesPath = `/repos/${spec.slug}/issues`;
+  const creates = requests.filter(
+    (r) => accepted(r) && r.method === "POST" && r.pathname === issuesPath,
+  );
+  const patches = requests.filter(
+    (r) => accepted(r) && r.method === "PATCH" && r.pathname.startsWith(`${issuesPath}/`),
+  );
+  const writes: IssueWrites = {
+    spec,
+    requests,
+    issuesPath,
+    creates,
+    patches,
+    created: creates[0]?.body as { title?: unknown; labels?: unknown } | undefined,
+  };
+  return [
+    ...createdCountFailures(writes),
+    ...titleFailures(writes),
+    ...markerLabelFailures(writes),
+    ...lookupFailures(writes),
+    ...labelsFailures(writes),
+    ...bodyFailures(writes),
+    ...stateFailures(writes),
+  ];
 }

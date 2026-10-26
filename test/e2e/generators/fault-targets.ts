@@ -3,10 +3,7 @@ import { endpointMethod } from "../../../src/sections/contract/endpoints.js";
 import { allEndpoints, allGraphqlOps } from "../../../src/sections/registry.js";
 import type { MustBeNever } from "../../../src/types.js";
 
-/**
- * The one read each section issues in BOTH modes under the batteries' document (SECTION_FAULT_FIXTURE for the key-gated
- * ones), so a fault aimed there fires for certain; UNFAULTABLE_SECTIONS have none.
- */
+/** The one read each section issues in BOTH modes under the batteries' document (SECTION_FAULT_FIXTURE for the key-gated ones), so a fault aimed there fires for certain; UNFAULTABLE_SECTIONS have none. */
 export const SECTION_PRIMARY_READ = {
   repository: "repository.get",
   labels: "labels.list",
@@ -38,10 +35,7 @@ export const SECTION_PRIMARY_READ = {
 
 export type FaultableSection = keyof typeof SECTION_PRIMARY_READ;
 
-/**
- * The batteries' document for a section whose reads are each gated on a declared key, so its primary read fires for
- * certain; a section absent here reads unconditionally, so its document stays random.
- */
+/** The batteries' document for a section whose reads are each gated on a declared key, so its primary read fires for certain; a section absent here reads unconditionally, so its document stays random. */
 export const SECTION_FAULT_FIXTURE: {
   readonly [K in FaultableSection]?: NonNullable<SettingsFile[K]>;
 } = {
@@ -55,17 +49,14 @@ export const SECTION_FAULT_FIXTURE: {
 export const UNFAULTABLE_SECTIONS = [
   "check_suite_preferences",
 ] as const satisfies readonly SectionKey[];
+
 export type UnfaultableSection = (typeof UNFAULTABLE_SECTIONS)[number];
 
 type FaultClassified = FaultableSection | UnfaultableSection;
 type _UnclassifiedFaultSection = MustBeNever<Exclude<SectionKey, FaultClassified>>;
 type _DoublyClassifiedFaultSection = MustBeNever<Extract<FaultableSection, UnfaultableSection>>;
 
-/**
- * MAXIMAL on purpose: each entry declares every key it can without reaching a read, so the battery's claim is "a
- * full-width apply issues no read", not "a tiny apply stays quiet". The battery arms one-shot faults on every GET the
- * section declares (unfaultableReadKeys) and requires none to fire.
- */
+/** MAXIMAL on purpose: each entry declares every key it can without reaching a read, so the battery's claim is "a full-width apply issues no read", not "a tiny apply stays quiet". */
 export const UNFAULTABLE_APPLY_SETTINGS: {
   [K in UnfaultableSection]: NonNullable<SettingsFile[K]>;
 } = {

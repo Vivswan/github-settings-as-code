@@ -9,33 +9,25 @@ import { ISSUE_REPORT_ENDPOINTS } from "../../../src/report/issue-report.js";
 import { endpointPath } from "../../../src/sections/contract/endpoints.js";
 import { allEndpoints } from "../../../src/sections/registry.js";
 
-/**
- * Paths the action calls outside the section handlers (the repo probe is also repository.get and
- * collapses on dedup). The issue-channel paths are not listed: they derive from
- * ISSUE_REPORT_ENDPOINTS below.
- *   /repos/{owner}/{repo}                    -> the repository probe
- *   /repos/{owner}/{repo}/contents/{path}    -> the settings.yml read
- *   /repos/{owner}/{repo}/git/ref/{ref}      -> proves a settings.yml absent (Contents-gated)
- *   /user/repos                              -> multi-repo discovery
- */
+/** Paths the action calls outside the section handlers; the issue-channel paths are not listed, since they derive from ISSUE_REPORT_ENDPOINTS below. */
 const CORE_PATHS: readonly string[] = [
-  "/repos/{owner}/{repo}",
-  "/repos/{owner}/{repo}/contents/{path}",
-  "/repos/{owner}/{repo}/git/ref/{ref}",
-  "/user/repos",
+  "/repos/{owner}/{repo}", // the repository probe, also repository.get, so it collapses on dedup
+  "/repos/{owner}/{repo}/contents/{path}", // the settings.yml read
+  "/repos/{owner}/{repo}/git/ref/{ref}", // proves a settings.yml absent (Contents-gated)
+  "/user/repos", // multi-repo discovery
 ];
 
-/**
- * Real endpoints GitHub's descriptor does not document (src/upstream-gaps/ holds them), kept out of USED_PATHS so
- * the validator's load does not hard-error while it exempts the exact METHOD+path pairs. Staleness fails in both directions:
- *   an entry is no longer a declared endpoint path  -> excludeUndocumented() throws
- *   a package bump documents one                    -> loadSpec() errors; retire the gap file
- */
+/** Real endpoints GitHub's descriptor does not document (src/upstream-gaps/ holds them), kept out of USED_PATHS so the validator's load does not hard-error while it exempts the exact METHOD+path pairs. */
 export const UNDOCUMENTED_PATHS: readonly string[] = [
   ...new Set(UNDOCUMENTED_ROUTES.map(endpointPath)),
 ];
 
-/** Exported so validate.test.ts can pin the stale-entry throw directly. */
+/**
+ * Exported so validate.test.ts can pin the stale-entry throw directly. An UNDOCUMENTED_PATHS entry goes stale in
+ * both directions, and each fails by name:
+ *   an entry is no longer a declared endpoint path  -> this throws
+ *   a package bump documents one                    -> loadSpec() errors; retire the gap file
+ */
 export function excludeUndocumented(
   paths: ReadonlySet<string>,
   undocumented: readonly string[],
