@@ -19,6 +19,7 @@ function verdict(...rulesets: Record<string, unknown>[]): Verdict {
   );
 }
 
+/** A pattern parameter with every field, shared by the three message and email pattern rules. */
 const pattern = { operator: "regex", pattern: "^v\\d+", negate: false, name: "shown" };
 
 /** Every rule type the spec knows with parameters it accepts, plus one it does not know; a passthrough key on each kind. */

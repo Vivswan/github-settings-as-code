@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { ROOT } from "../root.js";
 import { fencedBlocks } from "./markdown.js";
 
+/** The tree whose every page is under test. */
 const DOCS = join(ROOT, "docs");
 
 /** The URL prefix docs/ pages use to reach a repository file (relative links may not leave docs/). */
@@ -20,6 +21,8 @@ export const REPO_FILE_URL = "https://github.com/Vivswan/github-settings-as-code
 
 /** A repo-relative path as a label token spells it: a known top-level directory, then segments. */
 const PATH_TOKEN = /^(?:src|test|docs|lib|\.github)\/[\w./-]*$/;
+
+/** An exported symbol as a label token spells it: an identifier, with `()` allowed after a function's. */
 const SYMBOL_TOKEN = /^[A-Za-z_]\w*(?:\(\))?$/;
 
 /** Whether `file` exports `name` at its top level, under any declaration keyword. */
@@ -68,6 +71,46 @@ function nodeLabels(mermaid: string): { labels: string[]; problems: string[] } {
   return { labels, problems };
 }
 
+/** A segment's code reading: the path it opens with, or the one an earlier segment bound, and the symbols after it; null for a caption. */
+function codeSegment(
+  tokens: readonly string[],
+  bound: string | undefined,
+): { path: string; symbols: readonly string[] } | null {
+  const [head] = tokens;
+  if (head !== undefined && PATH_TOKEN.test(head)) {
+    return { path: head, symbols: tokens.slice(1) };
+  }
+  if (bound === undefined) {
+    return null;
+  }
+  return { path: bound, symbols: tokens };
+}
+
+/** The problems of the symbols a segment lists after `path`, whose file exists at `file`. */
+function symbolProblems(
+  label: string,
+  path: string,
+  file: string,
+  symbols: readonly string[],
+): string[] {
+  const problems: string[] = [];
+  for (const symbol of symbols) {
+    if (!SYMBOL_TOKEN.test(symbol)) {
+      problems.push(
+        `"${label}": "${symbol}" is neither a symbol nor a path; after a path, a label lists only exported symbols`,
+      );
+      continue;
+    }
+    const name = symbol.replace(/\(\)$/, "");
+    if (path.endsWith("/")) {
+      problems.push(`"${label}": ${path} is a directory, so it exports no ${name}`);
+    } else if (!exportsSymbol(file, name)) {
+      problems.push(`"${label}": ${path} exports no ${name}`);
+    }
+  }
+  return problems;
+}
+
 export function labelProblems(label: string, root: string): string[] {
   const problems: string[] = [];
   const missing = new Set<string>();
@@ -77,16 +120,8 @@ export function labelProblems(label: string, root: string): string[] {
       .trim()
       .split(/[\s,]+/)
       .filter((token) => token !== "");
-    const [head] = tokens;
-    let path: string;
-    let symbols: string[];
-    if (head !== undefined && PATH_TOKEN.test(head)) {
-      path = head;
-      symbols = tokens.slice(1);
-    } else if (bound !== undefined) {
-      path = bound;
-      symbols = tokens;
-    } else {
+    const code = codeSegment(tokens, bound);
+    if (code === null) {
       if (segment.includes("/") || segment.includes("()")) {
         problems.push(
           `"${label}": "${segment.trim()}" looks like code but reads as a caption; a code segment starts with a src/, test/, docs/, lib/, or .github/ path`,
@@ -94,29 +129,16 @@ export function labelProblems(label: string, root: string): string[] {
       }
       continue;
     }
-    bound = path;
-    const file = join(root, path);
+    bound = code.path;
+    const file = join(root, code.path);
     if (!existsSync(file)) {
-      if (!missing.has(path)) {
-        missing.add(path);
-        problems.push(`"${label}": ${path} does not exist`);
+      if (!missing.has(code.path)) {
+        missing.add(code.path);
+        problems.push(`"${label}": ${code.path} does not exist`);
       }
       continue;
     }
-    for (const symbol of symbols) {
-      if (!SYMBOL_TOKEN.test(symbol)) {
-        problems.push(
-          `"${label}": "${symbol}" is neither a symbol nor a path; after a path, a label lists only exported symbols`,
-        );
-        continue;
-      }
-      const name = symbol.replace(/\(\)$/, "");
-      if (path.endsWith("/")) {
-        problems.push(`"${label}": ${path} is a directory, so it exports no ${name}`);
-      } else if (!exportsSymbol(file, name)) {
-        problems.push(`"${label}": ${path} exports no ${name}`);
-      }
-    }
+    problems.push(...symbolProblems(label, code.path, file, code.symbols));
   }
   return problems;
 }
@@ -137,6 +159,34 @@ function insideGeneratedRegion(lines: readonly string[], line: number): boolean 
   return open;
 }
 
+/** The problems of the "Demonstrated by:" line the concept diagram opening at `index` needs before the next heading. */
+function demonstrationProblems(lines: readonly string[], index: number, root: string): string[] {
+  const fenceEnd = lines.indexOf("```", index + 1);
+  const close = fenceEnd === -1 ? lines.length : fenceEnd;
+  const after = lines.slice(close + 1);
+  const nextHeading = after.findIndex((text) => /^#{1,6}\s/.test(text));
+  const section = nextHeading === -1 ? after : after.slice(0, nextHeading);
+  const demo = section.find((text) => text.startsWith("Demonstrated by:"));
+  if (demo === undefined) {
+    return [
+      `line ${index + 1}: the diagram has no "Demonstrated by:" line before the next heading`,
+    ];
+  }
+  const links = [...demo.matchAll(/\]\(([^)]+)\)/g)].map((m) => m[1] ?? "");
+  if (links.length === 0) {
+    return [`line ${index + 1}: the "Demonstrated by:" line links nothing`];
+  }
+  const problems: string[] = [];
+  for (const link of links) {
+    if (!link.startsWith(REPO_FILE_URL)) {
+      problems.push(`line ${index + 1}: "${link}" is not a ${REPO_FILE_URL} link`);
+    } else if (!existsSync(join(root, link.slice(REPO_FILE_URL.length)))) {
+      problems.push(`line ${index + 1}: "${link}" names a file that does not exist`);
+    }
+  }
+  return problems;
+}
+
 export function diagramProblems(markdown: string, root: string): string[] {
   const problems: string[] = [];
   for (const block of fencedBlocks(markdown, "mermaid")) {
@@ -151,31 +201,7 @@ export function diagramProblems(markdown: string, root: string): string[] {
     if (line !== "```mermaid" || insideGeneratedRegion(lines, index)) {
       continue;
     }
-    let close = lines.indexOf("```", index + 1);
-    if (close === -1) {
-      close = lines.length;
-    }
-    const after = lines.slice(close + 1);
-    const nextHeading = after.findIndex((text) => /^#{1,6}\s/.test(text));
-    const section = nextHeading === -1 ? after : after.slice(0, nextHeading);
-    const demo = section.find((text) => text.startsWith("Demonstrated by:"));
-    if (demo === undefined) {
-      problems.push(
-        `line ${index + 1}: the diagram has no "Demonstrated by:" line before the next heading`,
-      );
-      continue;
-    }
-    const links = [...demo.matchAll(/\]\(([^)]+)\)/g)].map((m) => m[1] ?? "");
-    if (links.length === 0) {
-      problems.push(`line ${index + 1}: the "Demonstrated by:" line links nothing`);
-    }
-    for (const link of links) {
-      if (!link.startsWith(REPO_FILE_URL)) {
-        problems.push(`line ${index + 1}: "${link}" is not a ${REPO_FILE_URL} link`);
-      } else if (!existsSync(join(root, link.slice(REPO_FILE_URL.length)))) {
-        problems.push(`line ${index + 1}: "${link}" names a file that does not exist`);
-      }
-    }
+    problems.push(...demonstrationProblems(lines, index, root));
   }
   return problems;
 }

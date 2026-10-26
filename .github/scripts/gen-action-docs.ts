@@ -37,11 +37,10 @@ import { runMain } from "./lib/entry.js";
 import { block, blockLine, blockLines, GeneratedRegion } from "./lib/generated-regions.js";
 import { type GeneratedFiles, regenerateFiles } from "./lib/region-driver.js";
 
+/** The repository root, two levels above this script. */
 const ROOT = join(import.meta.dir, "..", "..");
 
-/** The schema the scalars are rendered and read back under: a key YAML 1.1 would re-type (on, y, null, ...) comes out
- * quoted, for the 1.1 readers of action.yml still in the wild. Its merge tag is removed: it claims the string "<<"
- * itself, whatever style the scalar asks for, and action.yml carries no merges. */
+/** YAML 1.1, so a key it would re-type (on, y, null) comes out quoted for action.yml's 1.1 readers; the merge tag is removed, since it claims the string "<<" whatever style the scalar asks for and action.yml carries no merges. */
 const YAML_DOCUMENT: DocumentOptions & SchemaOptions & ParseOptions = {
   version: "1.1",
   merge: false,
@@ -51,25 +50,28 @@ const YAML_DOCUMENT: DocumentOptions & SchemaOptions & ParseOptions = {
     ),
 };
 
-/** Column budget for a folded description line, indent included; the library takes it as a soft limit (a line one
- * column over stays whole). Quoted scalars are JSON strings: one line however long, with JSON's escapes. */
+/** The library takes lineWidth as a soft limit for a folded description (a line one column over stays whole); quoted scalars are JSON strings, one line however long, with JSON's escapes. */
 const YAML_STYLE: ToStringOptions = { lineWidth: 78, singleQuote: false, doubleQuotedAsJSON: true };
 
+/** A name that may stay an unquoted YAML key. */
 const PLAIN_NAME = /^[a-z][a-z0-9-]*$/;
 
-/** One line not starting with whitespace: any other description would fold into a form action.yml does not carry (a
- * blank line, an indentation indicator, a kept newline), so the generator refuses it instead of writing it. */
+/** One line not starting with whitespace: any other description would fold into a form action.yml does not carry (a blank line, an indentation indicator, a kept newline), so the generator refuses it instead of writing it. */
 const DESCRIPTION = z
   .string()
   .regex(/^\S[^\r\n]*$/, "one line of text, not starting with whitespace");
 
+/** An input as action.yml spells it; every input is optional. */
 const INPUT_ENTRY = z.strictObject({
   description: DESCRIPTION,
   required: z.literal(false),
   default: z.string(),
 });
+
+/** An output as action.yml spells it. */
 const OUTPUT_ENTRY = z.strictObject({ description: DESCRIPTION });
 
+/** The one field every declaration renders; the rest is the entry's own. */
 const DESCRIBED = z.object({ description: DESCRIPTION });
 
 /** Each declaration parsed with `schema`, every own name kept (a record schema would drop `__proto__`, a name the
@@ -339,6 +341,7 @@ const SECRET_ROW_PROSE: PolicyRowProse = {
   override: "prune stale secrets - a deleted secret's value is unrecoverable",
 };
 
+/** The Defaults-per-section prose by section key; a knobbed section without a row stops the build naming it. */
 export const POLICY_ROW_PROSE: Record<UndeclaredPolicySection, PolicyRowProse> = {
   labels: {
     caveat: "Probot parity",
@@ -551,30 +554,44 @@ const EVERY_GATED =
 const SOME_GATED =
   /^- GitHub gates the (.+) reads at write, so `([a-z_]+)` needs its (.+) write grant in check mode to verify what they return\.$/;
 
+/** One gated-reads bullet read back, or why the line is not one; the caller prefixes the line number. */
+function gatedRead(line: string): Result<GatedRead, string> {
+  const every = EVERY_GATED.exec(line);
+  if (every !== null) {
+    return proseItems(every[1] ?? "").map(
+      (labels): GatedRead => ({
+        key: every[2] ?? "",
+        gated: "every",
+        labels,
+        ownGrant: every[3] === "its write grant",
+      }),
+    );
+  }
+  const some = SOME_GATED.exec(line);
+  if (some === null) {
+    return err("is not a gated-reads bullet");
+  }
+  // A route is listed as a code span, so the span is the item the prose rule judges.
+  const spans = proseListItems([...(some[1] ?? "").matchAll(/`[^`]+`/g)].map((m) => m[0]));
+  return Result.combine([proseItems(some[3] ?? ""), spans]).map(
+    ([labels = [], routeSpans = []]): GatedRead => ({
+      key: some[2] ?? "",
+      gated: "some",
+      routes: routeSpans.map((span) => span.slice(1, -1)),
+      labels,
+    }),
+  );
+}
+
 /** `lines` read back as gated-reads bullets, the first sitting at line `first`. */
 function parseGatedBullets(lines: readonly string[], first: number): Result<GatedRead[], string> {
   const reads: GatedRead[] = [];
   for (const [index, line] of lines.entries()) {
-    const every = EVERY_GATED.exec(line);
-    const some = SOME_GATED.exec(line);
-    if (every === null && some === null) {
-      return err(`line ${first + index} is not a gated-reads bullet`);
-    }
-    const labels = proseItems((every ?? some)?.[every !== null ? 1 : 3] ?? "");
-    // A route is listed as a code span, so the span is the item the prose rule judges.
-    const spans = proseListItems([...(some?.[1] ?? "").matchAll(/`[^`]+`/g)].map((m) => m[0]));
-    const read = Result.combine([labels, spans]);
+    const read = gatedRead(line);
     if (read.isErr()) {
       return err(`line ${first + index} ${read.error}`);
     }
-    const [readLabels = [], routeSpans = []] = read.value;
-    if (every !== null) {
-      const ownGrant = every[3] === "its write grant";
-      reads.push({ key: every[2] ?? "", gated: "every", labels: readLabels, ownGrant });
-    } else if (some !== null) {
-      const routes = routeSpans.map((span) => span.slice(1, -1));
-      reads.push({ key: some[2] ?? "", gated: "some", routes, labels: readLabels });
-    }
+    reads.push(read.value);
   }
   return ok(reads);
 }
@@ -617,6 +634,35 @@ function knobbedSections(): KnobbedSection[] {
   });
 }
 
+/** The region's YAML under the `key` line as data, or why it does not parse or convert. The library counts the
+ * prepended key line as line 1, so a parse error's line is counted in the body instead. */
+function yamlData(key: string, body: string): Result<unknown, string> {
+  const doc = parseDocument(`${key}:${body}`, { ...YAML_DOCUMENT, prettyErrors: false });
+  const error = doc.errors[0];
+  if (error !== undefined) {
+    const line = body.slice(0, error.pos[0] - `${key}:`.length).split("\n").length - 1;
+    return err(`line ${line} does not parse as YAML (${error.message})`);
+  }
+  // An alias without its anchor parses but does not convert; to the guard that is a refusal.
+  return Result.fromThrowable(
+    (): unknown => doc.toJS(),
+    (failure) =>
+      `it does not convert from YAML (${failure instanceof Error ? failure.message : String(failure)})`,
+  )();
+}
+
+/** The `key` mapping of the converted YAML, or why the body is not one. */
+function keyMapping(root: unknown, key: string): Result<Record<string, unknown>, string> {
+  const mapping =
+    typeof root === "object" && root !== null
+      ? ((root as Record<string, unknown>)[key] ?? {})
+      : root;
+  if (typeof mapping !== "object" || mapping === null || Array.isArray(mapping)) {
+    return err(`it is not a mapping of ${key} declarations`);
+  }
+  return ok(mapping as Record<string, unknown>);
+}
+
 /**
  * A YAML region's body read back as the `key` mapping's declarations under `entry`, every own name kept; the
  * emitter is its own grammar, so a spelling it does not write fails the byte compare that follows.
@@ -625,41 +671,18 @@ function yamlDeclarations<T>(
   key: string,
   entry: z.ZodType<T>,
 ): (body: string) => Result<Record<string, T>, string> {
-  return (body) => {
-    const doc = parseDocument(`${key}:${body}`, { ...YAML_DOCUMENT, prettyErrors: false });
-    const error = doc.errors[0];
-    if (error !== undefined) {
-      // The library counts the prepended key line as line 1, so the line is counted in the body instead.
-      const line = body.slice(0, error.pos[0] - `${key}:`.length).split("\n").length - 1;
-      return err(`line ${line} does not parse as YAML (${error.message})`);
-    }
-    let root: unknown;
-    try {
-      root = doc.toJS();
-    } catch (failure) {
-      // An alias without its anchor parses but does not convert; to the guard that is a refusal.
-      return err(
-        `it does not convert from YAML (${failure instanceof Error ? failure.message : String(failure)})`,
-      );
-    }
-    const mapping =
-      typeof root === "object" && root !== null
-        ? ((root as Record<string, unknown>)[key] ?? {})
-        : root;
-    if (typeof mapping !== "object" || mapping === null || Array.isArray(mapping)) {
-      return err(`it is not a mapping of ${key} declarations`);
-    }
-    const declared = declarations(entry, mapping as Record<string, unknown>);
-    return typeof declared === "string"
-      ? err(`it is not a set of ${key} declarations (${declared})`)
-      : ok(declared);
-  };
+  return (body) =>
+    yamlData(key, body)
+      .andThen((root) => keyMapping(root, key))
+      .andThen((mapping) => {
+        const declared = declarations(entry, mapping);
+        return typeof declared === "string"
+          ? err(`it is not a set of ${key} declarations (${declared})`)
+          : ok(declared);
+      });
 }
 
-/**
- * Each region reads its body back and re-renders it, so a marker moved elsewhere fails instead of regenerating
- * in the wrong place or erasing authored text.
- */
+/** Each region reads its body back and re-renders it, so a marker moved elsewhere fails instead of regenerating in the wrong place or erasing authored text. */
 export const FILES: GeneratedFiles = {
   "action.yml": {
     regions: [

@@ -51,7 +51,9 @@ export function prereleaseVersion(
 }
 
 export interface PrereleaseVersionOptions {
+  /** The checkout the manifest and the position on main are read from. */
   cwd: string;
+
   /** The commit whose build is published; the checkout must be at it. */
   sourceSha: string;
 }
@@ -109,11 +111,6 @@ function parseMinted(version: string): MintedVersion {
   return minted;
 }
 
-/** Whether release `a` sorts above `b`: by major, minor, patch. */
-function newerRelease(a: [number, number, number], b: [number, number, number]): boolean {
-  return a[0] !== b[0] ? a[0] > b[0] : a[1] !== b[1] ? a[1] > b[1] : a[2] > b[2];
-}
-
 /** What the registry holds for the package: every published version, and where each dist-tag points. */
 export interface Packument {
   versions: Record<string, unknown>;
@@ -128,7 +125,9 @@ export type NextVerdict = PublishVerdict & { notices: string[] };
 
 /** A published pre-release whose source is a strict descendant of this run's: newer on main, whatever its numbers say. */
 interface Descendant {
+  /** The published pre-release version. */
   version: string;
+
   /** The full sha the version's sha7 resolved to. */
   sha: string;
 }
@@ -258,7 +257,10 @@ export function stablePublishVerdict(version: string, packument: Packument | nul
   // pre-release): a packument always carries that key (npm/registry REGISTRY-API.md, "dist-tags: an object with at
   // least one key, latest"), whatever --tag asked for. A release must take latest over, so only a newer RELEASE holds one back.
   const held = latest === undefined ? null : parseMinted(latest);
-  if (held?.sha7 === null && newerRelease(held.release, parseMinted(version).release)) {
+  if (
+    held?.sha7 === null &&
+    Bun.semver.order(held.release.join("."), parseMinted(version).release.join(".")) > 0
+  ) {
     return {
       publish: false,
       version,
@@ -326,9 +328,12 @@ function releaseVersionAt(cwd: string, treeish: string, tag: string): string {
 }
 
 export type NpmVerdictOptions = {
+  /** The checkout the manifest and package.json are read from. */
   cwd: string;
+
   /** The commit whose build is published; the checkout must be at it. */
   sourceSha: string;
+
   /** The registry's base URL, where the package's record is read. */
   registry: string;
 } & ({ channel: "next" } | { channel: "stable"; tag: string });
@@ -359,14 +364,45 @@ export type ConfirmVerdict =
   | { outcome: "behind"; version: string; reason: string };
 
 export interface NpmConfirmOptions {
+  /** The checkout the version and the package name are read from. */
   cwd: string;
+
   /** The commit whose build this run published; the checkout must be at it. */
   sourceSha: string;
+
   /** The registry's base URL, where the package's record is read. */
   registry: string;
-  /** How many times the record is read while it lacks the version, and the pause between reads. */
+
+  /** How many times the record is read while it lacks the version. */
   attempts: number;
+
+  /** The pause between reads. */
   delayMs: number;
+}
+
+/** The verdict once the record shows the version: settled, or behind when the record also holds a descendant's
+ * pre-release that next does not name. */
+function shownVerdict(
+  options: NpmConfirmOptions,
+  name: string,
+  version: string,
+  packument: Packument,
+  reads: number,
+): ConfirmVerdict {
+  const { cwd, sourceSha } = options;
+  const { descendants, newest } = placePublished(cwd, sourceSha, packument);
+  const next = packument["dist-tags"].next;
+  if (newest !== null && !descendants.some((descendant) => descendant.version === next)) {
+    return {
+      outcome: "behind",
+      version,
+      reason:
+        `the registry's next is ${next ?? "unset"} while it holds ${newest.version}, whose source ${newest.sha.slice(0, 7)} ` +
+        `is a descendant of ${sourceSha.slice(0, 7)} on main; this stale run moved next back, and the next release-PR ` +
+        `refresh moves it forward (npm dist-tag add ${name}@${newest.version} next repairs it by hand)`,
+    };
+  }
+  return { outcome: "settled", version, reads };
 }
 
 /**
@@ -398,19 +434,7 @@ export async function npmConfirm(options: NpmConfirmOptions): Promise<ConfirmVer
       continue;
     }
     if (packument !== null && version in packument.versions) {
-      const { descendants, newest } = placePublished(cwd, sourceSha, packument);
-      const next = packument["dist-tags"].next;
-      if (newest !== null && !descendants.some((descendant) => descendant.version === next)) {
-        return {
-          outcome: "behind",
-          version,
-          reason:
-            `the registry's next is ${next ?? "unset"} while it holds ${newest.version}, whose source ${newest.sha.slice(0, 7)} ` +
-            `is a descendant of ${sourceSha.slice(0, 7)} on main; this stale run moved next back, and the next release-PR ` +
-            `refresh moves it forward (npm dist-tag add ${name}@${newest.version} next repairs it by hand)`,
-        };
-      }
-      return { outcome: "settled", version, reads: read };
+      return shownVerdict(options, name, version, packument, read);
     }
     if (read === attempts) {
       return {
@@ -436,9 +460,12 @@ function npm(cwd: string, env: Record<string, string>, ...args: string[]): void 
 }
 
 export type NpmPublishOptions = {
+  /** The checkout npm publishes from. */
   cwd: string;
+
   /** The commit whose build is published; the checkout must be at it. */
   sourceSha: string;
+
   /** The registry's base URL, where the package's record is read. */
   registry: string;
 } & (

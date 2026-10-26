@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import { executePlan } from "../../../src/engine/execute.js";
 import { validateSectionShapes } from "../../../src/engine/validate.js";
-import type { GitHubClient } from "../../../src/github/api.js";
+import type { ClientAnswer, GitHubClient } from "../../../src/github/api.js";
 import type { SectionInput } from "../../../src/sections/contract/declared.js";
 import type { SectionFailure } from "../../../src/sections/contract/errors.js";
 import { sectionGrant } from "../../../src/sections/contract/operations.js";
@@ -75,6 +75,23 @@ const echo = (fields: Record<string, unknown>) => ({
   "GRAPHQL UpdateRepositoryFeatures": { data: { updateRepository: { repository: fields } } },
 });
 
+/** What a toggle's GET answers, as GitHub does: an off toggle 404s, except private vulnerability reporting, which answers `{enabled}` either way. */
+function toggleRead(feature: string, enabled: boolean): ClientAnswer<unknown> {
+  const off = { error: { status: 404, message: "Not Found", body: "" } } as const;
+  switch (feature) {
+    case "vulnerability-alerts":
+      return enabled ? { data: null } : off;
+    case "automated-security-fixes":
+      return enabled ? { data: { enabled: true, paused: false } } : off;
+    case "private-vulnerability-reporting":
+      return { data: { enabled } };
+    case "immutable-releases":
+      return enabled ? { data: { enabled: true, enforced_by_owner: false } } : off;
+    default:
+      return off;
+  }
+}
+
 /** A stateful fake of the repository API: each toggle GET answers as GitHub does, and the write-only LFS pair is stored nowhere. */
 function liveRepo(seed: {
   repo?: Record<string, unknown>;
@@ -84,7 +101,6 @@ function liveRepo(seed: {
   const repo: Record<string, unknown> = { topics: [], ...seed.repo };
   const toggles: Record<string, boolean> = { ...seed.toggles };
   const feature = seed.features ?? { hasSponsorshipsEnabled: false, issueCreationPolicy: "ALL" };
-  const off = { error: { status: 404, message: "Not Found", body: "" } } as const;
   return withListing({
     writes: [],
     async tryRequest(method, path, payload) {
@@ -107,19 +123,7 @@ function liveRepo(seed: {
         toggles[feature] = method === "PUT";
         return { data: null };
       }
-      const enabled = toggles[feature] === true;
-      switch (feature) {
-        case "vulnerability-alerts":
-          return enabled ? { data: null } : off;
-        case "automated-security-fixes":
-          return enabled ? { data: { enabled: true, paused: false } } : off;
-        case "private-vulnerability-reporting":
-          return { data: { enabled } };
-        case "immutable-releases":
-          return enabled ? { data: { enabled: true, enforced_by_owner: false } } : off;
-        default:
-          return off;
-      }
+      return toggleRead(feature, toggles[feature] === true);
     },
     async tryGraphql(op, variables) {
       if (op.name === "RepositoryFeatures") {

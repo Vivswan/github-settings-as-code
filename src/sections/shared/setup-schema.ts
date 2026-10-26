@@ -13,18 +13,18 @@ type Names = readonly [string, ...string[]];
 
 /**
  * A setup's `languages` vocabulary: what its PATCH accepts, and what only its GET reports. Declared
- * `as const satisfies SetupLanguages`, so the slice's inferred type keeps the literal names.
+ * `as const satisfies SetupLanguages`, so the slice's inferred type keeps the literal names. A GET-only
+ * name folds onto the declarable name it stands for, or onto null when it has none and is left out with
+ * a note wherever it is read:
+ *
+ *   javascript, typescript -> "javascript-typescript"   (code scanning)
+ *   rust                   -> null                      (code quality)
  */
 export interface SetupLanguages<Declarable extends Names = Names> {
   /** The PATCH body's enum; the slice's `languages` items and the published schema come from it. */
   readonly declarable: Declarable;
-  /**
-   * The GET's names the PATCH does not take, each with the declarable name it folds onto, or null
-   * when it has none and is left out with a note wherever it is read.
-   *
-   *   javascript, typescript -> "javascript-typescript"   (code scanning)
-   *   rust                   -> null                      (code quality)
-   */
+
+  /** The GET's names the PATCH does not take, each with its fold (the rows above). */
   readonly getOnly: Readonly<Record<string, string | null>>;
 }
 

@@ -15,19 +15,34 @@ import {
 import type { SettingsFile } from "../../src/schema.js";
 import { MockApi, type Route } from "../mock-api.js";
 
+/** The private target every case reports on. */
 const SLUG = { owner: "o", name: "private-repo", slug: "o/private-repo" };
+
+/** The write that creates the marker label. */
 const LABEL_CREATE = "POST /repos/o/private-repo/labels";
+
+/** The lookup of the issues carrying the marker label, first page. */
 const LABEL_LOOKUP =
   "GET /repos/o/private-repo/issues?state=all&labels=settings-as-code-report&per_page=100&page=1";
+
+/** Its second page. */
 const LABEL_LOOKUP_PAGE_2 =
   "GET /repos/o/private-repo/issues?state=all&labels=settings-as-code-report&per_page=100&page=2";
+
+/** The write that opens a new report issue. */
 const ISSUE_CREATE = "POST /repos/o/private-repo/issues";
+
+/** The newest-first scan of every issue, for a report found by its title when none carries the label. */
 const TITLE_SCAN =
   "GET /repos/o/private-repo/issues?state=all&sort=created&direction=desc&per_page=100&page=1";
+
 /** The quiet path of mode on-failure: only open marker issues are looked up, and nothing is created. */
 const OPEN_LOOKUP_PATH =
   "/repos/o/private-repo/issues?state=open&labels=settings-as-code-report&per_page=100&page=1";
+
+/** That lookup as a route key. */
 const OPEN_LOOKUP = `GET ${OPEN_LOOKUP_PATH}`;
+
 /** No write reached the target: what a failure before its first write carries. */
 const NOTHING_LANDED = { labelCreated: false, createdIssue: null };
 

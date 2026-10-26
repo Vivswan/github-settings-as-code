@@ -7,9 +7,12 @@ import { type GeneratedRegion, regenerateRegions } from "./generated-regions.js"
 
 /** One file a generator writes into: its regions, and the whole-file rules no region's placement can carry. */
 export interface GeneratedFile {
+  /** The regions, re-rendered in this order. */
   readonly regions: readonly GeneratedRegion[];
+
   /** Why the file as read is not one the generator writes into, judged before any region is; `path` names the file. */
   readonly shape?: (text: string, path: string) => string | undefined;
+
   /** Why the file reads wrong once every region is re-rendered, judged over the regenerated text. */
   readonly rendered?: (text: string, path: string) => string | undefined;
 }

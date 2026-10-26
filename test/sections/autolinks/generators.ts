@@ -13,10 +13,10 @@ import {
 } from "../../e2e/generators/gen-support.js";
 import type { Rng } from "../../e2e/generators/prng.js";
 
-// No pool prefix begins another: a suffixed collision ("TICKET-" and "TICKET--1") would be the
-// pair the section refuses before its first create.
+// No pool prefix begins another: a suffixed collision ("TICKET-" and "TICKET--1") would be the pair the section refuses before its first create.
 const KEY_PREFIXES = ["JIRA-", "TICKET-", "REF-"] as const;
 
+/** One autolink over the slice; genAutolinks overrides key_prefix from a shrinking pool, so a run never repeats one. */
 const genAutolink = generatorFromSlice(AutolinkConfig, {
   fields: {
     key_prefix: (rng) => rng.pick(KEY_PREFIXES),

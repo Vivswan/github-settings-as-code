@@ -10,9 +10,13 @@ import { appendFileSync, closeSync, openSync } from "node:fs";
 import { constants } from "node:os";
 
 export interface RunOptions {
+  /** Added over the step's own environment. */
   env?: Record<string, string>;
-  /** stdout goes to this file instead of the step's log, as `> file` would; `stderrToo` sends stderr there as well. */
+
+  /** stdout goes to this file instead of the step's log, as `> file` would. */
   stdoutFile?: string;
+
+  /** stderr goes to `stdoutFile` as well, as `> file 2>&1` would. */
   stderrToo?: boolean;
 }
 

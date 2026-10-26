@@ -74,8 +74,7 @@ export function push(cwd: string, ...pushArgs: string[]): Error | null {
   }
 }
 
-/** The identity the pipeline's own commits carry, passed per invocation: written into a checkout's config it would
- * outlive the run and stamp every later commit made from that repository, or any worktree sharing it. */
+/** Passed per invocation: written into a checkout's config it would outlive the run and stamp every later commit made from that repository, or any worktree sharing it. */
 export const BOT_IDENTITY = {
   GIT_AUTHOR_NAME: "settings-as-code-release",
   GIT_AUTHOR_EMAIL: "settings-as-code-release@users.noreply.github.com",
@@ -117,6 +116,7 @@ export function manifestVersionAt(cwd: string, treeish: string): string {
 export interface MainPosition {
   /** Commits reachable from it along first parents: one more per merge to main, whatever a merged PR's branch held. */
   count: number;
+
   /** Its committer date in UTC, YYYYMMDD. */
   date: string;
 }

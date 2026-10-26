@@ -20,6 +20,7 @@ import { githubStoresDueOn } from "./mock.js";
 /** A fixed pool, never Date.now, so generation stays deterministic; one day per DST state and one at the year's edge. */
 const DUE_DATES = ["2026-01-15", "2026-06-30", "2026-12-31"] as const;
 
+/** One milestone over the slice; due_on is present on 40% of draws, so the dated and the undated compare both run. */
 const genMilestone = generatorFromSlice(MilestoneConfig, {
   fields: {
     title: (rng) => rng.pick(["v1", "v2", "backlog"]),

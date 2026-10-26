@@ -107,8 +107,28 @@ export interface SetupSectionModule<K extends SetupKey> {
   ) => Promise<Result<SectionSnapshot<K>, SectionFailure>>;
 }
 
+/** What the factory's plan closes over for one setup: the key's facts from SETUPS beside the noun and the minted dictionary. */
+interface Minted {
+  readonly key: SetupKey;
+  readonly noun: string;
+  readonly slice: z.ZodObject;
+  readonly languages: SetupLanguages;
+  readonly endpoints: WideEndpoints;
+}
+
 /** The GET body: the whole configuration as a mapping, which subsetDiff compares the declared keys against. */
 const LiveSetup = z.looseObject({});
+
+/** The PATCH name a reported language folds onto, or null when the vocabulary has none for it. */
+function declarableName(vocabulary: SetupLanguages, name: string): string | null {
+  if (vocabulary.declarable.includes(name)) {
+    return name;
+  }
+  if (Object.hasOwn(vocabulary.getOnly, name)) {
+    return vocabulary.getOnly[name] ?? null;
+  }
+  return null;
+}
 
 /**
  * The GET body in the PATCH's vocabulary: `languages` with the GET-only names folded onto their
@@ -126,39 +146,29 @@ function inPatchVocabulary(
   const folded = new Set<string>();
   const undeclarable: string[] = [];
   for (const name of reported) {
-    const declarable = vocabulary.declarable.includes(name)
-      ? name
-      : Object.hasOwn(vocabulary.getOnly, name)
-        ? vocabulary.getOnly[name]
-        : undefined;
-    if (typeof declarable === "string") {
-      folded.add(declarable);
-    } else {
+    const declarable = declarableName(vocabulary, name);
+    if (declarable === null) {
       undeclarable.push(name);
+      continue;
     }
+    folded.add(declarable);
   }
   return { live: { ...live, languages: [...folded] }, undeclarable };
 }
 
-export function setupSection<K extends SetupKey>(setup: {
-  key: K;
-  /** The fine-grained-PAT permission gating both endpoints. */
-  permission: SectionPermission;
-  /** What else a 403 here can mean (the feature not enabled, an archived repository). */
-  grantCaveat: string;
-  /** The output noun for change lines ("code scanning default setup"). */
-  noun: string;
-}): SetupSectionModule<K> {
-  const { key, permission, grantCaveat, noun } = setup;
-  const { path, slice, languages, read }: Setup<K> = SETUPS[key];
-  const readGrade: { accessGrade?: "write" } = read;
-  const endpoints: SetupEndpoints<K> = {
+/** The GET/PATCH pair at one setup's path, the GET graded as SETUPS says. */
+function setupEndpoints<K extends SetupKey>(
+  path: Setup<K>["path"],
+  noun: string,
+  read: { accessGrade?: "write" },
+): SetupEndpoints<K> {
+  return {
     get: {
       route: `GET /repos/{owner}/{repo}/${path}`,
       statuses: { 200: `the current ${noun} configuration` },
       // A fine-grained token conceals a denied GET as 404; reading it as "not configured" would be wrong, so it is a denial.
       primaryRead: { notFound: "denied" },
-      ...readGrade,
+      ...read,
     },
     update: {
       route: `PATCH /repos/{owner}/{repo}/${path}`,
@@ -169,9 +179,15 @@ export function setupSection<K extends SetupKey>(setup: {
       },
     },
   };
+}
 
-  const wide: WideEndpoints = endpoints;
-  const plan: WidePlan<SetupKey, WideEndpoints> = async (ctx, declared) => {
+/**
+ * The verbatim-PATCH plan over the wide dictionary: the declared keys compared against the GET body in the PATCH's
+ * vocabulary, a key outside the slice that the GET never echoes noted, and the one PATCH planned on any drift.
+ */
+function setupPlan(minted: Minted): WidePlan<SetupKey, WideEndpoints> {
+  const { key, noun, slice, languages, endpoints } = minted;
+  return async (ctx, declared) => {
     const desired: Record<string, unknown> = declared;
     const planned: SectionPlan<PlannedOp<WideEndpoints>> = { ops: [], notes: [], drift: [] };
     const read = await ctx.read.get.call(LiveSetup);
@@ -206,11 +222,11 @@ export function setupSection<K extends SetupKey>(setup: {
       tolerate: {
         statuses: [409],
         outcome: (error) => ({
-          failure: `${key}: PATCH ${expand(wide.update, ctx)}: ${error.status} ${error.message}. A ${noun} configuration run is already in progress on the repository; re-run the workflow after it finishes`,
+          failure: `${key}: PATCH ${expand(endpoints.update, ctx)}: ${error.status} ${error.message}. A ${noun} configuration run is already in progress on the repository; re-run the workflow after it finishes`,
         }),
       },
       change: (response) =>
-        parseLive(section, wide.update, LiveConfigurationRun, response).map((run) => {
+        parseLive(minted, endpoints.update, LiveConfigurationRun, response).map((run) => {
           if (run?.run_id === undefined) {
             return `applied ${noun}`;
           }
@@ -220,14 +236,22 @@ export function setupSection<K extends SetupKey>(setup: {
     });
     return ok(planned);
   };
+}
 
-  // The GET always answers with the whole configuration (a not-configured setup included), so
-  // the snapshot is that body, in the PATCH's vocabulary, on the slice's keys; the PATCH takes the
-  // same keys back verbatim. SETUPS pairs the slice with its key, so its projection IS the section's
-  // declared type; the casts are the wide-port and per-key boundaries.
-  const snapshot = async (
-    ctx: SnapshotContext<SetupEndpoints<K>, GraphqlDict, K>,
-  ): Promise<Result<SectionSnapshot<K>, SectionFailure>> =>
+/**
+ * The GET always answers with the whole configuration (a not-configured setup included), so the snapshot is that
+ * body, in the PATCH's vocabulary, on the slice's keys; the PATCH takes the same keys back verbatim. SETUPS pairs the
+ * slice with its key, so its projection IS the section's declared type; the casts are the wide-port and per-key
+ * boundaries.
+ */
+function setupSnapshot<K extends SetupKey>(
+  key: K,
+  slice: z.ZodObject,
+  languages: SetupLanguages,
+): (
+  ctx: SnapshotContext<SetupEndpoints<K>, GraphqlDict, K>,
+) => Promise<Result<SectionSnapshot<K>, SectionFailure>> {
+  return async (ctx) =>
     (ctx as SnapshotContext<WideEndpoints, GraphqlDict, K>).read.get
       .call(LiveSetup)
       .map((reported) => {
@@ -238,16 +262,32 @@ export function setupSection<K extends SetupKey>(setup: {
             : [];
         return { value: projectOntoSchema<unknown>(slice, live) as SetupDeclared<K>, notes };
       });
+}
 
-  const section: SetupSectionModule<K> = {
+export function setupSection<K extends SetupKey>(setup: {
+  /** The setup the factory mints; SETUPS pairs it with its path, slice, and vocabulary. */
+  key: K;
+
+  /** The fine-grained-PAT permission gating both endpoints. */
+  permission: SectionPermission;
+
+  /** What else a 403 here can mean (the feature not enabled, an archived repository). */
+  grantCaveat: string;
+
+  /** The output noun for change lines ("code scanning default setup"). */
+  noun: string;
+}): SetupSectionModule<K> {
+  const { key, permission, grantCaveat, noun } = setup;
+  const { path, slice, languages, read }: Setup<K> = SETUPS[key];
+  const endpoints = setupEndpoints<K>(path, noun, read);
+  return {
     key,
     undeclaredDefault: "untouched",
     permission,
     grantCaveat,
     endpoints,
     shape: requirePlainMapping(slice),
-    plan,
-    snapshot,
+    plan: setupPlan({ key, noun, slice, languages, endpoints }),
+    snapshot: setupSnapshot(key, slice, languages),
   };
-  return section;
 }

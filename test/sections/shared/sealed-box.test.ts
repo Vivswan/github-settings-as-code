@@ -11,8 +11,13 @@ import {
 
 await sodium.ready;
 
+/** A string's UTF-8 bytes. */
 const encode = (text: string) => new TextEncoder().encode(text);
+
+/** Bytes as lowercase hex, for a readable compare. */
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString("hex");
+
+/** The bytes a hex string spells. */
 const fromHex = (text: string) => new Uint8Array(Buffer.from(text, "hex"));
 
 // The empty message (a tag-only box), a message spanning several cipher blocks, and multi-byte UTF-8.

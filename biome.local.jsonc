@@ -1,0 +1,160 @@
+// The repository's own biome layer: exclusions, the formatter, extra rules, and per-path overrides with their
+// reasons. The managed biome.json extends this file and applies last, so the floor cannot be lowered here; the one
+// relaxation is a per-path `overrides` entry below with its reason beside it (docs/modules/typescript.md).
+{
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "includes": ["**", "!lib", "!.github/repo-platform-manifest.json"]
+  },
+  "formatter": {
+    "enabled": true,
+    "includes": ["**", "!src/generated/upstream-gaps.ts"],
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "linter": {
+    "rules": {
+      "preset": "recommended",
+      "correctness": {
+        "noUnusedImports": "error",
+        "noUnusedVariables": "error"
+      },
+      "style": {
+        "noNonNullAssertion": "error",
+        "noRestrictedImports": {
+          "level": "error",
+          "options": {
+            "paths": {
+              "@actions/core": "Only src/action/ implements the Io port over @actions/core; every other layer takes an Io."
+            },
+            "patterns": [
+              {
+                "group": ["**/private-open", "**/private-open.*"],
+                "message": "Only the redaction projections may open a Private<T> seal; render through publicDetail/toPublicView, or compose the private report."
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double"
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["src/generated/upstream-gaps.ts"],
+      "assist": {
+        "actions": {
+          "source": {
+            "organizeImports": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["src/**"],
+      "plugins": ["./lint/never-throw.grit"]
+    },
+    {
+      "includes": ["src/**", "!src/sections/shared/schema-helpers.ts"],
+      "plugins": ["./lint/rule-gate.grit"]
+    },
+    {
+      "includes": ["src/action/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["**/private-open", "**/private-open.*"],
+                    "message": "Only the redaction projections may open a Private<T> seal; render through publicDetail/toPublicView, or compose the private report."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["src/flows/redact.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "src/private.ts",
+        "src/discovery/discover.ts",
+        "src/report/delivery.ts",
+        "test/private.test.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@actions/core": "Only src/action/ implements the Io port over @actions/core; every other layer takes an Io."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    // The package's public and internal entry points exist to re-export: a barrel is their whole job.
+    {
+      "includes": ["src/index.ts", "src/internal.ts"],
+      "linter": {
+        "rules": {
+          "performance": {
+            "noBarrelFile": "off",
+            "noReExportAll": "off"
+          }
+        }
+      }
+    },
+    // A test table is data, not a function body.
+    {
+      "includes": ["test/**"],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noExcessiveLinesPerFunction": "off"
+          }
+        }
+      }
+    },
+    // normalizePlainData keeps one stack frame per nesting level on purpose (a helper for the container body would halve the depth a valid payload may reach); a split keeping that triplicates the scalar and container guards in each loop for no reading gain.
+    {
+      "includes": ["src/github/secret-scan.ts"],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noExcessiveCognitiveComplexity": {
+              "level": "error",
+              "options": { "maxAllowedComplexity": 30 }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

@@ -12,16 +12,13 @@ import { err, ok, type Result } from "neverthrow";
 /** An X25519 public key's length; parseSealingKey names it in a wrong-length rejection. */
 export const SEALED_BOX_PUBLIC_KEY_BYTES = 32;
 
+/** The ephemeral public key opens the wire format, its first 32 bytes. */
 const EPHEMERAL_KEY_BYTES = SEALED_BOX_PUBLIC_KEY_BYTES;
 
 /** XSalsa20's extended nonce, which crypto_box_seal derives instead of transmitting. */
 const NONCE_BYTES = 24;
 
-/**
- * hsalsa20's "expand 32-byte k" constant as the host-order word view hsalsa reads.
- * hsalsa byte-swaps its inputs and its output itself on a big-endian host, so the
- * views stay raw here: little-endian words would be swapped twice there.
- */
+/** hsalsa20's "expand 32-byte k" constant as the raw host-order words hsalsa reads: it byte-swaps its inputs and output itself on a big-endian host, so a little-endian view would be swapped twice. */
 const HSALSA_SIGMA = new Uint32Array(new TextEncoder().encode("expand 32-byte k").buffer);
 
 /** crypto_box_beforenm runs hsalsa20 with an all-zero 16-byte input. */

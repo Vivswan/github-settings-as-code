@@ -23,23 +23,39 @@ function liveKey(id: number, title: string, key: string, read_only = false) {
   return { id, title, key, read_only, verified: true, created_at: "2026-01-01T00:00:00Z" };
 }
 
+/** An ed25519 key, the one most cases declare. */
 const BOT_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBotBotBotBotBotBotBotBotBotBotBotBotBotBotB";
+
+/** A second ed25519 key, the material the mirror-pull title declares. */
 const MIRROR_KEY =
   "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMirrorMirrorMirrorMirrorMirrorMirrorMirrorM";
+
+/** The ed25519 key the live mirror-pull entry holds before the declared one replaces it. */
 const STALE_KEY =
   "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIStaleStaleStaleStaleStaleStaleStaleStaleSta";
+
+/** An RSA key, the material of the undeclared retired-service entry. */
 const RETIRED_KEY =
   "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCRetiredRetiredRetiredRetiredRetiredRetir=";
+
 // The REAL OpenSSH private-key framing, assembled at runtime so no source line carries the string a secret scanner flags.
 const PRIVATE_KEY_HEADER = ["-----BEGIN", "OPENSSH PRIVATE", "KEY-----"].join(" ");
+
+/** The closing half of the same framing. */
 const PRIVATE_KEY_FOOTER = ["-----END", "OPENSSH PRIVATE", "KEY-----"].join(" ");
+
+/** A whole private key in that framing, over a synthetic body. */
 const PRIVATE_KEY = `${PRIVATE_KEY_HEADER}\nU3ludGhldGljRml4dHVyZUJvZHk=\n${PRIVATE_KEY_FOOTER}`;
+
 // A PEM-framed PUBLIC key (ssh-keygen -e -m PKCS8): not a private key, and not the form GitHub takes either.
 const PEM_PUBLIC_KEY =
   "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAU3ludGhldGljRml4dHVyZUJvZHlQdWJsaWM=\n-----END PUBLIC KEY-----";
+
 // A key under an algorithm this list lacks, in the two-field shape GitHub stores.
 const ED448_KEY =
   "ssh-ed448 AAAACXNzaC1lZDQ0OAAAADlFZDQ0OEZ1dHVyZUFsZ29yaXRobUZ1dHVyZUFsZ29yaXRobUZ1dHVyZUE=";
+
+/** The section's plan over `desired`, failures unwrapped. */
 const plan = async (api: MockApi, desired: SectionInput<"deploy_keys">) =>
   unwrap(
     await deployKeysSection.plan(

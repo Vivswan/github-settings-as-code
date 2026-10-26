@@ -21,9 +21,12 @@ import type { Read, SnapshotContext } from "../../contract/plan.js";
 import { knobbedSnapshot } from "../snapshot-helpers.js";
 
 export interface KeyedValuesFamily<K extends SectionKey> {
+  /** The section key the family mints; the factory derives the path segment from it. */
   readonly key: K;
+
   /** The fine-grained-PAT Repository permission gating the family. */
   readonly resource: PatResource;
+
   /** The output noun for notes and change lines ("Actions secret", "Copilot agents variable"). */
   readonly noun: string;
 }

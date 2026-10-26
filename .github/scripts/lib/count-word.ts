@@ -5,6 +5,7 @@
  * the table and the build fails instead of the prose silently falling back to a numeral.
  */
 
+/** The count is the index; the module doc says why a count past the table's end fails the build. */
 const COUNT_WORDS = [
   "zero",
   "one",

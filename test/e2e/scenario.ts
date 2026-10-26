@@ -50,27 +50,17 @@ const MaskKeySchema = z.enum(MASK_KEYS);
 
 const MaskGradeSchema = z.enum(["none", "read", "write"]);
 
-/**
- * How denied resources answer. "fine_grained" mirrors a real fine-grained token; the numeric styles
- * answer every denial with that status.
- *   denied read   -> 404 "Not Found"
- *   denied write  -> 403 "Resource not accessible by personal access token"
- */
 const DenialStyleSchema = z.union([z.literal("fine_grained"), z.literal(403), z.literal(404)]);
 
-/** Which account kind the mock owner presents as (teams behave differently). */
 const OwnerKindSchema = z.enum(["org", "user"]);
 
-/**
- * A snapshot destination stays a plain path below the child's working directory, spelled exactly as
- * the child resolves it (the child trims surrounding whitespace, the runner reads the spelling), and
- * off the runner's own root files: a destination resolving to the root or above it would hand them
- * to the dir form's walk as snapshots, and one starting with a runner file would overwrite it.
- */
 const RESERVED_ROOT_NAMES: readonly string[] = Object.values(RUNNER_ROOT_FILES);
+
 function reservedRootName(segment: string): boolean {
   return RESERVED_ROOT_NAMES.includes(segment) || segment.startsWith(LAYER_FILE_PREFIX);
 }
+
+/** A plain path below the child's working directory, spelled as the child resolves it (trimmed), and off the runner's own root files, which the dir form's walk would otherwise collect as snapshots or the run would overwrite. */
 const SnapshotDestinationSchema = z
   .string()
   .refine(
@@ -117,6 +107,7 @@ const InputsSchema = z
 /** A settings file body: any YAML mapping (validated for real by the action). */
 const SettingsSchema = z.record(z.string(), z.unknown());
 
+/** What the runner asserts after the run; the refines reject a fixpoint proof beside a render or snapshot pin, since neither mode runs the engine's apply path. */
 const ExpectSchema = z
   .strictObject({
     /**
@@ -224,7 +215,6 @@ const ExpectSchema = z
   .refine((expected) => expected.rendered === undefined || expected.fixpoint === undefined, {
     message: "rendered pins a mode: render run, which has no fixpoint re-run to prove",
   })
-  // A snapshot applies nothing, so the apply-mode fixpoint proofs have no run to re-run.
   .refine(
     (expected) =>
       (expected.snapshot === undefined && expected.snapshot_converges === undefined) ||
@@ -235,32 +225,26 @@ const ExpectSchema = z
     },
   );
 
-/**
- * The mock's starting state, keyed by ./mock/state.ts's LIVE_STATE_KEYS so a typo'd family name fails
- * scenario load instead of being accepted and silently unseeded.
- */
+/** The mock's starting state, keyed by ./mock/state.ts's LIVE_STATE_KEYS so a typo'd family name fails scenario load instead of being accepted and silently unseeded. */
 const LiveStateSchema = z
   .partialRecord(z.enum(LIVE_STATE_KEYS), z.unknown())
   .transform((v) => v as LiveState);
 
+/** Resource -> granted access, for the token and for a multi-repo target's overlay; an unnamed resource is granted "write". */
 const TokenPermissionsSchema = z.partialRecord(MaskKeySchema, MaskGradeSchema);
 
-/**
- * One target repo in a multi-repo scenario. At most one of `settings`/`settings_raw` is set; neither,
- * or `settings: null`, means NO settings file.
- *
- *   no settings file  -> the defaults document applies, or the target is skipped
- *   settings_raw      -> served verbatim, for a YAML parse failure a serialized object cannot produce
- *   expect.result     -> this repo's own rollup, also assertable via the top-level repos_result map
- */
+/** One target repo in a multi-repo scenario; at most one of `settings`/`settings_raw` is set, and neither, or `settings: null`, means NO settings file. */
 const MultiRepoSchema = z
   .object({
+    /** Absent or null, with no settings_raw either: no settings file, so the defaults document applies, or the target is skipped. */
     settings: SettingsSchema.nullable().optional(),
+    /** Served verbatim, for a YAML parse failure a serialized object cannot produce. */
     settings_raw: z.string().optional(),
     live_state: LiveStateSchema.optional(),
     permissions: TokenPermissionsSchema.optional(),
     expect: z
       .object({
+        /** This repo's own rollup, also assertable via the top-level repos_result map. */
         result: z.string().optional(),
         /** mode: snapshot, dir form: the EXACT document written to `<snapshot_dir>/<owner>/<name>.yml`. */
         snapshot: SettingsSchema.optional(),
@@ -269,7 +253,6 @@ const MultiRepoSchema = z
       .optional(),
   })
   .strict()
-  // Both define the served settings.yml; setting both would silently favor one.
   .refine((repo) => !(repo.settings !== undefined && repo.settings_raw !== undefined), {
     message: "set only one of `settings` or `settings_raw`, not both",
   });
@@ -285,10 +268,7 @@ const DiscoveryRepoSchema = z
   })
   .strict();
 
-/**
- * A repos: "*" scenario's pool and the discovery-filter inputs the runner forwards as INPUT_* vars,
- * keyed by the real filter input names so a typoed filter fails at load instead of being forwarded and ignored.
- */
+/** A repos: "*" scenario's pool and the discovery-filter inputs the runner forwards as INPUT_* vars, keyed by the real filter input names so a typoed filter fails at load instead of being forwarded and ignored. */
 const DiscoverySchema = z
   .object({
     pool: z.array(DiscoveryRepoSchema),
@@ -296,39 +276,30 @@ const DiscoverySchema = z
   })
   .strict();
 
-/**
- * `endpoint` is a "section.role" key or a core-route key from CORE_FAULT_KEYS in mock/chaos.ts. These model
- * failures the permission and handler layers cannot:
- *
- *   rate_limit_403   -> 403 with "rate limit" in the body; the client must read it as throttling, not a denial
- *   429_then_200     -> the secondary-rate-limit shape; the throttling plugin honors its Retry-After (in GSAC_RETRY_BASE_MS units under the runner)
- *   server_error     -> 5xx rotating 500/502/503 per firing; times 1 recovers, times >= 3 (1 + MAX_RETRIES) fails
- *   connection_drop  -> the socket dies before any response, a network failure surfaced after the retries
- *   echo_422         -> a validation rejection quoting the request body verbatim; a secret-carrying request must surface none of it
- */
+/** `endpoint` is a "section.role" key or a core-route key from CORE_FAULT_KEYS in mock/chaos.ts; the kinds model failures the permission and handler layers cannot. */
 const FaultSchema = z
   .object({
     endpoint: z.string(),
+    /**
+     *   rate_limit_403   -> 403 with "rate limit" in the body; the client must read it as throttling, not a denial
+     *   429_then_200     -> the secondary-rate-limit shape; the throttling plugin honors its Retry-After (in GSAC_RETRY_BASE_MS units under the runner)
+     *   server_error     -> 5xx rotating 500/502/503 per firing; times 1 recovers, times >= 3 (1 + MAX_RETRIES) fails
+     *   connection_drop  -> the socket dies before any response, a network failure surfaced after the retries
+     *   echo_422         -> a validation rejection quoting the request body verbatim; a secret-carrying request must surface none of it
+     */
     kind: z.enum(["rate_limit_403", "429_then_200", "connection_drop", "server_error", "echo_422"]),
     times: z.union([z.number().int().positive(), z.literal("always")]).optional(),
   })
   .strict();
 
-/**
- * Names a scenario's `env` map may not set: the runner builds the child environment from scratch
- * and these are its own controls. The prefixes are the SAME set secret references refuse.
- */
+/** Names a scenario's `env` map may not set: the runner builds the child environment from scratch and these are its own controls; the prefixes are the SAME set secret references refuse. */
 const RESERVED_ENV_NAMES = new Set(["PATH", "HOME", "GSAC_RETRY_BASE_MS"]);
 
 function reservedEnvKey(name: string): boolean {
   return RESERVED_ENV_NAMES.has(name) || RESERVED_REF_PREFIXES.some((p) => name.startsWith(p));
 }
 
-/**
- * Extra child-process variables for `$NAME` secret references (the step-env wiring a workflow's
- * `env:` does). A colliding key is rejected at load: a scenario must not smuggle an input or a
- * runner override past the hermetic childEnv build.
- */
+/** Extra child-process variables for `$NAME` secret references (the step-env wiring a workflow's `env:` does); a colliding key is rejected at load, so a scenario cannot smuggle an input or a runner override past the hermetic childEnv build. */
 const EnvSchema = z.record(z.string(), z.string()).superRefine((env, ctx) => {
   for (const name of Object.keys(env)) {
     if (reservedEnvKey(name)) {
@@ -340,6 +311,7 @@ const EnvSchema = z.record(z.string(), z.string()).superRefine((env, ctx) => {
   }
 });
 
+/** The refines reject configuration the run would never read (a second settings source, a key of another mode), which would otherwise be silently dead. */
 const ScenarioSchema = z
   .object({
     name: z.string(),
@@ -360,10 +332,16 @@ const ScenarioSchema = z
     inputs: InputsSchema.optional(),
     /** The step-env half of a `$NAME` secret reference, the way a workflow's `env:` block defines it. */
     env: EnvSchema.optional(),
-    /** Resource -> granted access; unspecified resources default to "write". */
     token_permissions: TokenPermissionsSchema.optional(),
+    /**
+     * How denied resources answer. "fine_grained" mirrors a real fine-grained token; the numeric styles
+     * answer every denial with that status.
+     *   denied read   -> 404 "Not Found"
+     *   denied write  -> 403 "Resource not accessible by personal access token"
+     */
     denial_style: DenialStyleSchema.default("fine_grained"),
     live_state: LiveStateSchema.optional(),
+    /** Which account kind the mock owner presents as (teams behave differently). */
     owner_kind: OwnerKindSchema.default("org"),
     /**
      * A GHES-style path prefix (e.g. "/api/v3") the mock bakes into its base URL and requires on every
@@ -382,33 +360,25 @@ const ScenarioSchema = z
     expect: ExpectSchema,
   })
   .strict()
-  // Both define the served settings.yml, and setting both would silently favor one; setting neither
-  // leaves the run without a settings document at all.
   .refine((s) => !(s.settings !== undefined && s.settings_raw !== undefined), {
     message: "set only one of `settings` or `settings_raw`, not both",
   })
   .refine((s) => s.settings !== undefined || s.settings_raw !== undefined, {
     message: "one of `settings` or `settings_raw` is required",
   })
-  // The single-repo settings file is not read at all in multi mode, so a top-level settings_raw
-  // there would be silently dead configuration.
   .refine((s) => s.settings_raw === undefined || (!s.repos && !s.discovery), {
     message:
       "settings_raw is single-repo only; a multi-repo target's raw file is `repos.<slug>.settings_raw`",
   })
-  // Only a mode: render run reads the layer files and writes the rendered file the pin compares against.
   .refine((s) => s.settings_layers === undefined || s.inputs?.mode === "render", {
     message: "settings_layers only applies with inputs.mode: render",
   })
   .refine((s) => s.expect.rendered === undefined || s.inputs?.mode === "render", {
     message: "expect.rendered only applies with inputs.mode: render",
   })
-  // A merge runs no engine: a fixpoint re-run would be a check against nothing.
   .refine((s) => s.inputs?.mode !== "render" || s.expect.fixpoint === undefined, {
     message: "a mode: render scenario cannot arm a fixpoint proof",
   })
-  // The snapshot destinations and their pins describe a mode: snapshot run and
-  // nothing else; anywhere else they would be dead configuration.
   .refine(
     (s) =>
       s.inputs?.mode === "snapshot" ||
@@ -436,18 +406,16 @@ const ScenarioSchema = z
       Object.values(s.repos ?? {}).every((repo) => repo.expect?.snapshot === undefined),
     { message: "repos.<slug>.expect.snapshot only applies with inputs.snapshot_dir" },
   )
-  // A snapshot never runs the engine's apply path, so a fixpoint proof has no run to re-run.
   .refine((s) => s.inputs?.mode !== "snapshot" || s.expect.fixpoint === undefined, {
     message: "a mode: snapshot scenario cannot arm a fixpoint proof",
   });
 
 export type MaskKey = z.infer<typeof MaskKeySchema>;
 export type MaskGrade = z.infer<typeof MaskGradeSchema>;
-/**
- * The grade ordering: shared DATA for the mock's permission gate and the oracle, unlike their grading
- * predicates, which stay deliberately independent mirrors.
- */
+
+/** The grade ordering: shared DATA for the mock's permission gate and the oracle, unlike their grading predicates, which stay deliberately independent mirrors. */
 export const GRADE_RANK: Record<MaskGrade, number> = { none: 0, read: 1, write: 2 };
+
 export type PermissionMask = z.infer<typeof TokenPermissionsSchema>;
 export type DenialStyle = z.infer<typeof DenialStyleSchema>;
 export type OwnerKind = z.infer<typeof OwnerKindSchema>;
@@ -586,9 +554,7 @@ export function collectYmlFiles(dir: string): string[] {
   return out;
 }
 
-/** The section test mirror: <key>/ under it holds the section's tests, generators.ts, scenarios/, and its mock.ts
- * unless the fragment is one family-factory call in test/e2e/mock/sections.ts.
- * The layout census (test/layout.test.ts) reads the root from here, so a move edits this one line. */
+/** The section test mirror: <key>/ holds the section's tests, generators.ts, scenarios/, and its mock.ts (unless the fragment is one family-factory call in mock/sections.ts); test/layout.test.ts reads the root from here, so a move edits this line. */
 export const SECTIONS_TEST_ROOT = join(ROOT, "test", "sections");
 
 /**

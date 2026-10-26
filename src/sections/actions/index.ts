@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { ok, type Result, safeTry } from "neverthrow";
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
@@ -19,17 +20,18 @@ import {
 import { projectOntoSchema, readOrNote } from "../shared/snapshot-helpers.js";
 import { ActionsConfig } from "./schema.js";
 
+// The section grant; the OIDC subject pair declares its own Actions grant in the table below.
 const permission: SectionPermission = { repo: ["administration"] };
 
 // The contract documents both 400 and 422 for a rejected template, so the same advice keys both.
 const OIDC_TEMPLATE_HINT =
   "include_claim_keys entries must be unique claim keys of the OIDC token (alphanumeric and underscores only); see the OIDC subject claim customization endpoint documentation";
 
-// GitHub documents this pair for private repositories and a bare 403 on the GET with no prose
-// about why, so a denial here is ambiguous.
+// GitHub documents this pair for private repositories and a bare 403 on the GET with no prose about why, so a denial here is ambiguous.
 const FORK_PR_PRIVATE_DENIAL =
   "the fork PR workflow settings are documented for private repositories, so a denial here can also mean the repository is public";
 
+// Roles pair as get<N>/put<N>; endpointRouted and cacheLimit type each PUT off its GET's name.
 const ENDPOINTS = {
   getPermissions: {
     route: "GET /repos/{owner}/{repo}/actions/permissions",
@@ -184,16 +186,7 @@ type CacheKey = keyof NonNullable<ActionsConfig["cache"]>;
 type _CacheEndpointsComplete = MustBeNever<Exclude<CacheKey, keyof typeof CACHE_ENDPOINT_BY_KEY>>;
 type _CacheEndpointsSound = MustBeNever<Exclude<keyof typeof CACHE_ENDPOINT_BY_KEY, CacheKey>>;
 
-/**
- * Claim-key ORDER defines the OIDC subject format ("repo:...:context:..."), so unlike subsetDiff's
- * set comparison of scalar lists this one matches element by element: a reordered live value is drift.
- */
-function sameClaimKeyOrder(declared: readonly string[], live: readonly string[]): boolean {
-  return declared.length === live.length && declared.every((key, index) => live[index] === key);
-}
-
-// GitHub answers an unset list as null or omits it; both read as absent, so the snapshot's projection
-// onto the template variants never sees a null. The rest of the body rides into subsetDiff as passthrough.
+// An unset list answers null or is omitted; both read as absent, so the snapshot's projection onto the template variants never sees a null.
 const LiveOidcSub = z.looseObject({
   include_claim_keys: z
     .array(z.string())
@@ -229,19 +222,19 @@ type BasePermissions = Pick<ActionsConfig, "enabled" | "allowed_actions">;
 /**
  * The routing table holds the handlers themselves, so a routed key without one cannot exist.
  * Function-valued properties, not method shorthand, so the per-key value types check strictly.
+ * A snapshot over several GETs reads each through readOrNote itself, so under warn its siblings
+ * survive a denied one.
  */
 interface RoutedDestination<K extends keyof ActionsConfig> {
+  /** Reads the key's own GET and pushes its drift-gated PUT and its notes onto the plan. */
   plan: (
     ctx: ActionsContext,
     section: SectionMeta,
     declared: NonNullable<ActionsConfig[K]>,
     plan: ActionsPlan,
   ) => Promise<Result<void, SectionFailure>>;
-  /**
-   * Read the live state back as the settings file would declare it; undefined when none applies.
-   * A destination over several GETs reads each through readOrNote itself, so under warn its
-   * siblings survive a denied one.
-   */
+
+  /** The live state as the settings file would declare it; undefined when none applies. */
   snapshot: (
     ctx: ActionsSnapshotContext,
     section: SectionMeta,
@@ -250,32 +243,44 @@ interface RoutedDestination<K extends keyof ActionsConfig> {
   ) => Promise<Result<ActionsConfig[K], SectionFailure>>;
 }
 
-/** `N` is inferred from the GET alone, so a PUT of another name does not compile. */
+/**
+ * `N` is inferred from the GET alone, so a PUT of another name does not compile.
+ *
+ * With a `mapping`, a passthrough key outside its shape that the GET never echoes is noted as never converging,
+ * while a key inside the shape the GET omits is drift the PUT resolves.
+ */
 export function endpointRouted<
   K extends keyof ActionsConfig,
   N extends string,
   Live extends object,
 >(
   wiring: {
+    /** The GET whose body `live` parses; `N` is inferred from it alone. */
     get: `get${N}` & ReadRole;
+
+    /** The PUT, which must share the GET's name. */
     put: NoInfer<`put${N}`> & WriteRole;
+
     /** The drift-line prefix ("actions.access"). */
     label: string;
+
     /** The change line apply reports after the PUT lands. */
     applied: string;
+
+    /** The operation in settings-file terms ("setting the cache retention limit"), for the failure prose. */
     describe?: string;
+
     /** The GET body, every field `read` consumes declared, so an off-shape answer fails the read. */
     live: z.ZodType<Live>;
+
     /** The GET body as the settings file declares the key (the inverse of `body`). */
     read: (live: Live) => ActionsConfig[K];
   } & (NonNullable<ActionsConfig[K]> extends Record<string, unknown>
     ? {
+        /** The PUT body from the declared mapping; the mapping itself when absent. */
         body?: (declared: NonNullable<ActionsConfig[K]>) => Record<string, PlainData | undefined>;
-        /**
-         * The declared mapping's shape and what the note calls the live object: a passthrough key
-         * outside the shape that the GET never echoes is noted as never converging, while a key
-         * inside it the GET omits is drift the PUT resolves.
-         */
+
+        /** The declared mapping's shape and what the note calls the live object. */
         mapping: { shape: z.ZodObject; noun: string };
       }
     : {
@@ -323,9 +328,7 @@ function sliceOf<K extends keyof ActionsConfig>(key: K): (live: unknown) => Acti
   return (live) => projectOntoSchema(slice, live) as ActionsConfig[K];
 }
 
-// Every DECLARED key names its destination, so the mapped `satisfies` makes a schema field with no
-// entry a compile error; a routed entry IS its handler, so routed-but-unhandled cannot exist either.
-// Undeclared (future) keys fall through to the base permissions PUT verbatim, never silently dropped.
+// A schema field with no entry here fails to compile; an undeclared (future) key rides in the base permissions PUT verbatim, never silently dropped.
 const KEY_DESTINATION = {
   enabled: "base",
   allowed_actions: "base",
@@ -452,7 +455,9 @@ const KEY_DESTINATION = {
         const claimKeys = declared.use_default ? undefined : declared.include_claim_keys;
         if (claimKeys !== undefined) {
           const liveKeys = live.include_claim_keys ?? [];
-          if (!sameClaimKeyOrder(claimKeys, liveKeys)) {
+          // Claim-key ORDER defines the OIDC subject format ("repo:...:context:..."), so unlike subsetDiff's
+          // set comparison of scalar lists this compares element by element: a reordered live value is drift.
+          if (!isDeepStrictEqual(claimKeys, liveKeys)) {
             drift.push(
               valueDrift(
                 "actions.oidc_customization_sub.include_claim_keys",
@@ -517,10 +522,12 @@ type RoutedKey = {
 // Per-key handler types, so planRouted's generic dispatch stays correlated to one literal key.
 const ROUTED_DESTINATIONS: { [K in RoutedKey]: RoutedDestination<K> } = KEY_DESTINATION;
 
+// The keys with a handler of their own, in table order, which is the order plan and snapshot visit them.
 const ROUTED_KEYS = (Object.keys(KEY_DESTINATION) as (keyof ActionsConfig)[]).filter(
   (key): key is RoutedKey => typeof KEY_DESTINATION[key] !== "string",
 );
 
+// Keyed by string: the partition walks Object.entries(desired), whose keys are not narrowed.
 const ROUTED_KEY_SET: ReadonlySet<string> = new Set(ROUTED_KEYS);
 
 async function planRouted<K extends RoutedKey>(
@@ -563,6 +570,63 @@ const WORKFLOW_KEYS = keysTo("workflow");
 
 const KNOWN_PERMISSION_KEYS = keysTo("base");
 
+/** The base permissions and workflow bodies the declared keys fill, with the two defaults the base PUT needs. */
+function baseBodies(desired: ActionsConfig): {
+  permissions: Record<string, PlainData | undefined>;
+  workflow: Record<string, PlainData | undefined>;
+} {
+  const permissions: Record<string, PlainData | undefined> = {};
+  const workflow: Record<string, PlainData | undefined> = {};
+  for (const [key, value] of Object.entries(desired)) {
+    if (ROUTED_KEY_SET.has(key)) {
+      continue;
+    }
+    if (WORKFLOW_KEYS.has(key)) {
+      workflow[key] = value;
+    } else {
+      permissions[key] = value;
+    }
+  }
+
+  if (desired.selected_actions !== undefined && permissions.allowed_actions === undefined) {
+    // The allowlist endpoint answers 409 unless the policy is "selected", so an undeclared policy
+    // is inferred; a contradicting declared one is rejected upfront by the shape's superRefine.
+    permissions.allowed_actions = "selected";
+  }
+
+  if (Object.keys(permissions).length > 0) {
+    // The PUT body requires `enabled`; declaring any base-permissions key implies actions are on
+    // unless the file says otherwise.
+    permissions.enabled = permissions.enabled ?? true;
+  }
+
+  return { permissions, workflow };
+}
+
+/** The note for the keys riding verbatim in the base PUT, or undefined when every key is a known one. */
+function unrecognizedKeysNote(
+  permissions: Record<string, PlainData | undefined>,
+): string | undefined {
+  const routed = Object.keys(permissions).filter((k) => !KNOWN_PERMISSION_KEYS.has(k));
+  if (routed.length === 0) {
+    return undefined;
+  }
+
+  // The base PUT body always carries an enabled value (baseBodies defaults it), so a mis-routed key
+  // can flip Actions on as a side effect; the note says so. JSON.stringify keeps a malformed quoted
+  // "false" distinguishable from the boolean.
+  const enabledValue = JSON.stringify(permissions.enabled);
+  const count = routed.length;
+  return (
+    `${agree(count, "key", "keys")} [${routed.join(", ")}] ${agree(count, "is", "are")} not recognized by this action; ` +
+    `${agree(count, "it rides", "they ride")} verbatim ` +
+    `in PUT /actions/permissions (a body that also sets enabled: ${enabledValue}), where ` +
+    `GitHub may ignore ${agree(count, "it", "them")} - a "no such field" drift line for a key means GitHub does not ` +
+    `return it, so it can never be proven to have taken and apply would re-send the body ` +
+    `on every run; remove it from the actions section of the settings file`
+  );
+}
+
 export const actionsSection = {
   key: "actions",
   undeclaredDefault: "untouched",
@@ -574,43 +638,10 @@ export const actionsSection = {
     const section = this;
     return safeTry(async function* () {
       const plan: ActionsPlan = { ops: [], notes: [], drift: [] };
-      const permissions: Record<string, PlainData | undefined> = {};
-      const workflow: Record<string, PlainData | undefined> = {};
-      for (const [key, value] of Object.entries(desired)) {
-        if (ROUTED_KEY_SET.has(key)) {
-          continue;
-        }
-        if (WORKFLOW_KEYS.has(key)) {
-          workflow[key] = value;
-        } else {
-          permissions[key] = value;
-        }
-      }
-      if (desired.selected_actions !== undefined && permissions.allowed_actions === undefined) {
-        // The allowlist endpoint answers 409 unless the policy is "selected", so an undeclared policy
-        // is inferred; a contradicting declared one is rejected upfront by the shape's superRefine.
-        permissions.allowed_actions = "selected";
-      }
-      if (Object.keys(permissions).length > 0) {
-        // The PUT body requires `enabled`; declaring any base-permissions key implies actions are on
-        // unless the file says otherwise.
-        permissions.enabled = permissions.enabled ?? true;
-      }
-      const routed = Object.keys(permissions).filter((k) => !KNOWN_PERMISSION_KEYS.has(k));
-      if (routed.length > 0) {
-        // The base PUT body always carries an enabled value (defaulted above), so a mis-routed key can
-        // flip Actions on as a side effect; the note says so. JSON.stringify keeps a malformed quoted
-        // "false" distinguishable from the boolean.
-        const enabledValue = JSON.stringify(permissions.enabled);
-        const count = routed.length;
-        plan.notes.push(
-          `${agree(count, "key", "keys")} [${routed.join(", ")}] ${agree(count, "is", "are")} not recognized by this action; ` +
-            `${agree(count, "it rides", "they ride")} verbatim ` +
-            `in PUT /actions/permissions (a body that also sets enabled: ${enabledValue}), where ` +
-            `GitHub may ignore ${agree(count, "it", "them")} - a "no such field" drift line for a key means GitHub does not ` +
-            `return it, so it can never be proven to have taken and apply would re-send the body ` +
-            `on every run; remove it from the actions section of the settings file`,
-        );
+      const { permissions, workflow } = baseBodies(desired);
+      const note = unrecognizedKeysNote(permissions);
+      if (note !== undefined) {
+        plan.notes.push(note);
       }
 
       if (Object.keys(permissions).length > 0) {

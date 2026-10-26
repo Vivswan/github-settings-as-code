@@ -24,6 +24,7 @@ const GAPS_DIR = "src/upstream-gaps";
 export interface GraduationPlan {
   /** Gap-file paths (repo-relative, deduplicated, sorted) with a TS2344. */
   gapFiles: string[];
+
   /** Diagnostics the script must not fix: wrong code, or outside a gap file. */
   foreign: Diagnostic[];
 }

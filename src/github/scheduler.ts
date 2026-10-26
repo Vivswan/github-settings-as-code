@@ -22,6 +22,7 @@ type FailedHandler = (
 
 interface SchedulerLimiter {
   on(name: string, handler: FailedHandler): unknown;
+
   /** Both Bottleneck call shapes: `schedule(fn, ...args)` and `schedule(options, fn, ...args)`. */
   schedule(...call: unknown[]): Promise<unknown>;
 }
@@ -36,12 +37,15 @@ interface SchedulerGroup {
  */
 export interface Scheduler {
   new (): SchedulerLimiter;
+
+  /** The plugin's limiter groups (global, auth, search, notifications, write), one limiter per key. */
   Group: new (options: {
     id: string;
     maxConcurrent?: number;
     minTime?: number;
     timeout?: number;
   }) => SchedulerGroup;
+
   /** The plugin attaches its rate-limit listeners to a plain object through this emitter. */
   Events: new (
     target: object,

@@ -21,6 +21,7 @@ export type PatResource =
 export interface SectionPermission {
   /** Fine-grained PAT repository permissions; ANY one of these grants access. */
   readonly repo: readonly [PatResource, ...PatResource[]];
+
   /** Additional organization permission required (teams only). */
   readonly org?: "members";
 }
@@ -59,12 +60,12 @@ export const RESOURCE_LABEL: Record<PatResource, string> = {
   checks: "Checks",
 };
 
+/** The organization permission's label, as the token UI shows it. */
 export const RESOURCE_LABEL_ORG: Record<NonNullable<SectionPermission["org"]>, string> = {
   members: "Members",
 };
 
-// Each PAT resource's query parameter on GitHub's pre-filled token form (the generated token-form
-// link, in this order); total over PatResource, so a new resource names its parameter or records a null exemption.
+/** Each PAT resource's query parameter on GitHub's pre-filled token form (the generated token-form link, in this order); total over PatResource, so a new resource names its parameter or records a null exemption. */
 export const RESOURCE_SLUGS: Record<PatResource, string | null> = {
   // The form drops unknown parameters silently (the old variables= spelling failed that way), so every
   // non-null slug was verified against the live token form on 2026-07-28.

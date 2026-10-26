@@ -208,11 +208,7 @@ export type SectionGraphqlKey<K extends SectionKey = SectionKey> = {
     : never;
 }[K];
 
-/**
- * Erasure must go through THIS mapped annotation: the compiler relates SectionModule<K> to
- * SectionModule<SectionKey> by variance, while a literal module's closedSurface compared structurally
- * against the union-collapsed wide form would be rejected.
- */
+// Erasure goes through this mapped annotation: the compiler relates SectionModule<K> to SectionModule<SectionKey> by variance, while a literal module's closedSurface compared structurally against the union-collapsed wide form is rejected.
 const byKeyErased: { [K in SectionKey]: SectionModule<K> } = byKey;
 
 /**
@@ -256,15 +252,7 @@ function hasSnapshot<K extends SectionKey>(
   return module.snapshot !== undefined;
 }
 
-/**
- * The one door out of src/sections: the engine, the library, and the roster below all reach a module
- * through it, so the owner gate (contract/owner.ts) and the foreign-context refusal are applied here once
- * and not in 26 handlers, and so is the freeze (freezeDeclarations): the wrapper shares its declaration
- * objects with the source module, so those are deep-frozen in place, while only the wrapper object is
- * shallow-frozen (a test can still stub the source's handlers). The freeze lives here rather than in a
- * definition helper because the modules arrive by several routes (literal objects, listSection, the
- * secrets, variables, and setup factories).
- */
+// The one door out of src/sections, so the owner gate, the foreign-context refusal, and the freeze are applied here once, not in 26 handlers: modules arrive by several routes (literals, listSection, the factories), so no definition helper sees them all.
 const guarded: { [K in SectionKey]: SectionModule<K> } = Object.fromEntries(
   SECTION_KEYS.map((key) => [
     key,
@@ -272,6 +260,7 @@ const guarded: { [K in SectionKey]: SectionModule<K> } = Object.fromEntries(
   ]),
 ) as { [K in SectionKey]: SectionModule<K> };
 
+/** Every gated module, in SECTION_KEYS order: the execution order. */
 export const SECTIONS: readonly SectionModule[] = SECTION_KEYS.map((key) => guarded[key]);
 
 export function sectionShape(key: SectionKey): z.ZodType {

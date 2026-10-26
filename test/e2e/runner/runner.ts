@@ -33,7 +33,7 @@ import {
 } from "../constants.js";
 import { type LoggedRequest, renderRequest } from "../mock/contract.js";
 import { isWriteRequest } from "../mock/dispatch.js";
-import { type ServerOptions, startMockServer } from "../mock/server.js";
+import { type MockHandle, type ServerOptions, startMockServer } from "../mock/server.js";
 import { sharedValidator } from "../openapi/validate.js";
 import { collectYmlFiles, type Expect, type Scenario, settingsYamlFor } from "../scenario.js";
 import {
@@ -46,6 +46,112 @@ import { assertIssueReport, checkReportLeaks } from "./issue-report-assert.js";
 
 /** Memoized as a promise so concurrent scenarios share the one build instead of racing their own. */
 let bundleBuild: Promise<string> | undefined;
+
+/** Monotonic per-process counter so repeated same-name failures never collide. */
+let artifactCounter = 0;
+
+/** Pinned to the action's OUTPUT_DECLS (src/action/io.ts): a rename there fails compilation here instead of reading nothing. */
+const SKIPPED_SECTIONS_OUTPUT = "skipped-sections" satisfies OutputName;
+
+/** Hard cap so a hung child never wedges the suite: the fuzz battery's multi/apply-idempotent leg needs ~200s at some seeds (a 120s cap killed it); killNote() marks a kill, so it never reads as the action exiting on its own. */
+export const KILL_AFTER_MS = 300_000;
+
+/** The harness's own files at the root of the child's working directory, by role. */
+const {
+  settings: SETTINGS_FILE,
+  output: OUTPUT_FILE,
+  summary: SUMMARY_FILE,
+  rendered: RENDERED_FILE,
+  defaults: DEFAULTS_FILE,
+} = RUNNER_ROOT_FILES;
+
+/** The scenario inputs forwarded verbatim, each under the INPUT_<NAME> variable @actions/core reads (uppercased, dashes kept); the two snapshot destinations are wired by mode instead. */
+const FORWARDED_INPUTS: ReadonlyArray<[input: ForwardedInput, variable: string]> = [
+  ["mode", "INPUT_MODE"],
+  ["layering", "INPUT_LAYERING"],
+  ["undeclared", "INPUT_UNDECLARED"],
+  ["on_missing_permission", "INPUT_ON-MISSING-PERMISSION"],
+  ["required_sections", "INPUT_REQUIRED-SECTIONS"],
+  ["sections", "INPUT_SECTIONS"],
+  ["private_repos", "INPUT_PRIVATE-REPOS"],
+  ["private_report", "INPUT_PRIVATE-REPORT"],
+  ["report_public_key", "INPUT_REPORT-PUBLIC-KEY"],
+];
+
+/** The workflow command core.setSecret emits, one line per value. */
+const MASK_PREFIX = "::add-mask::";
+
+/** @actions/core command-encodes every payload it prints, mask and annotation alike (%, CR, LF as %25, %0D, %0A); a masked value sits decoded in the registry and encoded in the annotation line, so the redaction knows both spellings. */
+const COMMAND_ENCODING: ReadonlyArray<[raw: string, encoded: string]> = [
+  ["%", "%25"],
+  ["\r", "%0D"],
+  ["\n", "%0A"],
+];
+
+/** The index of the command line inside replayBlockLines' block, the one line setReplay swaps. */
+const REPLAY_LINE = 4;
+
+type ScenarioInputs = NonNullable<Scenario["inputs"]>;
+
+type ForwardedInput = Exclude<keyof ScenarioInputs, "snapshot_file" | "snapshot_dir">;
+
+export interface ScenarioReport {
+  /** The scenario's name, the artifact directory's key. */
+  scenario: string;
+
+  /** No failure of any kind: the runner's assertions, the fixpoint proofs, the contract validator, and the leak sweeps. */
+  ok: boolean;
+
+  /** Every failed assertion, each a sentence report.md lists. */
+  failures: string[];
+
+  /** The PRIMARY invocation's exit code; the re-runs' live in `reruns`. */
+  exitCode: number;
+
+  /** The primary invocation's GITHUB_OUTPUT, parsed. */
+  outputs: Record<string, string>;
+
+  /** The primary invocation's step summary. */
+  summary: string;
+
+  /** The primary invocation's stdout, mask lines included. */
+  stdout: string;
+
+  /** The primary invocation's stderr. */
+  stderr: string;
+
+  /** The artifact directory written on failure, for the CLI to surface. */
+  artifactDir?: string;
+
+  /** Full request log snapshot, for coverage and validation consumers. */
+  requests: LoggedRequest[];
+
+  /** How often each injected fault key fired during the PRIMARY invocation only, so the re-runs never inflate it; the fuzzer's non-vacuity assertion reads it, so a declared fault absent here never fired. */
+  faultsFired: Record<string, number>;
+
+  /** The multi-repo per-target rollup, display key -> result; empty for single-repo runs AND for multi runs that failed before any target ran, since a config or discovery fatal never writes the output. */
+  reposResult: Record<string, string>;
+
+  /** Every internal re-run's surfaces, in execution order; the top-level surfaces describe ONLY the primary invocation, so leak invariants must sweep these too. */
+  reruns: RerunCapture[];
+}
+
+/** One scenario's run as its assertions read it: the mock, the working directory, the primary invocation, and the re-runs so far. */
+interface Run {
+  scenario: Scenario;
+  dir: string;
+  handle: MockHandle;
+  first: Invocation;
+  reruns: RerunCapture[];
+}
+
+/** A dir-form snapshot pin resolved to the file the run must have written. */
+interface PinnedSnapshot {
+  slug: string;
+  path: string;
+  expected: Record<string, unknown>;
+}
+
 function builtBundle(): Promise<string> {
   bundleBuild ??= (async () => {
     const outdir = mkdtempSync(join(tmpdir(), "e2e-bundle-"));
@@ -72,48 +178,6 @@ function builtBundle(): Promise<string> {
     return outfile;
   })();
   return bundleBuild;
-}
-/** Pinned to the action's OUTPUT_DECLS (src/action/io.ts): a rename there fails compilation here instead of reading nothing. */
-const SKIPPED_SECTIONS_OUTPUT = "skipped-sections" satisfies OutputName;
-/**
- * Hard cap so a hung child never wedges the suite, sized for the observed worst case: the directed
- * fuzz battery's multi/apply-idempotent leg needs ~200s at some seeds (~190 requests behind ~500ms
- * injected latencies, applied twice), which a 120s cap killed. killNote() marks the kill in every
- * exit-code failure, so a wrongly killed child never reads as the action exiting on its own.
- */
-export const KILL_AFTER_MS = 300_000;
-
-/** Monotonic per-process counter so repeated same-name failures never collide. */
-let artifactCounter = 0;
-
-export interface ScenarioReport {
-  scenario: string;
-  ok: boolean;
-  failures: string[];
-  exitCode: number;
-  outputs: Record<string, string>;
-  summary: string;
-  stdout: string;
-  stderr: string;
-  /** The artifact directory written on failure, for the CLI to surface. */
-  artifactDir?: string;
-  /** Full request log snapshot, for coverage and validation consumers. */
-  requests: LoggedRequest[];
-  /**
-   * How often each injected fault key fired during the PRIMARY invocation only, so the re-runs never
-   * inflate it. The fuzzer's non-vacuity assertion reads it: a declared fault absent here never fired.
-   */
-  faultsFired: Record<string, number>;
-  /**
-   * The multi-repo per-target rollup, display key -> result. Empty for single-repo runs AND for multi
-   * runs that failed before any target ran: a config or discovery fatal never writes the output.
-   */
-  reposResult: Record<string, string>;
-  /**
-   * Every internal re-run's surfaces, in execution order. The top-level surfaces describe ONLY the
-   * primary invocation, so leak invariants must sweep these too.
-   */
-  reruns: RerunCapture[];
 }
 
 /** Marks a harness kill, so a timeout is never misread as the action exiting with the kill signal on its own. */
@@ -217,14 +281,6 @@ function expectedReposResult(scenario: Scenario): Record<string, string> | null 
   return Object.keys(merged).length > 0 ? merged : null;
 }
 
-const {
-  settings: SETTINGS_FILE,
-  output: OUTPUT_FILE,
-  summary: SUMMARY_FILE,
-  rendered: RENDERED_FILE,
-  defaults: DEFAULTS_FILE,
-} = RUNNER_ROOT_FILES;
-
 function renderedFilePath(dir: string): string {
   return join(dir, RENDERED_FILE);
 }
@@ -265,15 +321,12 @@ function documentFileFailures(
  * The snapshot files a dir-form scenario pins, each resolved to its
  * `<snapshot_dir>/<owner>/<name>.yml` path under the scenario's temp dir.
  */
-function pinnedDirSnapshots(
-  scenario: Scenario,
-  dir: string,
-): Array<{ slug: string; path: string; expected: Record<string, unknown> }> {
+function pinnedDirSnapshots(scenario: Scenario, dir: string): PinnedSnapshot[] {
   const snapshotDir = scenario.inputs?.snapshot_dir;
   if (snapshotDir === undefined) {
     return [];
   }
-  const pinned: Array<{ slug: string; path: string; expected: Record<string, unknown> }> = [];
+  const pinned: PinnedSnapshot[] = [];
   for (const [slug, spec] of Object.entries(scenario.repos ?? {})) {
     const expected = spec.expect?.snapshot;
     const repo = parseRepoSlug(slug);
@@ -293,9 +346,7 @@ function pinnedDirSnapshots(
  * The check run that proves a snapshot round-trips takes every input the scenario set, minus the two
  * destinations check mode rejects; derived by exclusion so a target-selecting input added later still rides along.
  */
-export function snapshotCheckInputs(
-  inputs: NonNullable<Scenario["inputs"]>,
-): NonNullable<Scenario["inputs"]> {
+export function snapshotCheckInputs(inputs: ScenarioInputs): ScenarioInputs {
   const { snapshot_file: _file, snapshot_dir: _dir, ...carried } = inputs;
   return { ...carried, mode: "check" };
 }
@@ -305,10 +356,7 @@ export function snapshotCheckInputs(
  * file form, or every .yml under the dir form's directory. Read off the filesystem, not the pins, so a
  * file the run wrote without a pin is still swept and round-tripped.
  */
-export function writtenSnapshotPaths(
-  inputs: NonNullable<Scenario["inputs"]>,
-  dir: string,
-): string[] {
+export function writtenSnapshotPaths(inputs: ScenarioInputs, dir: string): string[] {
   if (inputs.snapshot_file !== undefined) {
     return existsSync(join(dir, inputs.snapshot_file)) ? [inputs.snapshot_file] : [];
   }
@@ -389,6 +437,63 @@ export function roundTripFailures(
 }
 
 /**
+ * settings-file is a single-repo input the action rejects beside the multi-repo inputs and in
+ * snapshot mode. A merge lists every layer file below settings.yml, lowest first; a snapshot names
+ * its destination relative to the child's working directory (this temp dir).
+ */
+function settingsFileEnv(
+  scenario: Scenario,
+  dir: string,
+  multi: boolean,
+  env: Record<string, string>,
+): void {
+  const inputs = scenario.inputs ?? {};
+  if (inputs.mode === "render") {
+    const layers = (scenario.settings_layers ?? []).map((layer, i) => {
+      const path = join(dir, layerFile(i));
+      writeFileSync(path, stringifyYaml(layer));
+      return path;
+    });
+    env["INPUT_SETTINGS-FILE"] = [...layers, join(dir, SETTINGS_FILE)].join("\n");
+    env["INPUT_RENDERED-FILE"] = renderedFilePath(dir);
+  } else if (inputs.mode === "snapshot") {
+    if (inputs.snapshot_file !== undefined) {
+      env["INPUT_SNAPSHOT-FILE"] = inputs.snapshot_file;
+    }
+    if (inputs.snapshot_dir !== undefined) {
+      env["INPUT_SNAPSHOT-DIR"] = inputs.snapshot_dir;
+    }
+  } else if (!multi) {
+    env["INPUT_SETTINGS-FILE"] = join(dir, SETTINGS_FILE);
+  }
+}
+
+/** GITHUB_REPOSITORY stays the admin repo in multi-repo mode; INPUT_REPOS, or a repos-dir, selects the targets. */
+function targetEnv(
+  scenario: Scenario,
+  dir: string,
+  reposDir: string | undefined,
+  env: Record<string, string>,
+): void {
+  if (scenario.discovery) {
+    env.INPUT_REPOS = "*";
+    for (const [name, value] of Object.entries(scenario.discovery.inputs)) {
+      env[`INPUT_${name.toUpperCase()}`] = value;
+    }
+  } else if (scenario.repos) {
+    env.INPUT_REPOS = Object.keys(scenario.repos).join(",");
+  }
+  if (reposDir !== undefined) {
+    env["INPUT_REPOS-DIR"] = reposDir;
+  }
+  if (scenario.defaults_file) {
+    const defaultsPath = join(dir, DEFAULTS_FILE);
+    writeFileSync(defaultsPath, stringifyYaml(scenario.defaults_file));
+    env["INPUT_DEFAULTS-FILE"] = defaultsPath;
+  }
+}
+
+/**
  * Built from scratch: only PATH and HOME are taken from process.env. `reposDir` is the one input the
  * scenario schema has no key for: the dir-form round trip feeds a written snapshot back as a
  * central-mode target, so it selects the multi-repo path without a `repos` map.
@@ -415,72 +520,14 @@ function childEnv(
     // A test knob: millisecond plugin units and the immediate scheduler, so retry scenarios run in milliseconds instead of seconds.
     GSAC_RETRY_BASE_MS: "1",
   };
-  // settings-file is a single-repo input the action rejects beside the multi-repo inputs and in
-  // snapshot mode. A merge lists every layer file below settings.yml, lowest first; a snapshot names
-  // its destination relative to the child's working directory (this temp dir).
-  if (inputs.mode === "render") {
-    const layers = (scenario.settings_layers ?? []).map((layer, i) => {
-      const path = join(dir, layerFile(i));
-      writeFileSync(path, stringifyYaml(layer));
-      return path;
-    });
-    env["INPUT_SETTINGS-FILE"] = [...layers, join(dir, SETTINGS_FILE)].join("\n");
-    env["INPUT_RENDERED-FILE"] = renderedFilePath(dir);
-  } else if (inputs.mode === "snapshot") {
-    if (inputs.snapshot_file !== undefined) {
-      env["INPUT_SNAPSHOT-FILE"] = inputs.snapshot_file;
+  settingsFileEnv(scenario, dir, multi, env);
+  for (const [input, variable] of FORWARDED_INPUTS) {
+    const value = inputs[input];
+    if (value) {
+      env[variable] = value;
     }
-    if (inputs.snapshot_dir !== undefined) {
-      env["INPUT_SNAPSHOT-DIR"] = inputs.snapshot_dir;
-    }
-  } else if (!multi) {
-    env["INPUT_SETTINGS-FILE"] = join(dir, SETTINGS_FILE);
   }
-  if (inputs.mode) {
-    env.INPUT_MODE = inputs.mode;
-  }
-  if (inputs.layering) {
-    env.INPUT_LAYERING = inputs.layering;
-  }
-  if (inputs.undeclared) {
-    env.INPUT_UNDECLARED = inputs.undeclared;
-  }
-  if (inputs.on_missing_permission) {
-    env["INPUT_ON-MISSING-PERMISSION"] = inputs.on_missing_permission;
-  }
-  if (inputs.required_sections) {
-    env["INPUT_REQUIRED-SECTIONS"] = inputs.required_sections;
-  }
-  if (inputs.sections) {
-    env.INPUT_SECTIONS = inputs.sections;
-  }
-  if (inputs.private_repos) {
-    env["INPUT_PRIVATE-REPOS"] = inputs.private_repos;
-  }
-  if (inputs.private_report) {
-    env["INPUT_PRIVATE-REPORT"] = inputs.private_report;
-  }
-  if (inputs.report_public_key) {
-    env["INPUT_REPORT-PUBLIC-KEY"] = inputs.report_public_key;
-  }
-
-  // GITHUB_REPOSITORY stays the admin repo in multi-repo mode; INPUT_REPOS selects the targets.
-  if (scenario.discovery) {
-    env.INPUT_REPOS = "*";
-    for (const [name, value] of Object.entries(scenario.discovery.inputs)) {
-      env[`INPUT_${name.toUpperCase()}`] = value;
-    }
-  } else if (scenario.repos) {
-    env.INPUT_REPOS = Object.keys(scenario.repos).join(",");
-  }
-  if (reposDir !== undefined) {
-    env["INPUT_REPOS-DIR"] = reposDir;
-  }
-  if (scenario.defaults_file) {
-    const defaultsPath = join(dir, DEFAULTS_FILE);
-    writeFileSync(defaultsPath, stringifyYaml(scenario.defaults_file));
-    env["INPUT_DEFAULTS-FILE"] = defaultsPath;
-  }
+  targetEnv(scenario, dir, reposDir, env);
   return env;
 }
 
@@ -537,19 +584,6 @@ function stripLines(text: string, prefix: string): string {
     .filter((line) => !line.startsWith(prefix))
     .join("\n");
 }
-
-const MASK_PREFIX = "::add-mask::";
-
-/**
- * @actions/core command-encodes every payload it prints, mask and annotation alike: `%`, CR, LF as
- * %25, %0D, %0A. A masked value with any of those sits decoded in the registry and encoded in the
- * annotation line, so the redaction has to know both spellings.
- */
-const COMMAND_ENCODING: ReadonlyArray<[raw: string, encoded: string]> = [
-  ["%", "%25"],
-  ["\r", "%0D"],
-  ["\n", "%0A"],
-];
 
 function decodeCommandData(encoded: string): string {
   return encoded.replace(
@@ -682,306 +716,317 @@ export function requestLogFailures(
   return failures;
 }
 
-/**
- * Run one scenario end to end and dump an artifact directory on any failure. `opts.serverOptions`
- * merges over the scenario's own base_prefix, so the fuzz CLI can inject the chaos `corrupt` directive.
- */
-export async function runScenario(
-  scenario: Scenario,
-  opts?: { serverOptions?: ServerOptions },
-): Promise<ScenarioReport> {
-  let dir: string | undefined;
-  /** The dir-form round trip's one-file repos-dirs, a sibling of `dir` so they can never fall under the snapshot dir. */
-  let scratch: string | undefined;
-  let handle: Awaited<ReturnType<typeof startMockServer>> | undefined;
+/** The mock's own contract violations, and the verdicts on the primary invocation's exit code, request count, and `result` output. */
+function verdictFailures({ scenario, handle, first }: Run): string[] {
+  const exp = scenario.expect;
   const failures: string[] = [];
-  const reruns: RerunCapture[] = [];
-  let first: Invocation | undefined;
-
-  try {
-    dir = mkdtempSync(join(tmpdir(), "e2e-"));
-    handle = await startMockServer(scenario, {
-      ...(scenario.base_prefix ? { basePrefix: scenario.base_prefix } : {}),
-      ...(scenario.faults
-        ? {
-            faults: scenario.faults.map((f) => ({ key: f.endpoint, kind: f.kind, times: f.times })),
-          }
-        : {}),
-      ...opts?.serverOptions,
-    });
-    writeFileSync(join(dir, SETTINGS_FILE), settingsYamlFor(scenario));
-    first = await invoke(scenario, dir, handle.url);
-    // Snapshot NOW: a fault that fires only during an optional re-run must not read as non-vacuous
-    // for the primary outcome exitCode, outputs, and reposResult describe.
-    const faultsFired = Object.fromEntries(handle.faultCounts);
-    const exp = scenario.expect;
-
-    if (handle.violations.length > 0) {
-      failures.push(`mock violations:\n  ${handle.violations.join("\n  ")}`);
-    }
-    const exitFailure = exitCodeFailure(first.exitCode, exp.exit_code);
-    if (exitFailure !== undefined) {
-      failures.push(`${exitFailure}${killNote(first)}`);
-    }
-    if (exp.zero_requests && handle.requests.length > 0) {
-      const sample = handle.requests
-        .slice(0, 3)
-        .map((r) => renderRequest(r, false))
-        .join(", ");
-      failures.push(
-        `expected zero API requests, but the mock saw ${handle.requests.length}: ${sample}`,
-      );
-    }
-    if (exp.result !== undefined && first.outputs.result !== exp.result) {
-      failures.push(`result "${first.outputs.result}" != expected "${exp.result}"`);
-    }
-    if (exp.rendered !== undefined) {
-      failures.push(...documentFileFailures("rendered", renderedFilePath(dir), exp.rendered));
-    }
-    // 3-snapshot. The snapshot document(s) a mode: snapshot run wrote, each
-    // compared whole after a YAML parse, so the comment header is ignored.
-    const snapshotFile = scenario.inputs?.snapshot_file;
-    if (exp.snapshot !== undefined && snapshotFile !== undefined) {
-      failures.push(...documentFileFailures("snapshot", join(dir, snapshotFile), exp.snapshot));
-    }
-    for (const pinned of pinnedDirSnapshots(scenario, dir)) {
-      failures.push(
-        ...documentFileFailures(`snapshot[${pinned.slug}]`, pinned.path, pinned.expected),
-      );
-    }
-    // The `skipped-sections` output is compared as a set: the engine emits SECTION_KEYS order, which
-    // the expectation should not restate. An ABSENT output fails even against an empty expectation:
-    // publishing nothing is a different regression from publishing an empty list.
-    if (exp.skipped_sections !== undefined) {
-      const published = first.outputs[SKIPPED_SECTIONS_OUTPUT];
-      if (published === undefined) {
-        failures.push(`the ${SKIPPED_SECTIONS_OUTPUT} output was not published at all`);
-      } else {
-        const live = published.split(",").filter(Boolean).sort();
-        const want = [...exp.skipped_sections].sort();
-        if (JSON.stringify(live) !== JSON.stringify(want)) {
-          failures.push(
-            `${SKIPPED_SECTIONS_OUTPUT} output [${live.join(", ")}] != expected [${want.join(", ")}]`,
-          );
-        }
-      }
-    }
-    const expectedRepos = expectedReposResult(scenario);
-    if (expectedRepos) {
-      const live = parseReposResult(first.outputs["repos-result"]);
-      const liveSlugs = Object.keys(live).sort();
-      const wantSlugs = Object.keys(expectedRepos).sort();
-      if (JSON.stringify(liveSlugs) !== JSON.stringify(wantSlugs)) {
-        failures.push(
-          `repos_result targets [${liveSlugs.join(", ")}] != expected [${wantSlugs.join(", ")}]`,
-        );
-      }
-      for (const [slug, want] of Object.entries(expectedRepos)) {
-        if (live[slug] !== want) {
-          failures.push(`repos_result[${slug}] "${live[slug]}" != expected "${want}"`);
-        }
-      }
-    }
-    if (exp.outcomes) {
-      const live = parseSummaryOutcomes(first.summary);
-      for (const [key, want] of Object.entries(exp.outcomes)) {
-        if (live[key] !== want) {
-          failures.push(`outcome ${key} "${live[key]}" != expected "${want}"`);
-        }
-      }
-    }
-    failures.push(...requestLogFailures(exp, handle.requests));
-    for (const needle of exp.summary_contains ?? []) {
-      if (!first.summary.includes(needle)) {
-        failures.push(`summary missing: ${needle}`);
-      }
-    }
-    for (const needle of exp.stdout_contains ?? []) {
-      if (!first.stdout.includes(needle)) {
-        failures.push(`stdout missing: ${needle}`);
-      }
-    }
-    // stdout_lacks matches AFTER stripping the ::add-mask:: lines, which carry the raw slug for the
-    // real runner by design; summary_lacks matches the summary as-is.
-    const maskedStdout = stripMaskLines(first.stdout);
-    for (const needle of exp.summary_lacks ?? []) {
-      if (first.summary.includes(needle)) {
-        failures.push(`summary must not contain: ${needle}`);
-      }
-    }
-    for (const needle of exp.stdout_lacks ?? []) {
-      if (maskedStdout.includes(needle)) {
-        failures.push(`stdout must not contain: ${needle}`);
-      }
-    }
-    // The whole-surface leak sweep runs on EVERY scenario, deferred past the rerun blocks so it covers
-    // the primary invocation and every internal re-run. Two needle families join the declared ones:
-    //   E2E_TOKEN                -> never add-mask'd, so any echo on a public surface is a real leak
-    //   every scenario env value -> by definition a resolved secret plaintext, listed by the author or not
-    // An EMPTY env value is skipped: a set-but-empty variable is a scenario about the resolver's
-    // empty-value error, not a leakable secret. Those two families are secrets, forbidden on the
-    // private-report surface too, where a leaks_nowhere needle (a slug, a private live value) belongs.
-    const secretNeedles = [
-      ...new Set(
-        [E2E_TOKEN, ...Object.values(scenario.env ?? {})].filter((needle) => needle !== ""),
-      ),
-    ];
-    const leakNeedles = [...new Set([...secretNeedles, ...(exp.leaks_nowhere ?? [])])];
-    // Private-report issue delivery: the one channel where the private slug and sentinel may
-    // legitimately appear, inside the target repo's own issue.
-    if (exp.issue_report) {
-      failures.push(...assertIssueReport(exp.issue_report, handle.requests));
-    }
-    // assertApplyIdempotent's own final step arms the one-way check-mode barrier and proves
-    // convergence, which is why `fixpoint` is a single enum: only one of these two blocks can ever run.
-    if (exp.fixpoint === "apply_idempotent") {
-      // `dir` and `handle` are mutable lets (the finally block owns their cleanup), so a closure over
-      // them widens back to `| undefined`; the consts carry the narrowed values into the invoker.
-      const boundDir = dir;
-      const mockUrl = handle.url;
-      const idempotence = await assertApplyIdempotent(scenario, handle, {
-        invoke: (rerun) => invoke(rerun, boundDir, mockUrl),
-        killNote,
-      });
-      failures.push(...idempotence.failures);
-      reruns.push(...idempotence.reruns);
-    }
-    // Convergence: rerun in check mode against the SAME mutated server. The mock's check-mode write
-    // barrier is armed first: the server still holds the apply-mode scenario, so without it a stray
-    // write would not be a violation.
-    if (exp.fixpoint === "converges") {
-      const violationsBefore = handle.violations.length;
-      const requestsBefore = handle.requests.length;
-      handle.enterCheckMode();
-      const converge = await invoke(
-        { ...scenario, inputs: { ...scenario.inputs, mode: "check" } },
-        dir,
-        handle.url,
-      );
-      const rerunRequests = handle.requests.slice(requestsBefore);
-      reruns.push(captureRerun("converges check", converge, rerunRequests));
-      const newWrites = rerunRequests.filter(isWriteRequest);
-      if (converge.exitCode !== 0) {
-        failures.push(
-          `convergence: rerun exited ${converge.exitCode}, expected 0${killNote(converge)}`,
-        );
-      }
-      if (newWrites.length > 0) {
-        failures.push(
-          `convergence: rerun wrote ${newWrites.length} time(s): ${newWrites.map((r) => renderRequest(r, false)).join(", ")}`,
-        );
-      }
-      const newViolations = handle.violations.slice(violationsBefore);
-      if (newViolations.length > 0) {
-        failures.push(`convergence: mock violations:\n  ${newViolations.join("\n  ")}`);
-      }
-    }
-
-    // 8-snapshot. Every written snapshot, fed back as the settings document of a CHECK run against
-    // the SAME seeded state, must read clean without a write. The file form copies it over
-    // settings.yml; the dir form feeds each file back through its own one-file repos-dir, so the
-    // check targets exactly that repository and a non-converging file names itself.
-    const written = writtenSnapshotPaths(scenario.inputs ?? {}, dir);
-    const snapshotDir = scenario.inputs?.snapshot_dir;
-    if (exp.snapshot_converges) {
-      const checkInputs = snapshotCheckInputs(scenario.inputs ?? {});
-      if (written.length === 0) {
-        failures.push("snapshot round trip: the run wrote no snapshot document to feed back");
-      }
-      handle.enterCheckMode();
-      for (const [i, path] of written.entries()) {
-        const violationsBefore = handle.violations.length;
-        const requestsBefore = handle.requests.length;
-        let check: Invocation;
-        if (snapshotDir !== undefined) {
-          scratch ??= mkdtempSync(join(tmpdir(), "e2e-round-trip-"));
-          const reposDir = join(scratch, String(i));
-          const central = join(reposDir, relative(join(dir, snapshotDir), join(dir, path)));
-          mkdirSync(dirname(central), { recursive: true });
-          copyFileSync(join(dir, path), central);
-          const { repos: _repos, discovery: _discovery, ...single } = scenario;
-          check = await invoke({ ...single, inputs: checkInputs }, dir, handle.url, reposDir);
-        } else {
-          copyFileSync(join(dir, path), join(dir, SETTINGS_FILE));
-          check = await invoke({ ...scenario, inputs: checkInputs }, dir, handle.url);
-        }
-        const rerunRequests = handle.requests.slice(requestsBefore);
-        reruns.push(captureRerun(`snapshot check ${path}`, check, rerunRequests));
-        failures.push(
-          ...roundTripFailures(
-            `snapshot round trip[${path}]`,
-            check,
-            rerunRequests,
-            handle.violations.slice(violationsBefore),
-          ),
-        );
-      }
-    }
-
-    // Always on: the mock is our stand-in for GitHub, so any drift from the published contract is a mock bug.
-    const openApiViolations = sharedValidator().validateLog(handle.requests);
-    if (openApiViolations.length > 0) {
-      const lines = openApiViolations.map((v) => `${v.request} [${v.kind}]: ${v.detail}`);
-      failures.push(`OpenAPI contract violations:\n  ${lines.join("\n  ")}`);
-    }
-
+  if (handle.violations.length > 0) {
+    failures.push(`mock violations:\n  ${handle.violations.join("\n  ")}`);
+  }
+  const exitFailure = exitCodeFailure(first.exitCode, exp.exit_code);
+  if (exitFailure !== undefined) {
+    failures.push(`${exitFailure}${killNote(first)}`);
+  }
+  if (exp.zero_requests && handle.requests.length > 0) {
+    const sample = handle.requests
+      .slice(0, 3)
+      .map((r) => renderRequest(r, false))
+      .join(", ");
     failures.push(
-      ...checkLeaks(
-        {
-          summary: first.summary,
-          stdout: first.stdout,
-          stderr: first.stderr,
-          outputs: first.outputs,
-        },
-        leakNeedles,
-      ),
+      `expected zero API requests, but the mock saw ${handle.requests.length}: ${sample}`,
     );
-    for (const rerun of reruns) {
-      failures.push(
-        ...checkLeaks(
-          {
-            summary: rerun.summary,
-            stdout: rerun.stdout,
-            stderr: rerun.stderr,
-            outputs: rerun.outputs,
-          },
-          leakNeedles,
-        ).map((failure) => `${rerun.label}: ${failure}`),
-      );
-    }
-    // The request log spans the primary invocation and every re-run, so one sweep covers each delivered report.
-    failures.push(...checkReportLeaks(handle.requests, secretNeedles));
-    failures.push(...writtenSnapshotLeaks(dir, written, secretNeedles));
+  }
+  if (exp.result !== undefined && first.outputs.result !== exp.result) {
+    failures.push(`result "${first.outputs.result}" != expected "${exp.result}"`);
+  }
+  return failures;
+}
 
-    const report: ScenarioReport = {
-      scenario: scenario.name,
-      ok: failures.length === 0,
-      failures,
-      exitCode: first.exitCode,
-      outputs: first.outputs,
-      summary: first.summary,
-      stdout: first.stdout,
-      stderr: first.stderr,
-      requests: [...handle.requests],
-      faultsFired,
-      reposResult: parseReposResult(first.outputs["repos-result"]),
-      reruns,
-    };
-    if (!report.ok) {
-      report.artifactDir = dumpArtifacts(scenario, report, handle.requests);
-    }
-    return report;
-  } finally {
-    if (handle) {
-      await handle.stop();
-    }
-    if (dir) {
-      rmSync(dir, { recursive: true, force: true });
-    }
-    if (scratch) {
-      rmSync(scratch, { recursive: true, force: true });
+/** The documents a render or snapshot run wrote, each compared whole after a YAML parse, so the comment header is ignored. */
+function documentFailures({ scenario, dir }: Run): string[] {
+  const exp = scenario.expect;
+  const failures: string[] = [];
+  if (exp.rendered !== undefined) {
+    failures.push(...documentFileFailures("rendered", renderedFilePath(dir), exp.rendered));
+  }
+  const snapshotFile = scenario.inputs?.snapshot_file;
+  if (exp.snapshot !== undefined && snapshotFile !== undefined) {
+    failures.push(...documentFileFailures("snapshot", join(dir, snapshotFile), exp.snapshot));
+  }
+  for (const pinned of pinnedDirSnapshots(scenario, dir)) {
+    failures.push(
+      ...documentFileFailures(`snapshot[${pinned.slug}]`, pinned.path, pinned.expected),
+    );
+  }
+  return failures;
+}
+
+/**
+ * The `skipped-sections` output is compared as a set: the engine emits SECTION_KEYS order, which
+ * the expectation should not restate. An ABSENT output fails even against an empty expectation:
+ * publishing nothing is a different regression from publishing an empty list.
+ */
+function skippedSectionsFailures(exp: Expect, first: Invocation): string[] {
+  if (exp.skipped_sections === undefined) {
+    return [];
+  }
+  const published = first.outputs[SKIPPED_SECTIONS_OUTPUT];
+  if (published === undefined) {
+    return [`the ${SKIPPED_SECTIONS_OUTPUT} output was not published at all`];
+  }
+  const live = published.split(",").filter(Boolean).sort();
+  const want = [...exp.skipped_sections].sort();
+  if (JSON.stringify(live) === JSON.stringify(want)) {
+    return [];
+  }
+  return [
+    `${SKIPPED_SECTIONS_OUTPUT} output [${live.join(", ")}] != expected [${want.join(", ")}]`,
+  ];
+}
+
+/** The per-target rollup against the merged expectation: the target set, then each target's result. */
+function reposResultFailures(scenario: Scenario, first: Invocation): string[] {
+  const expectedRepos = expectedReposResult(scenario);
+  if (!expectedRepos) {
+    return [];
+  }
+  const failures: string[] = [];
+  const live = parseReposResult(first.outputs["repos-result"]);
+  const liveSlugs = Object.keys(live).sort();
+  const wantSlugs = Object.keys(expectedRepos).sort();
+  if (JSON.stringify(liveSlugs) !== JSON.stringify(wantSlugs)) {
+    failures.push(
+      `repos_result targets [${liveSlugs.join(", ")}] != expected [${wantSlugs.join(", ")}]`,
+    );
+  }
+  for (const [slug, want] of Object.entries(expectedRepos)) {
+    if (live[slug] !== want) {
+      failures.push(`repos_result[${slug}] "${live[slug]}" != expected "${want}"`);
     }
   }
+  return failures;
+}
+
+function outcomeFailures(exp: Expect, first: Invocation): string[] {
+  if (!exp.outcomes) {
+    return [];
+  }
+  const failures: string[] = [];
+  const live = parseSummaryOutcomes(first.summary);
+  for (const [key, want] of Object.entries(exp.outcomes)) {
+    if (live[key] !== want) {
+      failures.push(`outcome ${key} "${live[key]}" != expected "${want}"`);
+    }
+  }
+  return failures;
+}
+
+function surfaceContainsFailures(exp: Expect, first: Invocation): string[] {
+  const failures: string[] = [];
+  for (const needle of exp.summary_contains ?? []) {
+    if (!first.summary.includes(needle)) {
+      failures.push(`summary missing: ${needle}`);
+    }
+  }
+  for (const needle of exp.stdout_contains ?? []) {
+    if (!first.stdout.includes(needle)) {
+      failures.push(`stdout missing: ${needle}`);
+    }
+  }
+  return failures;
+}
+
+/** stdout_lacks matches AFTER stripping the ::add-mask:: lines, which carry the raw slug for the real runner by design; summary_lacks matches the summary as-is. */
+function surfaceLacksFailures(exp: Expect, first: Invocation): string[] {
+  const failures: string[] = [];
+  const maskedStdout = stripMaskLines(first.stdout);
+  for (const needle of exp.summary_lacks ?? []) {
+    if (first.summary.includes(needle)) {
+      failures.push(`summary must not contain: ${needle}`);
+    }
+  }
+  for (const needle of exp.stdout_lacks ?? []) {
+    if (maskedStdout.includes(needle)) {
+      failures.push(`stdout must not contain: ${needle}`);
+    }
+  }
+  return failures;
+}
+
+/**
+ * Every assertion on the primary invocation, in the order report.md lists them. The private-report issue
+ * delivery is the one channel where the private slug and sentinel may legitimately appear, inside the
+ * target repo's own issue.
+ */
+function primaryFailures(run: Run): string[] {
+  const exp = run.scenario.expect;
+  return [
+    ...verdictFailures(run),
+    ...documentFailures(run),
+    ...skippedSectionsFailures(exp, run.first),
+    ...reposResultFailures(run.scenario, run.first),
+    ...outcomeFailures(exp, run.first),
+    ...requestLogFailures(exp, run.handle.requests),
+    ...surfaceContainsFailures(exp, run.first),
+    ...surfaceLacksFailures(exp, run.first),
+    ...(exp.issue_report ? assertIssueReport(exp.issue_report, run.handle.requests) : []),
+  ];
+}
+
+async function applyIdempotenceFailures({ scenario, dir, handle, reruns }: Run): Promise<string[]> {
+  const idempotence = await assertApplyIdempotent(scenario, handle, {
+    invoke: (rerun) => invoke(rerun, dir, handle.url),
+    killNote,
+  });
+  reruns.push(...idempotence.reruns);
+  return idempotence.failures;
+}
+
+/**
+ * Convergence: rerun in check mode against the SAME mutated server. The mock's check-mode write
+ * barrier is armed first: the server still holds the apply-mode scenario, so without it a stray
+ * write would not be a violation.
+ */
+async function convergenceFailures({ scenario, dir, handle, reruns }: Run): Promise<string[]> {
+  const violationsBefore = handle.violations.length;
+  const requestsBefore = handle.requests.length;
+  handle.enterCheckMode();
+  const converge = await invoke(
+    { ...scenario, inputs: { ...scenario.inputs, mode: "check" } },
+    dir,
+    handle.url,
+  );
+  const rerunRequests = handle.requests.slice(requestsBefore);
+  reruns.push(captureRerun("converges check", converge, rerunRequests));
+  const failures: string[] = [];
+  const newWrites = rerunRequests.filter(isWriteRequest);
+  if (converge.exitCode !== 0) {
+    failures.push(
+      `convergence: rerun exited ${converge.exitCode}, expected 0${killNote(converge)}`,
+    );
+  }
+  if (newWrites.length > 0) {
+    failures.push(
+      `convergence: rerun wrote ${newWrites.length} time(s): ${newWrites.map((r) => renderRequest(r, false)).join(", ")}`,
+    );
+  }
+  const newViolations = handle.violations.slice(violationsBefore);
+  if (newViolations.length > 0) {
+    failures.push(`convergence: mock violations:\n  ${newViolations.join("\n  ")}`);
+  }
+  return failures;
+}
+
+/**
+ * assertApplyIdempotent's own final step arms the one-way check-mode barrier and proves
+ * convergence, which is why `fixpoint` is a single enum: only one of the two proofs can ever run.
+ */
+async function fixpointFailures(run: Run): Promise<string[]> {
+  if (run.scenario.expect.fixpoint === "apply_idempotent") {
+    return applyIdempotenceFailures(run);
+  }
+  if (run.scenario.expect.fixpoint === "converges") {
+    return convergenceFailures(run);
+  }
+  return [];
+}
+
+/**
+ * One written snapshot fed back as a CHECK run's settings document: the file form copies it over
+ * settings.yml; the dir form feeds it through its own one-file repos-dir, so the check targets exactly
+ * that repository and a non-converging file names itself.
+ */
+async function invokeSnapshotCheck(
+  { scenario, dir, handle }: Run,
+  checkInputs: ScenarioInputs,
+  path: string,
+  reposDir: () => string,
+): Promise<Invocation> {
+  const snapshotDir = scenario.inputs?.snapshot_dir;
+  if (snapshotDir === undefined) {
+    copyFileSync(join(dir, path), join(dir, SETTINGS_FILE));
+    return invoke({ ...scenario, inputs: checkInputs }, dir, handle.url);
+  }
+  const target = reposDir();
+  const central = join(target, relative(join(dir, snapshotDir), join(dir, path)));
+  mkdirSync(dirname(central), { recursive: true });
+  copyFileSync(join(dir, path), central);
+  const { repos: _repos, discovery: _discovery, ...single } = scenario;
+  return invoke({ ...single, inputs: checkInputs }, dir, handle.url, target);
+}
+
+/**
+ * Every written snapshot, fed back as the settings document of a CHECK run against the SAME seeded
+ * state, must read clean without a write. `scratchDir` creates the round trip's scratch directory on
+ * first use, a sibling of `dir` so a repos-dir can never fall under the snapshot dir.
+ */
+async function snapshotRoundTripFailures(
+  run: Run,
+  written: string[],
+  scratchDir: () => string,
+): Promise<string[]> {
+  const { scenario, handle, reruns } = run;
+  if (!scenario.expect.snapshot_converges) {
+    return [];
+  }
+  const failures: string[] = [];
+  const checkInputs = snapshotCheckInputs(scenario.inputs ?? {});
+  if (written.length === 0) {
+    failures.push("snapshot round trip: the run wrote no snapshot document to feed back");
+  }
+  handle.enterCheckMode();
+  for (const [i, path] of written.entries()) {
+    const violationsBefore = handle.violations.length;
+    const requestsBefore = handle.requests.length;
+    const check = await invokeSnapshotCheck(run, checkInputs, path, () =>
+      join(scratchDir(), String(i)),
+    );
+    const rerunRequests = handle.requests.slice(requestsBefore);
+    reruns.push(captureRerun(`snapshot check ${path}`, check, rerunRequests));
+    failures.push(
+      ...roundTripFailures(
+        `snapshot round trip[${path}]`,
+        check,
+        rerunRequests,
+        handle.violations.slice(violationsBefore),
+      ),
+    );
+  }
+  return failures;
+}
+
+/** Always on: the mock is our stand-in for GitHub, so any drift from the published contract is a mock bug. */
+function openApiFailures(handle: MockHandle): string[] {
+  const openApiViolations = sharedValidator().validateLog(handle.requests);
+  if (openApiViolations.length === 0) {
+    return [];
+  }
+  const lines = openApiViolations.map((v) => `${v.request} [${v.kind}]: ${v.detail}`);
+  return [`OpenAPI contract violations:\n  ${lines.join("\n  ")}`];
+}
+
+/**
+ * The whole-surface leak sweep runs on EVERY scenario, after the re-runs so it covers the primary
+ * invocation and every internal one. Two needle families join the declared ones:
+ *   E2E_TOKEN                -> never add-mask'd, so any echo on a public surface is a real leak
+ *   every scenario env value -> by definition a resolved secret plaintext, listed by the author or not
+ * An EMPTY env value is skipped: a set-but-empty variable is a scenario about the resolver's
+ * empty-value error, not a leakable secret. Those two families are secrets, forbidden on the
+ * private-report surface and in the written snapshots too, where a leaks_nowhere needle (a slug, a
+ * private live value) belongs. The request log spans every invocation, so one report sweep covers each delivered body.
+ */
+function leakFailures({ scenario, dir, handle, first, reruns }: Run, written: string[]): string[] {
+  const secretNeedles = [
+    ...new Set([E2E_TOKEN, ...Object.values(scenario.env ?? {})].filter((needle) => needle !== "")),
+  ];
+  const leakNeedles = [...new Set([...secretNeedles, ...(scenario.expect.leaks_nowhere ?? [])])];
+  const failures = checkLeaks(first, leakNeedles);
+  for (const rerun of reruns) {
+    failures.push(...checkLeaks(rerun, leakNeedles).map((failure) => `${rerun.label}: ${failure}`));
+  }
+  failures.push(...checkReportLeaks(handle.requests, secretNeedles));
+  failures.push(...writtenSnapshotLeaks(dir, written, secretNeedles));
+  return failures;
 }
 
 /**
@@ -992,7 +1037,6 @@ export async function runScenario(
 function replayBlockLines(replay: string): string[] {
   return ["", "## Replay", "", "```sh", replay, "```"];
 }
-const REPLAY_LINE = 4;
 
 export function setReplay(artifactDir: string, replay: string): void {
   const path = join(artifactDir, "report.md");
@@ -1037,6 +1081,28 @@ function dumpInvocation(
   writeFileSync(join(dir, "requests.json"), JSON.stringify(requests, null, 2));
 }
 
+/** The nightly issue action reads this report.md; its headings are the contract. */
+function writeReport(
+  dir: string,
+  scenario: Scenario,
+  report: ScenarioReport,
+  failures: readonly string[],
+): void {
+  const md = [
+    `# ${scenario.name}`,
+    ...replayBlockLines(`bun test/e2e/run.ts --scenario ${scenario.name}`),
+    "",
+    `Artifact directory: ${dir}`,
+    "",
+    "## Failures",
+    "",
+    ...failures.map((f) => `- ${f.replace(/\n/g, "\n  ")}`),
+    "",
+    `Exit code: ${report.exitCode}`,
+  ].join("\n");
+  writeFileSync(join(dir, "report.md"), `${md}\n`);
+}
+
 /**
  * The debugging dump for a failing scenario, keyed by name, pid, and a counter so parallel or repeated
  * runs never collide. `failures` is what report.md lists: the runner's own by default, or a caller's
@@ -1066,28 +1132,6 @@ function dumpArtifacts(
   return dir;
 }
 
-/** The nightly issue action reads this report.md; its headings are the contract. */
-function writeReport(
-  dir: string,
-  scenario: Scenario,
-  report: ScenarioReport,
-  failures: readonly string[],
-): void {
-  const md = [
-    `# ${scenario.name}`,
-    ...replayBlockLines(`bun test/e2e/run.ts --scenario ${scenario.name}`),
-    "",
-    `Artifact directory: ${dir}`,
-    "",
-    "## Failures",
-    "",
-    ...failures.map((f) => `- ${f.replace(/\n/g, "\n  ")}`),
-    "",
-    `Exit code: ${report.exitCode}`,
-  ].join("\n");
-  writeFileSync(join(dir, "report.md"), `${md}\n`);
-}
-
 /**
  * The nightly issue action reads report.md, not the log, so every failure judged against a run,
  * the runner's own and a caller's (the fuzz oracle's verdicts), must land in it.
@@ -1108,4 +1152,76 @@ export function failureArtifacts(
     writeReport(report.artifactDir, scenario, report, [...new Set(report.failures), ...extra]);
   }
   return report.artifactDir;
+}
+
+/**
+ * Run one scenario end to end and dump an artifact directory on any failure. `opts.serverOptions`
+ * merges over the scenario's own base_prefix, so the fuzz CLI can inject the chaos `corrupt` directive.
+ */
+export async function runScenario(
+  scenario: Scenario,
+  opts?: { serverOptions?: ServerOptions },
+): Promise<ScenarioReport> {
+  let dir: string | undefined;
+  let scratch: string | undefined;
+  let handle: MockHandle | undefined;
+
+  try {
+    dir = mkdtempSync(join(tmpdir(), "e2e-"));
+    handle = await startMockServer(scenario, {
+      ...(scenario.base_prefix ? { basePrefix: scenario.base_prefix } : {}),
+      ...(scenario.faults
+        ? {
+            faults: scenario.faults.map((f) => ({ key: f.endpoint, kind: f.kind, times: f.times })),
+          }
+        : {}),
+      ...opts?.serverOptions,
+    });
+    writeFileSync(join(dir, SETTINGS_FILE), settingsYamlFor(scenario));
+    const first = await invoke(scenario, dir, handle.url);
+    // Snapshot NOW: a fault that fires only during an optional re-run must not read as non-vacuous
+    // for the primary outcome exitCode, outputs, and reposResult describe.
+    const faultsFired = Object.fromEntries(handle.faultCounts);
+    const run: Run = { scenario, dir, handle, first, reruns: [] };
+
+    const failures = primaryFailures(run);
+    failures.push(...(await fixpointFailures(run)));
+    const written = writtenSnapshotPaths(scenario.inputs ?? {}, dir);
+    const scratchDir = (): string => {
+      scratch ??= mkdtempSync(join(tmpdir(), "e2e-round-trip-"));
+      return scratch;
+    };
+    failures.push(...(await snapshotRoundTripFailures(run, written, scratchDir)));
+    failures.push(...openApiFailures(handle));
+    failures.push(...leakFailures(run, written));
+
+    const report: ScenarioReport = {
+      scenario: scenario.name,
+      ok: failures.length === 0,
+      failures,
+      exitCode: first.exitCode,
+      outputs: first.outputs,
+      summary: first.summary,
+      stdout: first.stdout,
+      stderr: first.stderr,
+      requests: [...handle.requests],
+      faultsFired,
+      reposResult: parseReposResult(first.outputs["repos-result"]),
+      reruns: run.reruns,
+    };
+    if (!report.ok) {
+      report.artifactDir = dumpArtifacts(scenario, report, handle.requests);
+    }
+    return report;
+  } finally {
+    if (handle) {
+      await handle.stop();
+    }
+    if (dir) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+    if (scratch) {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  }
 }

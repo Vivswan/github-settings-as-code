@@ -41,7 +41,7 @@ type Paramless<R extends Route> = R extends Route
     : never
   : never;
 
-type UpdateDecl = EndpointDecl & {
+export type UpdateDecl = EndpointDecl & {
   readonly route: Extract<Route, `PATCH ${string}` | `PUT ${string}`>;
 };
 
@@ -184,6 +184,7 @@ type DriftWording = Pick<Parameters<typeof undeclaredDrift>[1], "state" | "add" 
 interface Listing {
   /** The query the list carries (milestones' state=all: the default listing omits closed items). */
   readonly query?: Readonly<Record<string, string>>;
+
   /** GitHub serves the whole list in one response and ignores page params (autolinks), so the page loop is skipped. */
   readonly unpaginated?: true;
 }
@@ -193,9 +194,12 @@ interface Listing {
  * under a read grant): plan() compares around it and notes it, snapshot() leaves the item out.
  */
 interface ConcealedField {
+  /** The write field GitHub withholds, as a dotted path. */
   readonly field: string;
+
   /** Why GitHub withholds it ("GitHub returns it only to a token with write access to the ruleset"). */
   readonly reason: string;
+
   /** The grant that lifts it, as an imperative clause ("grant Administration write"). */
   readonly remedy: string;
 }
@@ -225,12 +229,11 @@ type MappingFacet<K extends ListSectionKey, Ends, M extends string> = Ends exten
 interface Identity<K extends ListSectionKey, F extends string, Key extends string> {
   /** The write field naming the resource, as the live item carries it ("name", "title", "config.url"). */
   readonly field: F;
+
   /** Folds a name to the key GitHub matches it by; `exactName` when GitHub matches exactly. */
   readonly fold: (name: string) => Key;
-  /**
-   * Names an entry also answers to (a label's pre-rename `name`), so a live item under one is this
-   * entry's, renamed by the update, not undeclared.
-   */
+
+  /** Names an entry also answers to (a label's pre-rename `name`), so a live item under one is this entry's, renamed by the update, not undeclared. */
   readonly aliases?: (entry: Entry<K>) => readonly string[];
 }
 
@@ -247,7 +250,8 @@ type RenameFacet<F extends string> = F extends `${string}.${string}`
 
 /**
  * `Key` is the fold's output: the planner keys every live-versus-declared lookup by it, so an unfolded
- * name cannot be looked up, and a section's brand (labels' NameKey) survives to `decl`.
+ * name cannot be looked up, and a section's brand (labels' NameKey) survives to `decl`. `M` infers from
+ * `mapping` alone (NoInfer on `secrets`), so a stray secret path is the error, never a re-inferred mapping.
  */
 export type ListSectionDecl<
   K extends ListSectionKey,
@@ -258,6 +262,20 @@ export type ListSectionDecl<
   M extends string = never,
 > = ListSectionDeclFields<K, Ends, Live, F, Key, M> & MappingFacet<K, Ends, M>;
 
+/**
+ * The declaration a list section hands listSection(). The lens puts the entry and the live item in one vocabulary,
+ * so `fromLive` reads a live item in toWrite's terms:
+ *
+ *   identity field          -> verbatim
+ *   other declared fields   -> normalized as GitHub stores them (a color lowercased without "#", a null description as "")
+ *   every other live field  -> kept, so declared passthrough keys compare against what the API echoed
+ *
+ * `conflicts` are the clashes the identities cannot show, each naming the fix; any finding fails the section:
+ *
+ *   declared  -> sees only the writes and runs inside document validation, before ANY section writes
+ *                (a settings-file mistake costs no request); `[i]` indexes the writes as the entries
+ *   live      -> runs after the read and before any write (a deploy key's material held by another key)
+ */
 interface ListSectionDeclFields<
   K extends ListSectionKey,
   Ends extends ListEndpoints,
@@ -266,71 +284,63 @@ interface ListSectionDeclFields<
   Key extends string,
   M extends string,
 > {
+  /** As SectionMeta.key. */
   readonly key: K;
+
+  /** As SectionMeta.permission. */
   readonly permission: SectionPermission;
+
+  /** As SectionMeta.undeclaredDefault: "delete" or "keep", since a list section enumerates its live resources. */
   readonly undeclaredDefault: UndeclaredPolicy;
+
   /** The output noun for change lines and notes ("label"). */
   readonly noun: string;
+
   /** The entry config slice (src/sections/<key>/schema.ts); the loose shape derives from it. */
   readonly entry: z.ZodType<Entry<K>>;
+
   /** The fields of a live item the section reads (a list item, and the `get` body when the role exists); extras ride along. */
   readonly live: z.ZodType<Live>;
+
+  /** The roles the factory derives its handlers from, pinned to exactly those by OnlyListRoles. */
   readonly endpoints: Ends & OnlyListRoles<Ends>;
+
+  /** How the list is read: a query on every page, or one unpaginated GET. */
   readonly listing?: Listing;
+
+  /** The field entries and live items are matched by, with its fold and aliases. */
   readonly identity: Identity<K, F, Key> & RenameFacet<F>;
+
   /** The path params addressing one live item for every item role; unrepresentable when the routes disagree. */
   readonly address: [Address<Ends>] extends [never] ? never : (live: Live) => Address<Ends>;
+
+  /** The entry and the live item in one vocabulary, and the body the request spells. */
   readonly lens: {
-    /**
-     * The entry in the terms the comparison runs in: what a converged live item reads back as, and the
-     * request body itself unless `wire` renders it.
-     */
+    /** The entry as a converged live item reads back, and the request body itself unless `wire` renders it. */
     readonly toWrite: (entry: Entry<K>) => ListWrite<F>;
-    /**
-     * A live item in the same terms as toWrite, so the two compare field by field; a live item the section cannot
-     * compare (a ruleset repeating a rule type) is the failure that ends the plan or snapshot.
-     *
-     *   identity field          -> verbatim
-     *   other declared fields   -> normalized as GitHub stores them (a color lowercased without "#", a null description as "")
-     *   every other live field  -> kept, so declared passthrough keys compare against what the API echoed
-     */
+
+    /** A live item in toWrite's terms (the rows above); a live item the section cannot compare (a ruleset repeating a rule type) is the failure that ends the plan or snapshot. */
     readonly fromLive: (live: Live) => Result<ListComparable<F>, SectionFailure>;
-    /**
-     * The write as the request body spells it, when that differs from the compared form (a milestone's due
-     * day sent as noon UTC): applied to every body the planner sends (create, recreate, update, and the
-     * updateConfig slice) and to nothing the comparison or the snapshot reads. Omitted, the write is the body.
-     */
+
+    /** The body as the request spells it when that differs from the compared form (a milestone's due day as noon UTC): every body the planner sends, nothing the comparison or the snapshot reads. */
     readonly wire?: (write: ListWrite<F>) => ListWrite<F>;
+
     /** Per entry field holding a list, the item key to pair by (see DeltaOptions.matchBy); `{}` when none does. */
     readonly matchBy: Readonly<Partial<Record<keyof Entry<K> & string, MatchKey>>>;
   };
-  /**
-   * Whether the update body replaces the live item whole (a ruleset's PUT) or sets named fields only (a PATCH).
-   * Under `true` a non-empty live value under a key of the entry slice that the entry omits is drift, and apply
-   * refuses the write. Every declaration says which, so a replace-style section cannot inherit the declared-keys
-   * comparison by leaving it out.
-   */
+
+  /** Whether the update replaces the live item whole (a ruleset's PUT), so a non-empty live value the entry omits is drift and apply refuses the write; required, so a replace-style section cannot inherit the PATCH comparison by leaving it out. */
   readonly replaces: boolean;
-  /**
-   * The body recreating a drifted item of a resource GitHub cannot edit (no update role), when the
-   * write alone would drop a live field the file leaves undeclared (a deploy key's read_only).
-   */
+
+  /** The body recreating a drifted item of a resource GitHub cannot edit (no update role), when the write alone would drop a live field the file leaves undeclared (a deploy key's read_only). */
   readonly recreate?: "update" extends keyof Ends
     ? never
     : (live: Live, write: ListWrite<F>) => ListWrite<F>;
-  /**
-   * File-only checks over the entries beyond identity uniqueness (a deploy key's material must parse), one
-   * issue per finding with its path (`[2].key`); they join the module's validate hook, which the engine runs
-   * inside document validation, so a write with such an entry is unreachable and toWrite may treat it as a BUG.
-   */
+
+  /** File-only checks beyond identity uniqueness (a deploy key's material must parse), one issue per finding at its path (`[2].key`); the engine runs them inside document validation, so toWrite may treat such an entry as a BUG. */
   readonly validate?: (entries: readonly Entry<K>[]) => readonly DeclaredIssue[];
-  /**
-   * Conflicts the identities cannot show, each naming the fix; any finding fails the section.
-   *
-   *   `declared`  -> sees only the writes and runs inside document validation, before ANY section writes
-   *                  (a settings-file mistake costs no request); `[i]` indexes the writes as the entries
-   *   `live`      -> runs after the read and before any write (a deploy key's material held by another key)
-   */
+
+  /** Conflicts the identities cannot show (the rows above); any finding fails the section. */
   readonly conflicts?: {
     readonly declared?: (writes: readonly ListWrite<F>[]) => readonly DeclaredIssue[];
     readonly live?: (
@@ -338,37 +348,33 @@ interface ListSectionDeclFields<
       live: readonly ListComparable<F>[],
     ) => readonly string[];
   };
-  /**
-   * The reason a live item is outside what the section manages (an inherited ruleset, a legacy
-   * service hook), or null when it is the section's own: plan() neither matches nor removes it,
-   * snapshot() leaves it out under `name` with the reason.
-   */
+
+  /** Why a live item is outside what the section manages (an inherited ruleset, a legacy service hook), or null for the section's own; plan() neither matches nor removes it, snapshot() leaves it out with the reason. */
   readonly foreign?: (live: Live) => { readonly name: string; readonly reason: string } | null;
+
   /** Read off the full body (the `get` role's when it exists); see ConcealedField. */
   readonly concealed?: (live: Live) => readonly ConcealedField[];
-  /**
-   * Write fields (dotted paths) holding a `$NAME` reference to a value GitHub never echoes back (a
-   * webhook's config.secret): left out of the comparison, resolved when the write executes, re-sent
-   * on every run under an unverifiable facet, and read back by a snapshot as a per-item reference.
-   * SecretPath admits a path only under `mapping`, and only where its carriers declare the facet; `mapping`
-   * alone infers `M`, so a stray path is the error, never a re-inferred mapping.
-   */
+
+  /** Dotted write paths holding a `$NAME` reference GitHub never echoes back (a webhook's config.secret): left out of the comparison, resolved at execution, re-sent every run under an unverifiable facet, and read back as a per-item reference. */
   readonly secrets?: readonly SecretPath<Ends, NoInfer<M>>[];
+
+  /** The undeclared wording: what apply does, and the optional rewordings of the keep-note and the delete drift. */
   readonly prose: {
     /** What apply does to an undeclared live resource, as the note and drift spell it ("DELETE it"). */
     readonly undeclaredAction: string;
+
+    /** Rewords the keep-note (see NoteWording). */
     readonly undeclaredNote?: NoteWording;
+
+    /** Rewords the delete drift line (see DriftWording). */
     readonly undeclaredDrift?: DriftWording;
   };
-  /**
-   * The pairing itself is derived from `identity`, the very claims the planner's duplicate check reads, so the
-   * merge and the planner cannot disagree about which entries are one; a declaration adds only the nested keyed
-   * lists.
-   */
+
+  /** The nested keyed lists alone: the pairing derives from `identity`, the claims the planner's duplicate check reads, so the merge and the planner cannot disagree about which entries are one. */
   readonly layering?: Pick<KeyedListLayering, "nested">;
 }
 
-/** The module listSection() mints: SectionModule<K, Ends> at the registry, plus its declaration. */
+/** The module listSection() mints: SectionModule<K, Ends> at the registry, plus `decl`, the declaration the harness derives from (the mock's transformers, the fuzz witness). */
 export interface ListSectionModule<
   K extends ListSectionKey,
   Ends extends ListEndpoints,
@@ -392,7 +398,6 @@ export interface ListSectionModule<
   readonly snapshot: (
     ctx: SnapshotContext<Ends, GraphqlDict, K>,
   ) => Promise<Result<SectionSnapshot<K>, SectionFailure>>;
-  /** The declaration, for the harness derivations (the mock's transformers, the fuzz witness). */
   readonly decl: ListSectionDecl<K, Ends, Live, F, Key, M>;
 }
 

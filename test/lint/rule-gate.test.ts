@@ -1,5 +1,5 @@
 /**
- * The rule-gate plugin's verdict on each refinement form, and its biome.json wiring, pinned by linting a fixture tree
+ * The rule-gate plugin's verdict on each refinement form, and its biome.local.jsonc wiring, pinned by linting a fixture tree
  * with the repository's own configuration; a snippet that silently stopped matching would let a bare refinement
  * ship, and zod would skip it once a nested value failed.
  */
@@ -11,13 +11,17 @@ import { ROOT } from "../root.js";
 import { withTempDir } from "../temp-dir.js";
 import { lint } from "./fixture-lint.js";
 
+/** The plugin's one message, verbatim. */
 const MESSAGE =
   "bare refinement: zod skips it once a nested value failed; wrap it in rule() so it runs beside nested failures";
+
+/** The file the plugin exempts: rule() itself is a bare refinement. */
 const EXEMPT_FILE = "src/sections/shared/schema-helpers.ts";
 
 /** A line ending in `// bare` is one the plugin must flag; every other refinement here is authored through rule(). */
 const BARE = /\/\/ bare$/;
 
+/** A src/ module of refinements, every one through rule() but the lines marked bare. */
 const REFINEMENTS = `
 import { z } from "zod";
 import { maxLength, rule } from "./sections/shared/schema-helpers.js";

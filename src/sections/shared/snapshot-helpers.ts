@@ -13,7 +13,9 @@ import type { UndeclaredPolicyList } from "../../types.js";
 import type { SectionFailure } from "../contract/errors.js";
 import { defaultUndeclaredPolicy, type SectionMeta } from "../contract/module.js";
 import type { SnapshotContext } from "../contract/plan.js";
-import { schemaNode } from "./schema-node.js";
+import { type SchemaNode, schemaNode } from "./schema-node.js";
+
+type ObjectNode = Extract<SchemaNode, { readonly kind: "object" }>;
 
 /**
  * A live value projected onto a schema slice, so server-assigned fields fall away without a hand
@@ -31,6 +33,29 @@ export function projectOntoSchema<T>(schema: z.ZodType<T>, live: unknown): T {
   return project(schema, live) as T;
 }
 
+/**
+ * A mapping projected onto an object node: each declared key recursively, dropped when it projects to nothing, and
+ * under a z.looseObject node every other live key as it came; an open() node keeps the declared ones alone.
+ */
+function projectObject(node: ObjectNode, live: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(node.shape)) {
+    const projected = project(child, live[key]);
+    if (projected !== undefined) {
+      out[key] = projected;
+    }
+  }
+  if (node.openness !== "open") {
+    return out;
+  }
+  for (const [key, value] of Object.entries(live)) {
+    if (!(key in node.shape) && value !== undefined) {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
 function project(schema: z.ZodType, live: unknown): unknown {
   if (live === undefined) {
     return undefined;
@@ -42,26 +67,8 @@ function project(schema: z.ZodType, live: unknown): unknown {
   switch (node.kind) {
     case "wrapper":
       return project(node.inner, live);
-    case "object": {
-      if (!isPlainObject(live)) {
-        return live;
-      }
-      const out: Record<string, unknown> = {};
-      for (const [key, child] of Object.entries(node.shape)) {
-        const projected = project(child, live[key]);
-        if (projected !== undefined) {
-          out[key] = projected;
-        }
-      }
-      if (node.openness === "open") {
-        for (const [key, value] of Object.entries(live)) {
-          if (!(key in node.shape) && value !== undefined) {
-            out[key] = value;
-          }
-        }
-      }
-      return out;
-    }
+    case "object":
+      return isPlainObject(live) ? projectObject(node, live) : live;
     case "array":
       return Array.isArray(live) ? live.map((item) => project(node.element, item)) : live;
     case "record":

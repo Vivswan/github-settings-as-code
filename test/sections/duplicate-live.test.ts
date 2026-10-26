@@ -24,19 +24,17 @@ import { validatedInput } from "./validated-input.js";
 interface Seed {
   /** The list the pair sits in (`labels`, `environments[prod].variables`). */
   readonly list: string;
+
+  /** The live state the fake is seeded with, the pair inside it. */
   readonly live: LiveState;
-  /**
-   * The declared value plan() runs against; absent when plan() has no list read over this identity
-   * (branches probes by name; the environment listing is snapshot's alone), so only snapshot() is proven.
-   */
+
+  /** The declared value plan() runs against; absent when plan() has no list read over this identity (branches probes by name; the environment listing is snapshot's alone), so only snapshot() is proven. */
   readonly declared?: unknown;
+
   /** The refusal, as liveByIdentity renders it: the noun, then each pair through liveIdentity. */
   readonly refusal: string;
-  /**
-   * A response the mock's state cannot hold (a record keyed by the identity itself, node ids minted
-   * from the identity): the pair is served in place of the mock's answer to every GET on this path
-   * (any page), or to the named GraphQL operations.
-   */
+
+  /** A response the mock's state cannot hold (a record keyed by the identity itself, node ids minted from the identity), served in place of the mock's answer to every GET on this path (any page) or to the named GraphQL operations. */
   readonly served?:
     | { readonly path: string; readonly body: unknown; readonly ops?: never }
     | {
@@ -52,7 +50,9 @@ interface Seed {
  * the port, a GraphQL connection) fails the section's exemption.
  */
 interface NoLiveList {
+  /** Why the section reads no live list. */
   readonly noLiveList: string;
+
   /** The declared value plan() runs against for the check. */
   readonly declared: unknown;
 }

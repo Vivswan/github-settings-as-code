@@ -34,6 +34,7 @@ export interface CliStreams {
 export interface MaskedStreams extends CliStreams, MaskPair {
   /** `text` with every masked value replaced, for the writes that bypass the streams. */
   redact(text: string): string;
+
   /** The runner this boundary reports to; none for a terminal. */
   readonly runner: RunnerChannel | undefined;
 }
@@ -103,18 +104,25 @@ export function maskedStreams(streams: CliStreams, runner?: ActionsRunner): Mask
 }
 
 export interface CliIoOptions {
+  /** The masked boundary every write goes through. */
   readonly streams: MaskedStreams;
+
   /** Print the outputs as one JSON object; log lines move to stderr so stdout is that object alone. */
   readonly json: boolean;
+
   /** Show the debug trace. */
   readonly verbose: boolean;
+
   /** The file summary blocks are appended to; none falls back to the runner's step summary, or drops them. */
   readonly summaryFile?: string;
+
+  /** Color the level labels. */
   readonly colors: boolean;
 }
 
 export interface CliIo {
   readonly io: Io;
+
   /**
    * Print the collected outputs to stdout, in the form the json option picked. `problem` is the fatal problem a run
    * ended in, worded for the terminal; the envelope carries it beside the outputs, the line form already has it on stderr.
@@ -140,10 +148,7 @@ const LABEL: Partial<Record<LogType, { label: string; paint: Paint }>> = {
   debug: { label: "debug", paint: (colors) => colors.dim },
 };
 
-/**
- * How each output reads inside the --json envelope: the action's outputs are strings (a comma list, a JSON document),
- * and a JSON envelope carries the value itself, never a string a reader would parse again.
- */
+/** Each output's form inside the --json envelope: the action's outputs are strings (a comma list, a JSON document), and a JSON envelope carries the value itself, never a string a reader would parse again. */
 const JSON_OUTPUT: Record<OutputName, (value: string) => unknown> = {
   result: (value) => value,
   "skipped-sections": (value) => (value === "" ? [] : value.split(",")),

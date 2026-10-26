@@ -9,7 +9,6 @@ import { REPO, unwrap } from "../section-run.js";
 import { validatedInput } from "../validated-input.js";
 import { githubStoresDueOn, milestonesMockHandlers } from "./mock.js";
 
-/** Closed milestones are listed too: the read asks for state=all. */
 const LIST = "GET /repos/o/r/milestones?state=all&per_page=100&page=1";
 const liveMilestones = [
   { number: 1, title: "v1", description: null, state: "open", due_on: null },
@@ -61,6 +60,7 @@ describe("milestones", () => {
       notes: [KEEP_NOTE],
       drift: [],
     });
+    // state=all: closed milestones are listed too.
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([LIST]);
   });
 

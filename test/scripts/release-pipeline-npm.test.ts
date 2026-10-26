@@ -39,8 +39,7 @@ import {
 setDefaultTimeout(60_000);
 installReleasePipelineFixture();
 
-/** The version grammar as semver.org states it: what npm holds a version to
- * before it normalizes one (a bare all-digit identifier loses its leading zero). */
+/** The version grammar as semver.org states it: what npm holds a version to before it normalizes one (a bare all-digit identifier loses its leading zero). */
 const SEMVER =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
 
@@ -926,56 +925,74 @@ describe("npmFloor", () => {
       ? readFileSync(join(dir, "calls.log"), "utf8").split("\n").filter(Boolean)
       : [];
 
-  test.each([
-    ["at the floor", "11.5.1", "11.5.1", 0, [], "", ""],
+  /** An npm on PATH at `version` that `after` the upgrade prints as such, and what the floor step must do and say. */
+  interface FloorCase {
+    readonly version: string;
+    readonly after: string;
+    readonly status: number;
+    readonly upgrades: string[];
+    readonly stdout: string;
+    readonly stderr: string;
+  }
+  test.each<[string, FloorCase]>([
+    [
+      "at the floor",
+      { version: "11.5.1", after: "11.5.1", status: 0, upgrades: [], stdout: "", stderr: "" },
+    ],
     [
       "above it by a two-digit minor (numeric, not textual, order)",
-      "11.10.0",
-      "11.10.0",
-      0,
-      [],
-      "",
-      "",
+      { version: "11.10.0", after: "11.10.0", status: 0, upgrades: [], stdout: "", stderr: "" },
     ],
     [
       "below it, with an upgrade that reaches it",
-      "10.9.2",
-      "11.6.0",
-      0,
-      ["install -g npm@latest"],
-      "",
-      "",
+      {
+        version: "10.9.2",
+        after: "11.6.0",
+        status: 0,
+        upgrades: ["install -g npm@latest"],
+        stdout: "",
+        stderr: "",
+      },
     ],
     [
       "below it, with an upgrade that does not",
-      "10.9.2",
-      "10.9.2",
-      1,
-      ["install -g npm@latest"],
-      "::error::npm 10.9.2 cannot publish through OIDC; trusted publishing needs npm 11.5.1 or newer.\n",
-      "",
+      {
+        version: "10.9.2",
+        after: "10.9.2",
+        status: 1,
+        upgrades: ["install -g npm@latest"],
+        stdout:
+          "::error::npm 10.9.2 cannot publish through OIDC; trusted publishing needs npm 11.5.1 or newer.\n",
+        stderr: "",
+      },
     ],
     [
       "below it, with an upgrade that fails",
-      "10.9.2",
-      "fail 7",
-      1,
-      ["install -g npm@latest"],
-      "",
-      "release-pipeline npm-floor: npm 10.9.2 is below 11.5.1 and npm install -g npm@latest exited 7; the publish needs npm 11.5.1 or newer.\n",
+      {
+        version: "10.9.2",
+        after: "fail 7",
+        status: 1,
+        upgrades: ["install -g npm@latest"],
+        stdout: "",
+        stderr:
+          "release-pipeline npm-floor: npm 10.9.2 is below 11.5.1 and npm install -g npm@latest exited 7; the publish needs npm 11.5.1 or newer.\n",
+      },
     ],
     [
       "at a prerelease of the floor, with an upgrade that still prints no version",
-      "11.5.1-pre.0",
-      "not-a-version",
-      1,
-      ["install -g npm@latest"],
-      "::error::npm not-a-version cannot publish through OIDC; trusted publishing needs npm 11.5.1 or newer.\n",
-      "",
+      {
+        version: "11.5.1-pre.0",
+        after: "not-a-version",
+        status: 1,
+        upgrades: ["install -g npm@latest"],
+        stdout:
+          "::error::npm not-a-version cannot publish through OIDC; trusted publishing needs npm 11.5.1 or newer.\n",
+        stderr: "",
+      },
     ],
   ])(
     "an npm %s: the upgrade runs once at most, the floor holding is silent, and the floor failing is the annotation",
-    (_, version, after, status, upgrades, stdout, stderr) =>
+    (_, { version, after, status, upgrades, stdout, stderr }) =>
       withTempDir("npm-floor-", async (dir) => {
         const npm = withNpm(dir, version, after);
         expect(

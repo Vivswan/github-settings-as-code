@@ -8,15 +8,13 @@ export type UndeclaredPolicy = "keep" | "delete";
 
 /**
  * The wrapper knobbed() and nestedKnobbed() build. The underscored keys are this action's DIRECTIVES, never GitHub
- * settings; each key's meaning is published from docs/sections/shared.docs.yml, the one source the JSON Schema and the docs render from.
+ * settings; each key's meaning is published from docs/sections/shared.docs.yml, the one source the JSON Schema and the
+ * docs render from. Only a TOP-LEVEL section's wrapper takes `_layering` (see nestedKnobbed()); its values are
+ * LAYERINGS in src/sections/shared/schema-helpers.ts, pinned in src/sections/contract/keyed-list.ts.
  */
 export interface UndeclaredPolicyList<E> {
   _undeclared?: UndeclaredPolicy;
   entries: E[];
-  /**
-   * Only a TOP-LEVEL section's wrapper takes it (see nestedKnobbed()); the values are LAYERINGS in
-   * src/sections/shared/schema-helpers.ts, pinned in src/sections/contract/keyed-list.ts.
-   */
   _layering?: "replace" | "shallow" | "deep";
 }
 

@@ -1,6 +1,8 @@
 /**
- * biome.json's $schema URL names a biome version by hand, and `biome ci` only emits an info notice when it lags the installed CLI, so a dependency
- * bump leaves it drifting silently.
+ * The fleet lints with one biome, the version the managed biome.json's $schema URL names, while this repository's
+ * own lint, format, and pre-commit hook run the @biomejs/biome devDependency. A Dependabot bump of that devDependency
+ * would otherwise lint with a newer biome than the gate, silently: `biome ci` only emits an info notice when the
+ * schema lags the CLI.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -13,8 +15,8 @@ function biomeSchemaVersion(schemaUrl: string): string | null {
   return schemaUrl.match(/^https:\/\/biomejs\.dev\/schemas\/([^/]+)\/schema\.json$/)?.[1] ?? null;
 }
 
-describe("biome.json $schema", () => {
-  test("names the installed @biomejs/biome version", () => {
+describe("@biomejs/biome devDependency", () => {
+  test("is the fleet's biome, the version the managed biome.json's $schema names", () => {
     const biome = JSON.parse(readFileSync(join(ROOT, "biome.json"), "utf8")) as {
       $schema?: string;
     };
@@ -23,14 +25,14 @@ describe("biome.json $schema", () => {
     };
     const installed = pkg.devDependencies?.["@biomejs/biome"];
     expect(installed, "package.json has no @biomejs/biome devDependency").toBeDefined();
-    const pinned = biomeSchemaVersion(biome.$schema ?? "");
+    const fleet = biomeSchemaVersion(biome.$schema ?? "");
     expect(
-      pinned,
+      fleet,
       `biome.json $schema "${biome.$schema}" is not a biomejs.dev schema URL`,
     ).not.toBeNull();
     expect(
-      pinned,
-      `biome.json $schema names ${pinned} but @biomejs/biome is ${installed}; run \`bun x biome migrate --write\``,
-    ).toBe(installed as string);
+      installed,
+      `@biomejs/biome is pinned at ${installed} but the fleet's biome.json names ${fleet}; the gate lints with the fleet's biome, so pin the devDependency to ${fleet}`,
+    ).toBe(fleet as string);
   });
 });

@@ -4,10 +4,7 @@
  * a run's targets through worstOf(), so no mode can grow a word or a ranking of its own.
  */
 
-/**
- * Worst-first. The healthy words never share a run (clean and drift belong to check, applied to apply, snapshot to
- * snapshot, rendered to render), so their order against each other is never exercised; skipped appears only across a fleet.
- */
+/** Worst-first; the healthy words never share a run (clean and drift are check's, applied apply's, snapshot snapshot's, rendered render's), so their order against each other is never exercised, and skipped appears only across a fleet. */
 export const RUN_RESULTS = [
   "failed",
   "drift",

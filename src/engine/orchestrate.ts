@@ -38,7 +38,7 @@ import { executePlan } from "./execute.js";
 import { UNDECLARED_POLICIES } from "./layers.js";
 import type { RunOutcome } from "./outcome.js";
 import { resolveSecretRefs, type SettingsSource } from "./secret-refs.js";
-import { collectSecretReferences } from "./secrets.js";
+import { collectSecretReferences, type SectionSecretReference } from "./secrets.js";
 import type { SectionSelection } from "./section-selection.js";
 import { separateRemovals } from "./separate-removals.js";
 import { resolveUndeclaredPolicies } from "./undeclared.js";
@@ -46,7 +46,8 @@ import { validateSectionShapes } from "./validate.js";
 
 /**
  * `httpStatus` is the safe code of the permission-denied failure behind a failed or skipped section (the redacted view shows it
- * as `HTTP 403` in place of the hidden detail); the `?: never` pin makes a code on a healthy row unrepresentable.
+ * as `HTTP 403` in place of the hidden detail); the `?: never` pin makes a code on a healthy row unrepresentable, and a
+ * generic (non-denial) failure legitimately carries none.
  */
 export type SectionOutcome =
   | {
@@ -59,17 +60,16 @@ export type SectionOutcome =
       key: SectionKey;
       status: "failed" | "skipped";
       detail: string[];
-      /** Optional: a generic (non-denial) failure legitimately carries none. */
       httpStatus?: number;
     };
 
-/**
- * The brand has exactly one construction site (mintValidatedSettings, below validateSettingsDoc), so a RepoRunOptions
- * built from an unvalidated document is a compile error. The value is the PARSED document zod built, never the
- * caller's object. Each section's value reads back as ValidatedInput, the per-section proof every plan() takes, so
- * the document is the only source of planner input.
- */
+/** The brand's one minting site is mintValidatedSettings (below validateSettingsDoc), so a RepoRunOptions built from an unvalidated document is a compile error. */
 declare const validatedSettings: unique symbol;
+
+/**
+ * The PARSED document zod built, never the caller's object. Each section's value reads back as ValidatedInput, the
+ * per-section proof every plan() takes, so the document is the only source of planner input.
+ */
 export type ValidatedSettings = {
   [K in keyof SettingsFile]: K extends SectionKey ? ValidatedInput<K> : SettingsFile[K];
 } & { readonly [validatedSettings]: true };
@@ -88,11 +88,11 @@ export type RepoResult = "applied" | "partial" | "clean" | "drift" | "failed" | 
 
 type _UnrankedRepoResult = MustBeNever<Exclude<RepoResult, RunOutcome>>;
 
+/** One repository's apply or check; `preflightDenied` is non-empty when the preflight barrier refused to write anything. */
 export interface RepoRunResult {
   repo: string;
   result: RepoResult;
   outcomes: SectionOutcome[];
-  /** Non-empty when the preflight barrier refused to write anything. */
   preflightDenied: string[];
 }
 
@@ -106,12 +106,40 @@ export function skippedSectionKeys(
 export interface ValidateOptions {
   /** The run's `undeclared` input: the fallback for a list whose wrapper and file set no policy, before the list's default. */
   readonly undeclared?: UndeclaredPolicy | undefined;
-  /**
-   * Who authored the document; "operator" when omitted. The multi-repo flow passes "target" for a target's own
-   * settings.yml, so a secret reference in it is refused here, with the rest of the document's problems.
-   */
+
+  /** Who authored the document, "operator" when omitted; the multi-repo flow passes "target" for a target's own settings.yml, so a secret reference in it is refused here, with the rest of the document's problems. */
   readonly secretSource?: SettingsSource | undefined;
 }
+
+/** What one section's run ends in: the drift it found (check) or the changes it made (apply), with its notes. */
+type Outcome =
+  | { check: true; drift: string[]; notes: string[] }
+  | { check: false; changes: string[]; notes: string[] };
+
+/** What a section produced before an operation failed, reported with the failure instead of vanishing; `landed` counts accepted requests, which the lines cannot stand in for, since a change thunk can fail after its request landed. */
+interface Produced {
+  readonly notes: readonly string[];
+  readonly changes: readonly string[];
+  readonly landed: number;
+}
+
+/** A section's plan and execution as a value, beside what it produced on the way. */
+interface SectionStep {
+  readonly step: Result<Outcome, SectionFailure>;
+  readonly produced: Produced;
+}
+
+/** What the section loop shares across one repository; `tools` is null in check mode, which builds none. */
+interface SectionRun {
+  readonly api: GitHubClient;
+  readonly repo: RepoRef;
+  readonly io: Io;
+  readonly opts: RepoRunOptions;
+  readonly tools: ExecTools | null;
+}
+
+/** A failure the on-missing-permission policy classifies. */
+type Denied = Extract<SectionFailure, { kind: "permission-denied" }>;
 
 /**
  * The ONE boundary that turns a raw parsed document into the ValidatedSettings the engine accepts. Unknown top-level
@@ -245,6 +273,261 @@ export async function preflightProbe(
   return denied;
 }
 
+/** The ONE statement of what runs: the preflight filter and the section loop both read it, so they can never disagree. */
+function dispositionOf(opts: RepoRunOptions, key: SectionKey): "absent" | "excluded" | "active" {
+  if (opts.settings[key] === undefined) {
+    return "absent";
+  }
+  if (opts.sections.only.size > 0 && !opts.sections.only.has(key)) {
+    return "excluded";
+  }
+  return "active";
+}
+
+/** The failed rows for secret references the environment could not resolve, each error annotated under its section. */
+function secretFailure(
+  io: Io,
+  slug: string,
+  errorsBySection: ReadonlyMap<SectionKey, string[]>,
+): RepoRunResult {
+  const outcomes: SectionOutcome[] = [];
+  for (const [key, errors] of errorsBySection) {
+    for (const message of errors) {
+      io.annotate("error", `${key}: ${message}`);
+    }
+    outcomes.push({ key, status: "failed", detail: errors });
+  }
+  return { repo: slug, result: "failed", outcomes, preflightDenied: [] };
+}
+
+/** The referenced variable names by the section declaring them. */
+function referencesBySection(
+  references: readonly SectionSecretReference[],
+): Map<SectionKey, string[]> {
+  const bySection = new Map<SectionKey, string[]>();
+  for (const { section, name } of references) {
+    const list = bySection.get(section) ?? [];
+    list.push(name);
+    bySection.set(section, list);
+  }
+  return bySection;
+}
+
+/** The resolver the operations read plaintexts through; a reference it never met is a bug, since every declared one was resolved up front. */
+function secretResolver(resolved: Readonly<Record<string, string>>): ExecTools {
+  return {
+    resolveSecret: (reference: string): string => {
+      const plaintext = reference.startsWith("$") ? resolved[reference.slice(1)] : undefined;
+      if (plaintext === undefined) {
+        throw new Error(
+          `BUG: secret reference ${reference} was not resolved up front; the engine resolves every declared secret value before any section runs`,
+        );
+      }
+      return plaintext;
+    },
+  };
+}
+
+/**
+ * Apply resolves EVERY secret reference after the read-only preflight and before the first mutation, and masks each
+ * plaintext before the resolver exists; the errors come back by section. An empty map proves no legitimate lookup exists.
+ */
+function resolveTools(
+  references: readonly SectionSecretReference[],
+  secretEnv: Record<string, string | undefined> | undefined,
+  io: Io,
+): Result<ExecTools, Map<SectionKey, string[]>> {
+  const resolved: Record<string, string> = {};
+  if (references.length > 0) {
+    const env = secretEnv ?? process.env;
+    const resolutionErrors = new Map<SectionKey, string[]>();
+    const mask = new Set<string>();
+    for (const [key, names] of referencesBySection(references)) {
+      const resolution = resolveSecretRefs(names, env);
+      if (resolution.isErr()) {
+        resolutionErrors.set(key, resolution.error);
+        continue;
+      }
+      Object.assign(resolved, resolution.value.values);
+      for (const plaintext of resolution.value.mask) {
+        mask.add(plaintext);
+      }
+    }
+
+    if (resolutionErrors.size > 0) {
+      return err(resolutionErrors);
+    }
+
+    for (const plaintext of mask) {
+      io.mask(plaintext);
+    }
+  }
+
+  return ok(secretResolver(resolved));
+}
+
+/**
+ * One section's plan and, in apply, its execution, each ending in a value; the catch is for what still throws (the
+ * client's own transport error on an unmarked request, a BUG invariant), reported like any other failure.
+ */
+async function runSection(
+  run: SectionRun,
+  section: (typeof SECTIONS)[number],
+): Promise<SectionStep> {
+  const desired = run.opts.settings[section.key];
+  if (desired === undefined) {
+    // dispositionOf() classified this section active, which requires a declared value; planning on undefined would
+    // break plan()'s ValidatedInput contract.
+    throw new Error(
+      `BUG: section "${section.key}" was classified active but the settings document does not declare it`,
+    );
+  }
+
+  let produced: Produced = { notes: [], changes: [], landed: 0 };
+  try {
+    const planned = await section.plan(planContext(section, run.api, run.repo), desired);
+    if (planned.isErr()) {
+      return { step: err(planned.error), produced };
+    }
+
+    const plan = planned.value;
+    if (run.tools === null) {
+      return {
+        step: ok({ check: true, drift: planDrift(plan), notes: planCheckNotes(plan) }),
+        produced,
+      };
+    }
+
+    const execution = await executePlan(plan, section, run.api, run.repo, run.tools);
+    const notes = [...plan.notes, ...plan.drift, ...execution.notes];
+    produced = { notes, changes: execution.changes, landed: execution.landed };
+    if (execution.status === "failed") {
+      return { step: err(execution.failure), produced };
+    }
+
+    return { step: ok({ check: false, changes: [...execution.changes], notes }), produced };
+  } catch (error) {
+    return { step: err(thrown(error)), produced };
+  }
+}
+
+/** Why a denial fails the run whatever the policy: a request landed, or the section is required. */
+function denialWhy(landed: number, required: boolean): string {
+  if (landed > 0) {
+    return ` (${countNoun(landed, "request", "requests")} landed before the denial, so this fails the run whatever the on-missing-permission policy)`;
+  }
+  if (required) {
+    return " (listed in required-sections, so this fails the run)";
+  }
+  return "";
+}
+
+/** A denied section: skipped under warn when nothing landed and the section is not required, else failed, the line saying why the policy did not spare it. */
+function deniedOutcome(
+  run: SectionRun,
+  key: SectionKey,
+  failure: Denied,
+  landed: number,
+  before: readonly string[],
+): SectionOutcome {
+  const required = run.opts.sections.required.has(key);
+  // A denial after some operations landed is a partial mutation, never a skip: the warn policy applies only when nothing was written.
+  if (run.opts.onMissingPermission === "warn" && !required && landed === 0) {
+    run.io.annotate("warning", `${key}: skipped - ${failure.detail}`);
+    return {
+      key,
+      status: "skipped",
+      detail: [...before, failure.detail],
+      httpStatus: failure.status,
+    };
+  }
+
+  const applied = landed > 0 ? "partially applied" : "not applied";
+  run.io.annotate("error", `${key}: ${applied}${denialWhy(landed, required)} - ${failure.detail}`);
+  return { key, status: "failed", detail: [...before, failure.detail], httpStatus: failure.status };
+}
+
+/** A section that failed: what it produced first (its notes and change lines), then the failure as its row. */
+function failedOutcome(
+  run: SectionRun,
+  key: SectionKey,
+  failure: SectionFailure,
+  produced: Produced,
+): SectionOutcome {
+  for (const note of produced.notes) {
+    run.io.annotate("notice", `${key}: ${note}`);
+  }
+  for (const line of produced.changes) {
+    run.io.log(`${key}: ${line}`);
+  }
+
+  const before = [...produced.notes, ...produced.changes];
+  if (failure.kind === "permission-denied") {
+    return deniedOutcome(run, key, failure, produced.landed, before);
+  }
+
+  // failureFor() messages already carry section, cause, and fix; anything else gets the section prefixed. A landed
+  // request is a real mutation with or without its line, so say so.
+  const prefixed = failure.message.startsWith(`${key}:`)
+    ? failure.message
+    : `${key}: ${failure.message}`;
+  const annotated =
+    produced.landed > 0
+      ? `${prefixed} (${countNoun(produced.landed, "request", "requests")} landed before this failure, so the repository is partially applied)`
+      : prefixed;
+  run.io.annotate("error", annotated);
+  return { key, status: "failed", detail: [...before, annotated] };
+}
+
+/** A section that changed nothing but left notes (a tolerated 409, a personal-account skip) is NOT "already in the desired state"; the notes are shown instead of claiming no changes were needed. */
+function appliedDetail(changes: string[], notes: string[]): string[] {
+  if (changes.length > 0) {
+    return changes;
+  }
+  if (notes.length > 0) {
+    return notes;
+  }
+  return ["no changes needed"];
+}
+
+/** A section that ran: its notes, then its drift lines (check) or change lines (apply) as its row. */
+function ranOutcome(io: Io, key: SectionKey, outcome: Outcome): SectionOutcome {
+  for (const note of outcome.notes) {
+    io.annotate("notice", `${key}: ${note}`);
+  }
+
+  if (outcome.check) {
+    if (outcome.drift.length === 0) {
+      return { key, status: "clean", detail: outcome.notes };
+    }
+    for (const line of outcome.drift) {
+      io.log(`drift: ${line}`);
+    }
+    return { key, status: "drift", detail: outcome.drift };
+  }
+
+  for (const line of outcome.changes) {
+    io.log(`${key}: ${line}`);
+  }
+  return { key, status: "applied", detail: appliedDetail(outcome.changes, outcome.notes) };
+}
+
+/** The repository's result from its rows: a failure outranks everything, then drift (check only) or a skipped section, else the mode's healthy word. */
+function repoResult(outcomes: readonly SectionOutcome[], check: boolean): RepoResult {
+  const has = (status: SectionOutcome["status"]): boolean =>
+    outcomes.some((outcome) => outcome.status === status);
+  if (has("failed")) {
+    return "failed";
+  }
+  if (check && has("drift")) {
+    return "drift";
+  }
+  if (has("skipped")) {
+    return "partial";
+  }
+  return check ? "clean" : "applied";
+}
+
 export async function runForRepo(
   api: GitHubClient,
   opts: RepoRunOptions,
@@ -253,37 +536,11 @@ export async function runForRepo(
   const check = opts.mode === "check";
   const repo = opts.repo;
   const settings = opts.settings;
-
-  // The ONE statement of what runs: the preflight filter and the section loop both read it, so they can never disagree.
-  const disposition = (key: SectionKey): "absent" | "excluded" | "active" => {
-    if (settings[key] === undefined) {
-      return "absent";
-    }
-    if (opts.sections.only.size > 0 && !opts.sections.only.has(key)) {
-      return "excluded";
-    }
-    return "active";
-  };
-  const active = SECTIONS.filter((section) => disposition(section.key) === "active");
+  const active = SECTIONS.filter((section) => dispositionOf(opts, section.key) === "active");
 
   // Validation judged every secret value's syntax and provenance, in the excluded sections too, so what is collected
   // here is the ACTIVE sections' references, for apply to resolve; check mode reads no environment.
   const secretReferences = collectSecretReferences(settings, active);
-  const secretFailure = (errorsBySection: Map<SectionKey, string[]>): RepoRunResult => {
-    const outcomes: SectionOutcome[] = [];
-    for (const [key, errors] of errorsBySection) {
-      for (const message of errors) {
-        io.annotate("error", `${key}: ${message}`);
-      }
-      outcomes.push({ key, status: "failed", detail: errors });
-    }
-    return {
-      repo: opts.repo.slug,
-      result: "failed",
-      outcomes,
-      preflightDenied: [],
-    };
-  };
 
   // The API has no transactions, so a mid-apply permission failure would leave settings half-applied: under the strict
   // policy every active section is probed read-only FIRST. A token with read but not write access can still fail
@@ -294,68 +551,23 @@ export async function runForRepo(
       for (const line of denied) {
         io.annotate("error", `preflight: ${line}`);
       }
-      return {
-        repo: opts.repo.slug,
-        result: "failed",
-        outcomes: [],
-        preflightDenied: denied,
-      };
+      return { repo: repo.slug, result: "failed", outcomes: [], preflightDenied: denied };
     }
   }
 
-  // Apply resolves EVERY secret reference after the read-only preflight and before the first mutation, and masks each
-  // plaintext before the resolver exists; check mode builds no tools. An empty map in apply proves no legitimate lookup exists.
   let tools: ExecTools | null = null;
   if (!check) {
-    const resolved: Record<string, string> = {};
-    if (secretReferences.length > 0) {
-      const env = opts.secretEnv ?? process.env;
-      const bySection = new Map<SectionKey, string[]>();
-      for (const { section, name } of secretReferences) {
-        const list = bySection.get(section) ?? [];
-        list.push(name);
-        bySection.set(section, list);
-      }
-      const resolutionErrors = new Map<SectionKey, string[]>();
-      const mask = new Set<string>();
-      for (const [key, names] of bySection) {
-        const resolution = resolveSecretRefs(names, env);
-        if (resolution.isErr()) {
-          resolutionErrors.set(key, resolution.error);
-          continue;
-        }
-        Object.assign(resolved, resolution.value.values);
-        for (const plaintext of resolution.value.mask) {
-          mask.add(plaintext);
-        }
-      }
-      if (resolutionErrors.size > 0) {
-        return secretFailure(resolutionErrors);
-      }
-      for (const plaintext of mask) {
-        io.mask(plaintext);
-      }
+    const resolved = resolveTools(secretReferences, opts.secretEnv, io);
+    if (resolved.isErr()) {
+      return secretFailure(io, repo.slug, resolved.error);
     }
-    tools = {
-      resolveSecret: (reference: string): string => {
-        const plaintext = reference.startsWith("$") ? resolved[reference.slice(1)] : undefined;
-        if (plaintext === undefined) {
-          throw new Error(
-            `BUG: secret reference ${reference} was not resolved up front; the engine resolves every declared secret value before any section runs`,
-          );
-        }
-        return plaintext;
-      },
-    };
+    tools = resolved.value;
   }
 
+  const run: SectionRun = { api, repo, io, opts, tools };
   const outcomes: SectionOutcome[] = [];
-  let failed = false;
-  let partial = false;
-  let drifted = false;
-
   for (const section of SECTIONS) {
-    switch (disposition(section.key)) {
+    switch (dispositionOf(opts, section.key)) {
       case "absent":
         continue;
       case "excluded":
@@ -364,149 +576,14 @@ export async function runForRepo(
       case "active":
         break;
     }
-    const desired = settings[section.key];
-    if (desired === undefined) {
-      // disposition() classified this section active, which requires a declared value; planning on undefined would
-      // break plan()'s ValidatedInput contract.
-      throw new Error(
-        `BUG: section "${section.key}" was classified active but the settings document does not declare it`,
-      );
-    }
-    type Outcome =
-      | { check: true; drift: string[]; notes: string[] }
-      | { check: false; changes: string[]; notes: string[] };
-    // What the section produced before an operation failed, reported with the failure instead of vanishing. `landed`
-    // counts accepted requests: a change thunk can fail after its request landed, so the lines cannot stand in for it.
-    let produced: { notes: readonly string[]; changes: readonly string[]; landed: number } = {
-      notes: [],
-      changes: [],
-      landed: 0,
-    };
-    // The section's plan and its execution, each ending in a value; the catch is for what still throws (the
-    // client's own transport error on an unmarked request, a BUG invariant), reported like any other failure.
-    const step = await (async (): Promise<Result<Outcome, SectionFailure>> => {
-      const planned = await section.plan(planContext(section, api, repo), desired);
-      if (planned.isErr()) {
-        return err(planned.error);
-      }
-      const plan = planned.value;
-      if (tools === null) {
-        return ok({ check: true, drift: planDrift(plan), notes: planCheckNotes(plan) });
-      }
-      const execution = await executePlan(plan, section, api, repo, tools);
-      const notes = [...plan.notes, ...plan.drift, ...execution.notes];
-      produced = { notes, changes: execution.changes, landed: execution.landed };
-      if (execution.status === "failed") {
-        return err(execution.failure);
-      }
-      return ok({ check: false, changes: [...execution.changes], notes });
-    })().catch((error: unknown) => err(thrown(error)));
+
+    const { step, produced } = await runSection(run, section);
     if (step.isErr()) {
-      const failure = step.error;
-      for (const note of produced.notes) {
-        io.annotate("notice", `${section.key}: ${note}`);
-      }
-      for (const line of produced.changes) {
-        io.log(`${section.key}: ${line}`);
-      }
-      const before = [...produced.notes, ...produced.changes];
-      if (failure.kind === "permission-denied") {
-        const required = opts.sections.required.has(section.key);
-        // A denial after some operations landed is a partial mutation, never a skip: the warn policy applies only when nothing was written.
-        const landed = produced.landed;
-        if (opts.onMissingPermission === "warn" && !required && landed === 0) {
-          io.annotate("warning", `${section.key}: skipped - ${failure.detail}`);
-          outcomes.push({
-            key: section.key,
-            status: "skipped",
-            detail: [...before, failure.detail],
-            httpStatus: failure.status,
-          });
-          partial = true;
-          continue;
-        }
-        const why =
-          landed > 0
-            ? ` (${countNoun(landed, "request", "requests")} landed before the denial, so this fails the run whatever the on-missing-permission policy)`
-            : required
-              ? " (listed in required-sections, so this fails the run)"
-              : "";
-        io.annotate(
-          "error",
-          `${section.key}: ${landed > 0 ? "partially applied" : "not applied"}${why} - ${failure.detail}`,
-        );
-        outcomes.push({
-          key: section.key,
-          status: "failed",
-          detail: [...before, failure.detail],
-          httpStatus: failure.status,
-        });
-        failed = true;
-        continue;
-      }
-      // failureFor() messages already carry section, cause, and fix; anything else gets the section prefixed. A landed
-      // request is a real mutation with or without its line, so say so.
-      const prefixed = failure.message.startsWith(`${section.key}:`)
-        ? failure.message
-        : `${section.key}: ${failure.message}`;
-      const annotated =
-        produced.landed > 0
-          ? `${prefixed} (${countNoun(produced.landed, "request", "requests")} landed before this failure, so the repository is partially applied)`
-          : prefixed;
-      io.annotate("error", annotated);
-      outcomes.push({ key: section.key, status: "failed", detail: [...before, annotated] });
-      failed = true;
+      outcomes.push(failedOutcome(run, section.key, step.error, produced));
       continue;
     }
-    const outcome = step.value;
-    for (const note of outcome.notes) {
-      io.annotate("notice", `${section.key}: ${note}`);
-    }
-    if (outcome.check) {
-      if (outcome.drift.length > 0) {
-        drifted = true;
-        for (const line of outcome.drift) {
-          io.log(`drift: ${line}`);
-        }
-        outcomes.push({ key: section.key, status: "drift", detail: outcome.drift });
-      } else {
-        outcomes.push({ key: section.key, status: "clean", detail: outcome.notes });
-      }
-    } else {
-      for (const line of outcome.changes) {
-        io.log(`${section.key}: ${line}`);
-      }
-      outcomes.push({
-        key: section.key,
-        status: "applied",
-        // A section that changed nothing but left notes (a tolerated 409, a personal-account skip) is NOT "already in
-        // the desired state"; the notes are shown instead of claiming no changes were needed.
-        detail:
-          outcome.changes.length > 0
-            ? outcome.changes
-            : outcome.notes.length > 0
-              ? outcome.notes
-              : ["no changes needed"],
-      });
-    }
+    outcomes.push(ranOutcome(io, section.key, step.value));
   }
 
-  const result: RepoResult = failed
-    ? "failed"
-    : check
-      ? drifted
-        ? "drift"
-        : partial
-          ? "partial"
-          : "clean"
-      : partial
-        ? "partial"
-        : "applied";
-
-  return {
-    repo: opts.repo.slug,
-    result,
-    outcomes,
-    preflightDenied: [],
-  };
+  return { repo: repo.slug, result: repoResult(outcomes, check), outcomes, preflightDenied: [] };
 }

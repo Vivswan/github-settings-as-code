@@ -42,20 +42,13 @@ import {
 
 export type RepoVariablesKey = "actions_variables" | "agents_variables";
 
-/**
- * The factory derives the routes from THIS map, so a key paired with the other family's segment (which
- * the mock would faithfully serve, hiding the swap) is unrepresentable; the `satisfies` pins each VALUE
- * to the segment its own KEY spells.
- */
+/** The routes derive from THIS map, so a key paired with the other family's segment (which the mock would faithfully serve) is unrepresentable; the `satisfies` pins each value to the segment its key spells. */
 const VARIABLES_SEGMENTS = {
   actions_variables: "actions",
   agents_variables: "agents",
 } as const satisfies { [K in RepoVariablesKey]: SegmentOfVariablesKey<K> };
 
-/**
- * The factory derives the runtime shape from THIS map, so a key paired with the other family's config
- * (structurally identical, invisible to every gate) is unrepresentable.
- */
+/** The runtime shape derives from THIS map, so a key paired with the other family's config (structurally identical, invisible to every gate) is unrepresentable. */
 const VARIABLES_ENTRIES = {
   actions_variables: ActionsVariableConfig,
   agents_variables: AgentsVariableConfig,

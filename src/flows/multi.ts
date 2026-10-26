@@ -12,7 +12,12 @@
 
 import { type Err, err, ok, type ResultAsync, safeTry } from "neverthrow";
 import { resolveCentralTargets } from "../discovery/central.js";
-import { type DiscoveryFilters, discoverRepos, formatSkipNotice } from "../discovery/discover.js";
+import {
+  type DiscoveryFilters,
+  type DiscoveryResult,
+  discoverRepos,
+  formatSkipNotice,
+} from "../discovery/discover.js";
 import { parseReposInput } from "../discovery/repos-input.js";
 import {
   type CentralTarget,
@@ -61,11 +66,18 @@ export const DEFAULT_SETTINGS_FILE = ".github/settings.yml";
  * the three modes name the same fleet from the same inputs.
  */
 export interface TargetsConfig extends Pick<RunFlowConfig, "privateRepos" | "selfSlug"> {
+  /** The `repos-dir` input: a directory of central files, empty when unset. */
   reposDir: string;
+
+  /** The `repos` input as written, split and judged by parseReposInput; empty when unset. */
   reposInput: string;
+
   /** The owner a bare `<name>.yml` file under repos-dir belongs to. */
   adminOwner: string;
+
+  /** The discovery filters, every input defaulted. */
   discoveryFilters: DiscoveryFilters;
+
   /** Filter inputs the user explicitly set, for the misuse rejections. */
   discoveryFiltersSet: string[];
 }
@@ -74,11 +86,13 @@ export interface MultiConfig extends RunFlowConfig, TargetsConfig {
   defaultsFile: string;
 }
 
-/** The channel is the only sink in scope, so a redacted target's text lands only in its report. */
+/**
+ * The channel is the only sink in scope, so a redacted target's text lands only in its report. `defaults` was
+ * validated once before any target ran; null when no `defaults-file` was given.
+ */
 async function processTarget(ctx: {
   api: GitHubClient;
   target: Target;
-  /** Validated once before any target ran; null when no `defaults-file` was given. */
   defaults: ValidatedSettings | null;
   cfg: MultiConfig;
   injectMarker: boolean;
@@ -235,7 +249,10 @@ const slugOf = (entry: FleetEntry): string => (isRejected(entry) ? entry.slug : 
 export interface ResolvedTargets {
   /** Deduped, central first, in the order the run processes them. */
   targets: FleetEntry[];
+
+  /** The redaction decision: which slugs hide, and the label each shows. */
   plan: RedactionPlan;
+
   /** A slug's resolved visibility; "unknown" for a slug never resolved. */
   visibilityOf: (slug: string) => RepoVisibility;
 }
@@ -291,15 +308,137 @@ export function resolveTargets(
   });
 }
 
-/** The fleet with every hidden slug registered; what resolveTargets lists and reports from. */
+/** The fleet with every hidden slug registered; what resolveTargets lists and reports from. `remote` is in listing order: the repos input's, or discovery's. */
 interface MaskedFleet {
-  /** In listing order: the repos input's, or discovery's. */
   remote: Array<RemoteTarget | RejectedTarget>;
   plan: RedactionPlan;
   visibilityOf: (slug: string) => RepoVisibility;
   skipGroups: Array<{ reason: string; repos: Parameters<typeof formatSkipNotice>[0]["repos"] }>;
   filteredOutCount: number;
   redact: boolean;
+}
+
+/**
+ * The remote half of the fleet before visibility is resolved: the repos input's targets or discovery's, with what
+ * discovery already knows (`knownVisibility`, authoritative for those repos, so their per-target probe is skipped) and
+ * the private slugs it filtered out (`filteredPrivateSlugs`: masked, never placeholdered).
+ */
+interface RemoteFleet {
+  readonly remote: Array<RemoteTarget | RejectedTarget>;
+  readonly skipGroups: MaskedFleet["skipGroups"];
+  readonly filteredOutCount: number;
+  readonly knownVisibility: Map<SlugKey, RepoVisibility>;
+  readonly filteredPrivateSlugs: Private<string>[];
+}
+
+/** The discovered fleet: each found slug a target (or a rejected name), each filtered group a skip notice. */
+function discoveredFleet(discovered: DiscoveryResult): RemoteFleet {
+  const origin = 'repos: "*" discovery';
+  const filteredPrivateSlugs: Private<string>[] = [];
+  let filteredOutCount = 0;
+  for (const group of discovered.filtered) {
+    filteredOutCount += group.repos.length;
+    for (const repo of group.repos) {
+      if (repo.visibility !== "public") {
+        filteredPrivateSlugs.push(repo.slug);
+      }
+    }
+  }
+
+  const knownVisibility = new Map<SlugKey, RepoVisibility>();
+  const remote: Array<RemoteTarget | RejectedTarget> = [];
+  for (const found of discovered.repos) {
+    knownVisibility.set(slugKey(found.slug), found.visibility);
+    remote.push(
+      parseRepoSlug(found.slug).match(
+        (repo): RemoteTarget | RejectedTarget => ({ repo, source: "remote", origin }),
+        () => ({ source: "remote", origin, slug: found.slug }),
+      ),
+    );
+  }
+  return {
+    remote,
+    skipGroups: [...discovered.filtered],
+    filteredOutCount,
+    knownVisibility,
+    filteredPrivateSlugs,
+  };
+}
+
+/**
+ * The remote targets: the repos input's, or discovery's under "*". parseConfig refuses a bad repos list and misplaced
+ * filters before any file is read; a library caller that builds the config by hand meets the same refusals here.
+ */
+function remoteFleet(api: GitHubClient, cfg: TargetsConfig): ResultAsync<RemoteFleet, Problem> {
+  return safeTry(async function* () {
+    const none: RemoteFleet = {
+      remote: [],
+      skipGroups: [],
+      filteredOutCount: 0,
+      knownVisibility: new Map(),
+      filteredPrivateSlugs: [],
+    };
+    if (!cfg.reposInput) {
+      if (cfg.discoveryFiltersSet.length > 0) {
+        return fail({
+          code: "discovery-filters-without-wildcard",
+          filters: cfg.discoveryFiltersSet,
+          targets: "repos-dir",
+        });
+      }
+      return ok(none);
+    }
+
+    const parsed = yield* parseReposInput(cfg.reposInput);
+    if (parsed.discover) {
+      const discovered = yield* discoverRepos(api, cfg.discoveryFilters);
+      return ok(discoveredFleet(discovered));
+    }
+
+    if (cfg.discoveryFiltersSet.length > 0) {
+      return fail({
+        code: "discovery-filters-without-wildcard",
+        filters: cfg.discoveryFiltersSet,
+        targets: "explicit-repos",
+      });
+    }
+
+    const origin = 'the "repos" input';
+    const remote = parsed.repos.map((repo) => ({ repo, source: "remote" as const, origin }));
+    return ok({ ...none, remote });
+  });
+}
+
+/**
+ * Every distinct target slug's visibility under `redact`: discovery's value where it knew one and "public" for the
+ * self slug, so neither is probed. Empty under `show`, where visibility is never consulted.
+ */
+async function resolveVisibilities(
+  api: GitHubClient,
+  cfg: TargetsConfig,
+  orderedSlugs: readonly string[],
+  knownVisibility: ReadonlyMap<SlugKey, RepoVisibility>,
+): Promise<Map<SlugKey, RepoVisibility>> {
+  const visibilityBySlug = new Map<SlugKey, RepoVisibility>();
+  if (cfg.privateRepos !== "redact") {
+    return visibilityBySlug;
+  }
+
+  const resolveVisibility = createVisibilityResolver(api);
+  const self = slugKey(cfg.selfSlug);
+  for (const slug of orderedSlugs) {
+    const key = slugKey(slug);
+    if (visibilityBySlug.has(key)) {
+      continue;
+    }
+    if (key === self) {
+      visibilityBySlug.set(key, "public");
+      continue;
+    }
+    const known = knownVisibility.get(key);
+    visibilityBySlug.set(key, known ?? (await resolveVisibility(slug)));
+  }
+  return visibilityBySlug;
 }
 
 /**
@@ -313,58 +452,8 @@ function maskFleet(
   central: CentralTarget[],
 ): ResultAsync<MaskedFleet, Problem> {
   return safeTry(async function* () {
-    const remote: Array<RemoteTarget | RejectedTarget> = [];
-    let filteredOutCount = 0;
-    const skipGroups: MaskedFleet["skipGroups"] = [];
-    // Visibility learned from discovery is authoritative for those repos, so their per-target probe is skipped.
-    const knownVisibility = new Map<SlugKey, RepoVisibility>();
-    // Private slugs discovery filtered out are masked but never placeholdered.
-    const filteredPrivateSlugs: Private<string>[] = [];
-    // parseConfig refuses a bad repos list and misplaced filters before any file is read; a library caller that
-    // builds the config by hand meets the same refusals here.
-    if (cfg.reposInput) {
-      const parsed = yield* parseReposInput(cfg.reposInput);
-      if (parsed.discover) {
-        const origin = 'repos: "*" discovery';
-        const discovered = yield* discoverRepos(api, cfg.discoveryFilters);
-        for (const group of discovered.filtered) {
-          skipGroups.push(group);
-          filteredOutCount += group.repos.length;
-          for (const repo of group.repos) {
-            if (repo.visibility !== "public") {
-              filteredPrivateSlugs.push(repo.slug);
-            }
-          }
-        }
-        for (const found of discovered.repos) {
-          knownVisibility.set(slugKey(found.slug), found.visibility);
-          remote.push(
-            parseRepoSlug(found.slug).match(
-              (repo): RemoteTarget | RejectedTarget => ({ repo, source: "remote", origin }),
-              () => ({ source: "remote", origin, slug: found.slug }),
-            ),
-          );
-        }
-      } else if (cfg.discoveryFiltersSet.length > 0) {
-        return fail({
-          code: "discovery-filters-without-wildcard",
-          filters: cfg.discoveryFiltersSet,
-          targets: "explicit-repos",
-        });
-      } else {
-        const origin = 'the "repos" input';
-        remote.push(...parsed.repos.map((repo) => ({ repo, source: "remote" as const, origin })));
-      }
-    } else if (cfg.discoveryFiltersSet.length > 0) {
-      return fail({
-        code: "discovery-filters-without-wildcard",
-        filters: cfg.discoveryFiltersSet,
-        targets: "repos-dir",
-      });
-    }
-
+    const fleet = yield* remoteFleet(api, cfg);
     const redact = cfg.privateRepos === "redact";
-    const self = slugKey(cfg.selfSlug);
 
     // Visibility is resolved for every distinct target slug before the plan, and the resolved value (not a boolean)
     // drives two decisions that fail closed in opposite directions, so an unknown never posts a private report to a
@@ -373,23 +462,13 @@ function maskFleet(
     //   `show`, or the self slug   -> no probe
     //   redaction                  -> hide unless proven public
     //   report delivery            -> deliver only when proven private or internal
-    const resolveVisibility = createVisibilityResolver(api);
-    const orderedSlugs = [...central.map((t) => t.repo.slug), ...remote.map(slugOf)];
-    const visibilityBySlug = new Map<SlugKey, RepoVisibility>();
-    if (redact) {
-      for (const slug of orderedSlugs) {
-        const key = slugKey(slug);
-        if (visibilityBySlug.has(key)) {
-          continue;
-        }
-        if (key === self) {
-          visibilityBySlug.set(key, "public");
-          continue;
-        }
-        const known = knownVisibility.get(key);
-        visibilityBySlug.set(key, known ?? (await resolveVisibility(slug)));
-      }
-    }
+    const orderedSlugs = [...central.map((t) => t.repo.slug), ...fleet.remote.map(slugOf)];
+    const visibilityBySlug = await resolveVisibilities(
+      api,
+      cfg,
+      orderedSlugs,
+      fleet.knownVisibility,
+    );
     // Under `redact` the map holds every target slug, so the fallback only fires under `show`, where visibility is
     // never consulted; it still fails CLOSED, since "unknown" redacts as private and delivers as unproven.
     const visibilityOf = (slug: string): RepoVisibility =>
@@ -398,7 +477,7 @@ function maskFleet(
     const plan = planRedaction(
       cfg.privateRepos,
       orderedSlugs,
-      filteredPrivateSlugs,
+      fleet.filteredPrivateSlugs,
       (slug) => visibilityOf(slug) !== "public",
       cfg.selfSlug,
     );
@@ -408,7 +487,14 @@ function maskFleet(
     for (const slug of plan.maskedSlugs) {
       io.mask(slug);
     }
-    return ok({ remote, plan, visibilityOf, skipGroups, filteredOutCount, redact });
+    return ok({
+      remote: fleet.remote,
+      plan,
+      visibilityOf,
+      skipGroups: fleet.skipGroups,
+      filteredOutCount: fleet.filteredOutCount,
+      redact,
+    });
   });
 }
 

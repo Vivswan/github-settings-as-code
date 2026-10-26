@@ -17,8 +17,8 @@ interface OutcomeRow {
   detail: string[];
 }
 
+/** What one report renders; `target` is the owner/name slug, unredacted: this document is private. */
 export interface ReportInput {
-  /** The target's owner/name slug, unredacted: this document is private. */
   target: string;
   adminRepo: string;
   runUrl: string;

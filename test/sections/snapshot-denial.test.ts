@@ -27,8 +27,10 @@ const DENIED_403: FakeToken = { mask: NO_GRANTS, denialStyle: 403 };
 /** The fine-grained style: a denied read answers 404, which an absent posture reads as nothing to snapshot. */
 const DENIED_404: FakeToken = { mask: NO_GRANTS, denialStyle: "fine_grained" };
 
+/** What every denial failure's detail carries: the denial, then the grant to make. */
 const GRANT_ADVICE = /the token was denied .*To fix, grant/;
 
+/** The sections that declare snapshot(). */
 const reading = SECTIONS.filter((section) => section.snapshot !== undefined);
 
 /** Whether any planning read needs a grant; a section reading only public endpoints is never denied. */

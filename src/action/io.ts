@@ -21,8 +21,7 @@ export const OUTPUT_DECLS = {
   },
 } as const satisfies Record<OutputName, { readonly description: string }>;
 
-// @actions/core owns workflow-command escaping (%, CR, LF). The static map keeps the namespace access tree-shakeable
-// (biome noDynamicNamespaceImportAccess); the references are captured at module load, so a spy installed after import is not seen.
+// The static map keeps the namespace access tree-shakeable (biome noDynamicNamespaceImportAccess) and captures the references at module load, so a spy installed after import is not seen; @actions/core owns the workflow-command escaping (%, CR, LF).
 const annotators = { notice: core.notice, warning: core.warning, error: core.error } as const;
 
 export function annotate(level: keyof typeof annotators, message: string): void {

@@ -23,27 +23,36 @@ import { runStep } from "./step-fixture.js";
 setDefaultTimeout(60_000);
 installReleasePipelineFixture();
 
+/**
+ * What the scripted bun replays, every call logged: `add @pkg@latest` writes the planned package.json under
+ * node_modules (or fails as planned) and `add -d --exact @pkg@version` moves the checkout's pin and touches bun.lock
+ * as bun would; `info` answers the planned latest; `test` exits as planned; `run typecheck` replays the planned
+ * typecheck and `run build:openapi` writes the planned generated files.
+ */
 interface Plan {
   /** `bun add` fails with this status instead of installing. */
   addStatus?: number;
+
   /** What `bun add` installs under node_modules, by package. */
   installed?: Record<string, string>;
+
   /** What `bun info <pkg> version` prints, by package. */
   latest?: Record<string, string>;
+
   /** `bun run typecheck`'s stdout, stderr, and status. */
   typecheck?: { stdout: string; stderr?: string; status: number };
+
   /** `bun run check`'s status; passes when unplanned. */
   checkStatus?: number;
+
   /** How many open bump PRs `gh pr list` reports; none when unplanned. */
   openPrs?: number;
+
   /** What `bun run build:openapi` writes into the checkout, by path. */
   generated?: Record<string, string>;
 }
 
-/** The scripted bun: every call logged; `add @pkg@latest` writes the planned package.json under node_modules (or
- * fails as planned) and `add -d --exact @pkg@version` moves the checkout's pin and touches bun.lock as bun would;
- * `info` answers the planned latest; `test` exits as planned; `run typecheck` replays the planned typecheck and
- * `run build:openapi` writes the planned generated files. */
+/** The scripted bun, replaying a Plan as its doc says. */
 const SHIM = `#!/bin/sh
 plan="$NIGHTLY_PLAN"
 printf '%s\\n' "$*" >> "$plan/calls.log"
@@ -317,17 +326,26 @@ describe("probe-types", () => {
   );
 });
 
+/** The @octokit/openapi version the checkout's package.json starts at. */
 const OPENAPI_PIN = "24.0.0";
+
+/** The lease push's URL, token and all, as the step builds it. */
 const REMOTE_URL = "https://x-access-token:t0ken@github.com/o/r.git";
+
+/** The gh call that counts the open bump PRs, as the shim logs it. */
 const PR_LIST =
   "gh pr list --head nightly/openapi-25.0.0 --state open --json isCrossRepository --jq [.[] | select(.isCrossRepository | not)] | length";
-/** What the regeneration writes; the checkout starts with each at an older spelling. */
-/** One line per descriptor-derived file the generator registers, so a new output is seeded here without an edit. */
+
+/** What the regeneration at `version` writes: one line per descriptor-derived file the generator registers, so a new output is seeded here without an edit. */
 const rendered = (version: string) =>
   Object.fromEntries(
     OUTPUTS.map(({ path }) => [path, `export const RENDERED = "${path} from ${version}";\n`]),
   );
+
+/** The generated files at the new pin. */
 const GENERATED = rendered("25.0.0");
+
+/** The same files as the checkout starts with them, at the older pin. */
 const OLDER = rendered("24.0.0");
 
 /** The nightly's checkout: main at a package.json pinning @octokit/openapi, with the generated files committed, and

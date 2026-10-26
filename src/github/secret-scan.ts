@@ -36,9 +36,12 @@ class NotPlainData {
 
 function renderKeyPath(path: readonly string[]): string {
   return path
-    .map((segment, index) =>
-      /^\d+$/.test(segment) ? `[${segment}]` : index === 0 ? segment : `.${segment}`,
-    )
+    .map((segment, index) => {
+      if (/^\d+$/.test(segment)) {
+        return `[${segment}]`;
+      }
+      return index === 0 ? segment : `.${segment}`;
+    })
     .join("");
 }
 

@@ -8,10 +8,7 @@ import { type GraphqlOpDecl, graphqlOp } from "../contract/graphql.js";
 import type { PlanContext, PlannedOp, SectionPlan } from "../contract/plan.js";
 import type { ENDPOINTS } from "./endpoints.js";
 
-/**
- * The rule selection both rules reads share, so the snapshot's read cannot lag the planner's
- * translation tables (test/sections/graphql-queries.test.ts asserts every twin is selected).
- */
+// The selection both rules reads share, so the snapshot's read cannot lag the planner's translation tables (test/sections/graphql-queries.test.ts asserts every twin is selected).
 const RULES_SELECTION = `($owner: String!, $repo: String!, $cursor: String) {
   repository(owner: $owner, name: $repo) {
     branchProtectionRules(first: 100, after: $cursor) {
@@ -54,11 +51,7 @@ const RULES_SELECTION = `($owner: String!, $repo: String!, $cursor: String) {
   }
 }`;
 
-/**
- * Classic protection IS a BranchProtectionRule upstream, so this lists literal and wildcard rules
- * alike. NOT_FOUND is tolerated so a fine-grained denial reads as "no rules visible" and surfaces
- * at the first write, the section's posture everywhere.
- */
+// Classic protection IS a BranchProtectionRule upstream, so literal and wildcard rules list alike; NOT_FOUND is tolerated so a fine-grained denial reads as "no rules visible" and surfaces at the first write, the section's posture everywhere.
 const RULES_QUERY = graphqlOp<{ owner: string; repo: string }>()({
   name: "BranchProtectionRules",
   kind: "read",
@@ -70,10 +63,7 @@ const RULES_QUERY = graphqlOp<{ owner: string; repo: string }>()({
   query: `query BranchProtectionRules${RULES_SELECTION}`,
 });
 
-/**
- * The snapshot's read of the same rules. No write follows a snapshot to surface a denial, so
- * NOT_FOUND is not tolerated here: a concealed denial fails the read with the grant advice.
- */
+// No write follows a snapshot to surface a denial, so NOT_FOUND is not tolerated here: a concealed denial fails the read with the grant advice.
 const RULES_SNAPSHOT = graphqlOp<{ owner: string; repo: string }>()({
   name: "BranchProtectionRulesSnapshot",
   kind: "read",
@@ -82,10 +72,7 @@ const RULES_SNAPSHOT = graphqlOp<{ owner: string; repo: string }>()({
   query: `query BranchProtectionRulesSnapshot${RULES_SELECTION}`,
 });
 
-/**
- * Execution-phase, like the two actor lookups: a fine-grained denial answers NOT_FOUND, which none
- * of the three tolerates, so they may only run where the posture puts the denial, at the first write.
- */
+// Execution-phase, like the two actor lookups: a fine-grained denial answers NOT_FOUND, which none of the three tolerates, so they may only run where the posture puts the denial, at the first write.
 const REPO_LOOKUP = graphqlOp<{ owner: string; repo: string }>()({
   name: "BranchProtectionRepository",
   kind: "read",
@@ -96,11 +83,7 @@ const REPO_LOOKUP = graphqlOp<{ owner: string; repo: string }>()({
 }`,
 });
 
-/**
- * REST /users/{username} can still carry a legacy node_id for old accounts (the mutation would
- * answer a deprecation warning), so users resolve through GraphQL. The repository selection routes
- * the read: every repo-addressed read takes $owner/$repo.
- */
+// REST /users/{username} can still carry a legacy node_id for old accounts (the mutation would answer a deprecation warning), so users resolve through GraphQL; the repository selection routes the read, as every repo-addressed read takes $owner/$repo.
 const ACTOR_USER = graphqlOp<{ owner: string; repo: string; login: string }>()({
   name: "BranchProtectionActorUser",
   kind: "read",
@@ -117,6 +100,7 @@ const ACTOR_USER = graphqlOp<{ owner: string; repo: string; login: string }>()({
 }`,
 });
 
+// Routed like ACTOR_USER; a team resolves under its organization, so the slug's org half is a variable of its own.
 const ACTOR_TEAM = graphqlOp<{ owner: string; repo: string; org: string; team: string }>()({
   name: "BranchProtectionActorTeam",
   kind: "read",
@@ -133,11 +117,7 @@ const ACTOR_TEAM = graphqlOp<{ owner: string; repo: string; org: string; team: s
 }`,
 });
 
-/**
- * The create and update payloads re-read the persisted rule, so selecting
- * requiredDeploymentEnvironments IS the post-mutation read-back the silent-drop check needs (GitHub
- * drops names of environments that do not exist without failing the mutation).
- */
+// The payload re-reads the persisted rule, so selecting requiredDeploymentEnvironments IS the post-mutation read-back the silent-drop check needs (GitHub drops names of environments that do not exist without failing the mutation).
 const CREATE_RULE = graphqlOp<{ input: Record<string, unknown> }>()({
   name: "CreateBranchProtectionRule",
   kind: "write",
@@ -152,6 +132,7 @@ const CREATE_RULE = graphqlOp<{ input: Record<string, unknown> }>()({
 }`,
 });
 
+// The same read-back selection as the create, for the same silent-drop check.
 const UPDATE_RULE = graphqlOp<{ input: Record<string, unknown> }>()({
   name: "UpdateBranchProtectionRule",
   kind: "write",
@@ -167,6 +148,7 @@ const UPDATE_RULE = graphqlOp<{ input: Record<string, unknown> }>()({
 }`,
 });
 
+// A mutation must select a field and nothing of a deleted rule reads back, so clientMutationId stands in.
 const DELETE_RULE = graphqlOp<{ input: Record<string, unknown> }>()({
   name: "DeleteBranchProtectionRule",
   kind: "write",
@@ -176,6 +158,7 @@ const DELETE_RULE = graphqlOp<{ input: Record<string, unknown> }>()({
 }`,
 });
 
+/** Keyed by the role a planned op names, so a role and its declaration cannot drift apart. */
 export const GRAPHQL = {
   rulesQuery: RULES_QUERY,
   rulesSnapshot: RULES_SNAPSHOT,
@@ -187,10 +170,7 @@ export const GRAPHQL = {
   deleteRule: DELETE_RULE,
 } as const satisfies Record<string, GraphqlOpDecl>;
 
-/**
- * A rule node as the selection returns it, every twin the translators read declared with the SDL's
- * nullability, so a value off the vocabulary fails the read instead of vanishing from the classic view.
- */
+/** A rule node as the selection returns it, every twin the translators read declared with the SDL's nullability, so a value off the vocabulary fails the read instead of vanishing from the classic view. */
 export const RuleNode = z.looseObject({
   id: z.string(),
   pattern: z.string(),
@@ -234,6 +214,7 @@ export const RuleNode = z.looseObject({
     pageInfo: z.looseObject({ hasNextPage: z.boolean() }),
   }),
 });
+
 export type RuleNode = z.infer<typeof RuleNode>;
 
 /**
@@ -243,13 +224,16 @@ export type RuleNode = z.infer<typeof RuleNode>;
 export type LiveRules = Map<string, RuleNode> | null;
 
 export interface GraphqlRun {
+  /** The plan-time read; a routed update of a literal whose rule it lacks reads the rule again at execution (graphql-writes.ts lateRuleId). */
   rules: LiveRules;
+
+  /** Adopted from the first user or team lookup that selects it, or looked up when a create needs it. */
   repoId: string | null;
+
+  /** Keyed by the case-folded actor string, since GitHub canonicalizes actor names. */
   actorIds: Map<string, string>;
-  /**
-   * Every bypass actor a planned mutation resolves at execution, appended by ruleVariables() as it
-   * seals one; plan() resolves them all ahead of the FIRST write, whichever entry they belong to.
-   */
+
+  /** Every bypass actor a planned mutation resolves at execution, appended as ruleVariables() seals one; plan() resolves them all ahead of the FIRST write, whichever entry they belong to. */
   lateActors: string[];
 }
 

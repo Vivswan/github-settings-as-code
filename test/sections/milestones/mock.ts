@@ -46,6 +46,7 @@ export const MILESTONES_MOCK: ListMockSpec = {
   unique: "identity",
 };
 
+/** The handlers derived from the section's declaration over the spec above. */
 export const milestonesMockHandlers: SectionRestHandlers<"milestones"> = mockFragmentFor(
   milestonesSection,
   MILESTONES_MOCK,

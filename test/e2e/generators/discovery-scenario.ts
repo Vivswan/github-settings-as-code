@@ -1,7 +1,10 @@
 import type { MultiRepo, Scenario } from "../scenario.js";
 import type { Rng } from "./prng.js";
 
+const TOPIC_POOL = ["platform", "infra", "legacy", "misc"];
+
 export interface DiscoveryScenarioMeta {
+  /** What the mock's /user/repos listing enumerates, each repo carrying the attributes the filters read. */
   pool: Array<{
     slug: string;
     archived?: boolean;
@@ -9,6 +12,8 @@ export interface DiscoveryScenarioMeta {
     visibility?: string;
     topics?: string[];
   }>;
+
+  /** The discovery-filter inputs the scenario passes, so predictDiscovery recomputes the kept set from the pool alone. */
   filters: {
     visibility?: string;
     archived?: string;
@@ -16,32 +21,17 @@ export interface DiscoveryScenarioMeta {
     topics?: string;
     exclude?: string;
   };
-  /**
-   * Always redact: discovery targets are the one surface with TRUE non-disclosure (their names come only from the
-   * private /user/repos listing, never the operator's config), so the fuzzer checks a kept private/internal repo is
-   * keyed by a placeholder and its slug leaks nowhere.
-   */
+
+  /** Always "redact": discovery targets' names come only from the private /user/repos listing, so the fuzzer checks a kept private repo is keyed by a placeholder and its slug leaks nowhere. */
   privateRepos: "redact" | "show";
 }
 
-/**
- * Each pool repo carries one label, so a kept repo applies. The meta echoes the pool and filters, so predictDiscovery
- * computes the kept set INDEPENDENTLY and the fuzz asserts the action discovered exactly those.
- */
-export function genDiscoveryScenario(
+/** One pool repo is forced non-public, or an all-public pool would hand the leak invariant an empty forbidden set. */
+function genDiscoveryPool(
   rng: Rng,
-  /**
-   * Battery construction: "converges" pins pool repo 0 non-archived with no filters, so the convergence battery entry
-   * exists for every master seed instead of being rejection-sampled. Deterministic per (seed, force); replays reapply it.
-   */
+  count: number,
   force?: "converges",
-): {
-  scenario: Scenario;
-  meta: DiscoveryScenarioMeta;
-} {
-  const count = rng.int(5) + 4;
-  const TOPIC_POOL = ["platform", "infra", "legacy", "misc"];
-  // One pool repo forced non-public, or an all-public pool would hand the leak invariant an empty forbidden set.
+): DiscoveryScenarioMeta["pool"] {
   const forcedPrivateIndex = rng.int(count);
   const pool: DiscoveryScenarioMeta["pool"] = [];
   for (let i = 0; i < count; i++) {
@@ -61,24 +51,52 @@ export function genDiscoveryScenario(
     }
     pool.push(repo);
   }
+  return pool;
+}
 
-  const rolledFilters: DiscoveryScenarioMeta["filters"] = {};
+/** Rolled under a force too, so the main stream and every recorded seed stay stable; "converges" then discards the roll. */
+function genDiscoveryFilters(
+  rng: Rng,
+  count: number,
+  force?: "converges",
+): DiscoveryScenarioMeta["filters"] {
+  const rolled: DiscoveryScenarioMeta["filters"] = {};
   if (rng.bool(0.4)) {
-    rolledFilters.visibility = rng.pick(["all", "public", "private", "internal"]);
+    rolled.visibility = rng.pick(["all", "public", "private", "internal"]);
   }
   if (rng.bool(0.4)) {
-    rolledFilters.archived = rng.pick(["skip", "include", "only"]);
+    rolled.archived = rng.pick(["skip", "include", "only"]);
   }
   if (rng.bool(0.4)) {
-    rolledFilters.forks = rng.pick(["include", "exclude", "only"]);
+    rolled.forks = rng.pick(["include", "exclude", "only"]);
   }
   if (rng.bool(0.4)) {
-    rolledFilters.topics = rng.pick(TOPIC_POOL);
+    rolled.topics = rng.pick(TOPIC_POOL);
   }
   if (rng.bool(0.3)) {
-    rolledFilters.exclude = `disc-${rng.int(count)}`;
+    rolled.exclude = `disc-${rng.int(count)}`;
   }
-  const filters: DiscoveryScenarioMeta["filters"] = force === "converges" ? {} : rolledFilters;
+  return force === "converges" ? {} : rolled;
+}
+
+/**
+ * Each pool repo carries one label, so a kept repo applies. The meta echoes the pool and filters, so predictDiscovery
+ * computes the kept set INDEPENDENTLY and the fuzz asserts the action discovered exactly those.
+ */
+export function genDiscoveryScenario(
+  rng: Rng,
+  /**
+   * Battery construction: "converges" pins pool repo 0 non-archived with no filters, so the convergence battery entry
+   * exists for every master seed instead of being rejection-sampled. Deterministic per (seed, force); replays reapply it.
+   */
+  force?: "converges",
+): {
+  scenario: Scenario;
+  meta: DiscoveryScenarioMeta;
+} {
+  const count = rng.int(5) + 4;
+  const pool = genDiscoveryPool(rng, count, force);
+  const filters = genDiscoveryFilters(rng, count, force);
 
   const repos: Record<string, MultiRepo> = {};
   for (const repo of pool) {

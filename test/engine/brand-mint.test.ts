@@ -21,6 +21,7 @@ import { ROOT } from "../root.js";
 interface Brand {
   /** The brand's own names: the carrier aliases and the unique symbols they key on. */
   readonly names: readonly string[];
+
   /** The mint, named so a move is a deliberate edit here. */
   readonly mint: Cast;
 }
@@ -52,9 +53,13 @@ const PROVED_PLAIN: Brand = {
 const SCANNED_DIRS = ["src", "test", ".github/scripts"];
 
 interface Cast {
+  /** The repo-relative path of the file the cast sits in. */
   file: string;
+
   /** The enclosing function declaration's name; "<module>" at the top level. */
   within: string;
+
+  /** The cast expression's source text. */
   text: string;
 }
 
@@ -65,11 +70,7 @@ interface Source {
 
 type Node = { type: string; start: number; end: number } & Record<string, unknown>;
 
-/**
- * A type reached only through a function's parameters consumes a branded value; it does not carry one. Of these node
- * kinds only the type parameters and the return type are descended when deciding whether a declaration carries the
- * brand.
- */
+/** The node kinds of which only the type parameters and the return type are descended: a type reached only through a function's parameters consumes a branded value and does not carry one. */
 const FUNCTION_POSITIONS = new Set([
   "TSFunctionType",
   "TSConstructorType",
@@ -253,12 +254,36 @@ function isBound(type: Node, bound: Bound): boolean {
   return typeName?.type === "Identifier" && bound.has(typeName.name as string);
 }
 
+/** The shape a declaration node declares: an alias or interface node itself, a named class's shape, else undefined. */
+function declaredShape(node: Node): Node | undefined {
+  if (node.type === "TSTypeAliasDeclaration" || node.type === "TSInterfaceDeclaration") {
+    return node;
+  }
+  if (node.type === "ClassDeclaration" && isNode(node.id)) {
+    return classShape(node);
+  }
+  return undefined;
+}
+
+/** The members of a resolved shape: an interface body's or a type literal's; undefined for any other shape. */
+function shapeMembers(shape: Node): Node[] | undefined {
+  if (shape.type === "TSInterfaceDeclaration") {
+    return (shape.body as Node).body as Node[];
+  }
+  if (shape.type === "TSTypeLiteral") {
+    return shape.members as Node[];
+  }
+  return undefined;
+}
+
 /**
  * The parsed tree plus every type alias, interface, and class by file and name, for resolving `Carrier["field"]` to
  * the field's type and for judging a name where it is declared.
  */
 class Tree {
+  /** Every parsed file beside its source. */
   readonly programs: Array<{ source: Source; program: Node }> = [];
+
   /** A name declared twice in one file (merged interfaces, a nested scope) keeps both declarations. */
   readonly declarations = new Map<string, Map<string, Declared[]>>();
 
@@ -272,12 +297,7 @@ class Tree {
 
   private collect(node: Node, file: string, outer: Bound): void {
     const bound = bindTypeParameters(node, outer);
-    const body =
-      node.type === "TSTypeAliasDeclaration" || node.type === "TSInterfaceDeclaration"
-        ? node
-        : node.type === "ClassDeclaration" && isNode(node.id)
-          ? classShape(node)
-          : undefined;
+    const body = declaredShape(node);
     if (body !== undefined) {
       const perFile = this.declarations.get(file) ?? new Map<string, Declared[]>();
       const name = (node.id as Node).name as string;
@@ -331,12 +351,7 @@ class Tree {
       declaration.body.type === "TSTypeAliasDeclaration"
         ? (declaration.body.typeAnnotation as Node)
         : declaration.body;
-    const members =
-      shape.type === "TSInterfaceDeclaration"
-        ? ((shape.body as Node).body as Node[])
-        : shape.type === "TSTypeLiteral"
-          ? (shape.members as Node[])
-          : undefined;
+    const members = shapeMembers(shape);
     const properties = members?.filter((m) => m.type === "TSPropertySignature") ?? [];
     // A computed key is a written name only when it is a string literal; an identifier there is a variable.
     const nameOf = (m: Node): string | undefined =>
@@ -365,6 +380,46 @@ class Tree {
     }
   }
 
+  /** A function position by its type parameters and return type (a setter by its annotation), its parameters left out. */
+  private functionPositionMentions(
+    file: string,
+    node: Node,
+    carriers: Carriers,
+    bound: Bound,
+  ): boolean {
+    const parts =
+      node.kind === "set" ? [setterAnnotation(node)] : [node.typeParameters, node.returnType];
+    return parts.filter(isNode).some((part) => this.mentions(file, part, carriers, bound));
+  }
+
+  /** An identifier: a carrier by name, or a type parameter by its constraint in the scope declaring it. */
+  private identifierMentions(
+    file: string,
+    name: string,
+    carriers: Carriers,
+    bound: Bound,
+  ): boolean {
+    const constrained = bound.get(name);
+    if (constrained === undefined) {
+      return this.carries(file, name, carriers);
+    }
+    const { constraint, scope } = constrained;
+    return (
+      constraint !== undefined &&
+      this.follow(constraint, () => this.mentions(file, constraint, carriers, scope))
+    );
+  }
+
+  /** The member a string-literal index picks off an indexed access's object type, where it is declared; undefined when it does not resolve. */
+  private pickedMember(file: string, node: Node): Declared | undefined {
+    const index = node.indexType as Node;
+    const literal = index.type === "TSLiteralType" ? (index.literal as Node) : undefined;
+    if (literal?.type === "Literal" && typeof literal.value === "string") {
+      return this.member(file, node.objectType as Node, literal.value);
+    }
+    return undefined;
+  }
+
   /**
    * True when a carrier is named at or under `node` in `file`, outside the parameters of a function position. A type
    * parameter in `bound` is judged by its constraint, in the scope declaring it. An indexed access `T["k"]` on a
@@ -375,29 +430,13 @@ class Tree {
   mentions(file: string, node: Node, carriers: Carriers, outer: Bound = NO_BOUND): boolean {
     const bound = bindTypeParameters(node, outer);
     if (FUNCTION_POSITIONS.has(node.type)) {
-      const parts =
-        node.kind === "set" ? [setterAnnotation(node)] : [node.typeParameters, node.returnType];
-      return parts.filter(isNode).some((part) => this.mentions(file, part, carriers, bound));
+      return this.functionPositionMentions(file, node, carriers, bound);
     }
     if (node.type === "Identifier") {
-      const name = node.name as string;
-      const constrained = bound.get(name);
-      if (constrained === undefined) {
-        return this.carries(file, name, carriers);
-      }
-      const { constraint, scope } = constrained;
-      return (
-        constraint !== undefined &&
-        this.follow(constraint, () => this.mentions(file, constraint, carriers, scope))
-      );
+      return this.identifierMentions(file, node.name as string, carriers, bound);
     }
     if (node.type === "TSIndexedAccessType" && !isBound(node.objectType as Node, bound)) {
-      const index = node.indexType as Node;
-      const literal = index.type === "TSLiteralType" ? (index.literal as Node) : undefined;
-      const picked =
-        literal?.type === "Literal" && typeof literal.value === "string"
-          ? this.member(file, node.objectType as Node, literal.value)
-          : undefined;
+      const picked = this.pickedMember(file, node);
       if (picked !== undefined) {
         return this.follow(picked.body, () =>
           this.mentions(picked.file, picked.body, carriers, picked.bound),

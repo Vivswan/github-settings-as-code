@@ -31,8 +31,8 @@ function scenario(overrides: Partial<Scenario> = {}): Scenario {
   );
 }
 
-// Fixture operations, tagged onto the real repository section so the
-// permission gate resolves its real requirement (administration).
+// Fixture operations, tagged onto the real repository section so the permission gate resolves its real requirement (administration).
+
 const G_READ: TaggedGraphqlOp = {
   name: "RepoToggles",
   kind: "read",

@@ -14,10 +14,48 @@ import tsdown from "../../tsdown.config.js";
 import { ROOT } from "../root.js";
 import { readSettingsSchema } from "../settings-schema.js";
 
+/** The built lib/settings.schema.json, whose $id names the repository the package must point at. */
 const schema = readSettingsSchema();
 
 /** tsdown types its options loosely (a glob, a list, or a map); this config is the map form. */
 const build = tsdown as { entry: Record<string, string>; outDir: string };
+
+/** The export targets and the bin paths package.json names, each as a ./-relative path. */
+function manifestTargets(): string[] {
+  return [
+    ...Object.values(pkg.exports).map((entry) =>
+      typeof entry === "string" ? entry : entry.default,
+    ),
+    ...Object.values(pkg.bin).map((bin) => `./${bin}`),
+  ];
+}
+
+/** The import paths the library page's entry table names, plus the two its trailing sentence says ride along, sorted. */
+function documentedExportPaths(page: string): string[] {
+  const entries = page.match(/^## The two entries\n([\s\S]*?)^## /m)?.[1] ?? "";
+  const importPaths = [
+    ...entries.matchAll(/^\| `@vivswan\/github-settings-as-code(\/[^`]+)?` \|/gm),
+  ].map((match) => `.${match[1] ?? ""}`);
+  const rideAlong = entries.match(/Two more paths ride along: (.+)$/m)?.[1] ?? "";
+  return [
+    ...importPaths,
+    ...[...rideAlong.matchAll(/`(\.\/[^`]+)`/g)].map((match) => match[1] ?? ""),
+  ].sort();
+}
+
+/** The bin names the library page's CLI sentence lists, sorted. */
+function documentedBinNames(page: string): string[] {
+  const sentence = page.match(/The package's `bin` entries, (.+?), run the same flows/)?.[1] ?? "";
+  return [...sentence.matchAll(/`([^`]+)`/g)].map((match) => match[1] ?? "").sort();
+}
+
+/** Whether `files` packs `target`: an entry names a file or a directory, with or without a trailing slash. */
+function isPacked(target: string): boolean {
+  return pkg.files.some((entry) => {
+    const path = `./${entry.replace(/\/$/, "")}`;
+    return target === path || target.startsWith(`${path}/`);
+  });
+}
 
 /** Every package the library entries reach through static imports and re-exports, type-only ones included (the bundled .d.ts names them). */
 function packagesImportedByTheLibrary(): string[] {
@@ -66,12 +104,7 @@ describe("package.json as the npm manifest", () => {
 
   test("the exports map and the bins name exactly the library build, the schema, and the manifest", () => {
     const built = Object.keys(build.entry).map((name) => `./${build.outDir}/${name}.js`);
-    const targets = [
-      ...Object.values(pkg.exports).map((entry) =>
-        typeof entry === "string" ? entry : entry.default,
-      ),
-      ...Object.values(pkg.bin).map((bin) => `./${bin}`),
-    ];
+    const targets = manifestTargets();
     expect(targets.filter((target) => !built.includes(target)).sort()).toEqual([
       "./lib/settings.schema.json",
       "./package.json",
@@ -79,23 +112,11 @@ describe("package.json as the npm manifest", () => {
     expect(built.filter((module) => !targets.includes(module))).toEqual([]);
     // The KEYS are public too: the library page's entry table names every import path and its trailing sentence the two paths that ride along.
     const page = readFileSync(join(ROOT, "docs/reference/library.md"), "utf8");
-    const entries = page.match(/^## The two entries\n([\s\S]*?)^## /m)?.[1] ?? "";
-    const importPaths = [
-      ...entries.matchAll(/^\| `@vivswan\/github-settings-as-code(\/[^`]+)?` \|/gm),
-    ].map((match) => `.${match[1] ?? ""}`);
-    const rideAlong = entries.match(/Two more paths ride along: (.+)$/m)?.[1] ?? "";
-    const documentedPaths = [
-      ...importPaths,
-      ...[...rideAlong.matchAll(/`(\.\/[^`]+)`/g)].map((match) => match[1] ?? ""),
-    ].sort();
+    const documentedPaths = documentedExportPaths(page);
     expect(documentedPaths).not.toEqual([]);
     expect(Object.keys(pkg.exports).sort()).toEqual(documentedPaths);
     // The bin NAMES likewise: the CLI section names every bin entry, and both must run the one CLI build.
-    const sentence =
-      page.match(/The package's `bin` entries, (.+?), run the same flows/)?.[1] ?? "";
-    const documentedBins = [...sentence.matchAll(/`([^`]+)`/g)]
-      .map((match) => match[1] ?? "")
-      .sort();
+    const documentedBins = documentedBinNames(page);
     expect(documentedBins).not.toEqual([]);
     expect(Object.keys(pkg.bin).sort()).toEqual(documentedBins);
     // The bins run the CLI entry and each module export its namesake entry, so a swapped target cannot pass as "some built module".
@@ -112,19 +133,15 @@ describe("package.json as the npm manifest", () => {
     }
     const declarations: string[] = [];
     for (const entry of Object.values(pkg.exports)) {
-      if (typeof entry !== "string") {
-        expect(entry.types).toBe(entry.default.replace(/\.js$/, ".d.ts"));
-        declarations.push(entry.types);
+      if (typeof entry === "string") {
+        continue;
       }
+      expect(entry.types).toBe(entry.default.replace(/\.js$/, ".d.ts"));
+      declarations.push(entry.types);
     }
-    // npm packs `files` (and the manifest, always), so a target outside them installs as a dangling path. An entry names a file or a directory,
-    // with or without a trailing slash.
+    // npm packs `files` (and the manifest, always), so a target outside them installs as a dangling path.
     for (const target of [...targets, ...declarations].filter((t) => t !== "./package.json")) {
-      const shipped = pkg.files.some((entry) => {
-        const path = `./${entry.replace(/\/$/, "")}`;
-        return target === path || target.startsWith(`${path}/`);
-      });
-      expect(shipped, target).toBe(true);
+      expect(isPacked(target), target).toBe(true);
     }
   });
 

@@ -19,7 +19,10 @@ import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
 import { endpointPath } from "../../src/sections/contract/endpoints.js";
 import { sectionModule } from "../../src/sections/registry.js";
 import { quote } from "../../src/text.js";
-import { genDiscoveryScenario } from "./generators/discovery-scenario.js";
+import {
+  type DiscoveryScenarioMeta,
+  genDiscoveryScenario,
+} from "./generators/discovery-scenario.js";
 import {
   type FaultableSection,
   SECTION_FAULT_FIXTURE,
@@ -59,11 +62,14 @@ import {
   foldRepoResults,
   foldSectionOutcomes,
   judgePreflightAbort,
+  type MergePrediction,
+  type MultiPrediction,
   NO_READ_SECTIONS,
   predictDiscovery,
   predictMerge,
   predictMulti,
   predictOutcomes,
+  type RunPrediction,
 } from "./generators/oracle.js";
 import { Rng } from "./generators/prng.js";
 import {
@@ -86,12 +92,14 @@ import {
   parseReposResult,
   parseSummaryOutcomes,
   runScenario,
+  type ScenarioReport,
   setReplay,
   stripDebugLines,
   stripMaskLines,
 } from "./runner/runner.js";
 import type { Scenario } from "./scenario.js";
 
+/** Failures after which the random stream stops; the directed batteries still run. */
 const FAILURE_CAP = 5;
 
 /** A stack frame line: the runtime crashed instead of reporting a problem. */
@@ -131,6 +139,59 @@ function refuse(error: string): ParsedFlags {
   return { ok: false, error: `fuzz: ${error}` };
 }
 
+/** Parse, don't cast: a typo'd section would otherwise crash deep inside the generator pool several green iterations later. */
+function applySectionsFlag(flags: Flags, value: string): string | undefined {
+  const parsed = value
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s !== "");
+  const isSection = (s: string): s is SectionKey => (SECTION_KEYS as readonly string[]).includes(s);
+  const unknown = parsed.filter((s) => !isSection(s));
+  if (unknown.length > 0) {
+    return `--sections names unknown section(s) [${unknown.join(", ")}]; known sections: ${SECTION_KEYS.join(", ")}`;
+  }
+  if (parsed.length === 0) {
+    return "--sections got an empty list; name at least one section or drop the flag";
+  }
+  flags.sections = parsed.filter(isSection);
+  return undefined;
+}
+
+/** One flag's value applied to `flags`, or the refusal it earns. */
+function applyFlag(flags: Flags, name: string, value: string): string | undefined {
+  if (name === "iterations") {
+    const count = uint32(value);
+    if (count === undefined) {
+      return `--iterations ${quote(value)} is not a count; ${COUNT_FIX}`;
+    }
+    flags.iterations = count;
+    return undefined;
+  }
+  if (name === "seed") {
+    const seed = uint32(value);
+    if (seed === undefined) {
+      return `--seed ${quote(value)} is not a seed; ${SEED_FIX}`;
+    }
+    flags.seed = seed;
+    return undefined;
+  }
+  return applySectionsFlag(flags, value);
+}
+
+/** FUZZ_SEED pins the seed when --seed does not: the second of the two pinning styles main() treats alike. */
+function applyEnvSeed(flags: Flags, env: NodeJS.ProcessEnv): string | undefined {
+  const envSeed = env.FUZZ_SEED ?? "";
+  if (flags.seed !== undefined || envSeed === "") {
+    return undefined;
+  }
+  const seed = uint32(envSeed);
+  if (seed === undefined) {
+    return `FUZZ_SEED ${quote(envSeed)} is not a seed; ${SEED_FIX}`;
+  }
+  flags.seed = seed;
+  return undefined;
+}
+
 function parseFlags(argv: readonly string[], env: NodeJS.ProcessEnv): ParsedFlags {
   const { tokens } = parseArgs({
     args: [...argv],
@@ -151,46 +212,14 @@ function parseFlags(argv: readonly string[], env: NodeJS.ProcessEnv): ParsedFlag
     if (token.value === undefined) {
       return refuse(`${token.rawName} needs a value; ${USAGE}`);
     }
-    if (token.name === "iterations") {
-      const count = uint32(token.value);
-      if (count === undefined) {
-        return refuse(`--iterations ${quote(token.value)} is not a count; ${COUNT_FIX}`);
-      }
-      flags.iterations = count;
-    } else if (token.name === "seed") {
-      const seed = uint32(token.value);
-      if (seed === undefined) {
-        return refuse(`--seed ${quote(token.value)} is not a seed; ${SEED_FIX}`);
-      }
-      flags.seed = seed;
-    } else {
-      // Parse, don't cast: a typo'd section would otherwise crash deep inside the generator pool several green
-      // iterations later.
-      const parsed = token.value
-        .split(",")
-        .map((s) => s.trim())
-        .filter((s) => s !== "");
-      const isSection = (s: string): s is SectionKey =>
-        (SECTION_KEYS as readonly string[]).includes(s);
-      const unknown = parsed.filter((s) => !isSection(s));
-      if (unknown.length > 0) {
-        return refuse(
-          `--sections names unknown section(s) [${unknown.join(", ")}]; known sections: ${SECTION_KEYS.join(", ")}`,
-        );
-      }
-      if (parsed.length === 0) {
-        return refuse("--sections got an empty list; name at least one section or drop the flag");
-      }
-      flags.sections = parsed.filter(isSection);
+    const problem = applyFlag(flags, token.name, token.value);
+    if (problem !== undefined) {
+      return refuse(problem);
     }
   }
-  const envSeed = env.FUZZ_SEED ?? "";
-  if (flags.seed === undefined && envSeed !== "") {
-    const seed = uint32(envSeed);
-    if (seed === undefined) {
-      return refuse(`FUZZ_SEED ${quote(envSeed)} is not a seed; ${SEED_FIX}`);
-    }
-    flags.seed = seed;
+  const envProblem = applyEnvSeed(flags, env);
+  if (envProblem !== undefined) {
+    return refuse(envProblem);
   }
   return { ok: true, flags };
 }
@@ -207,13 +236,25 @@ function reportArtifacts(result: IterationResult, replay: string): void {
 }
 
 interface IterationBase {
+  /** The primary run's artifact directory, when the runner or the oracle's verdicts dumped one. */
   artifactDir?: string;
+
   /** Artifact dirs beyond the primary run's (the redaction counterfactual). */
   extraArtifactDirs?: string[];
+
+  /** The sections the iteration exercised, for the per-soak coverage tally. */
   sections: SectionKey[];
+
+  /** The witness mutation classes the run reached: a successful write's method, or "clean" for a matching witness observed clean. */
   coverage?: CoverageEvent[];
+
+  /** The injected fault's histogram label, set only when the fault fired. */
   faultClass?: string;
+
+  /** The fixpoint proof the run armed, for the proof tally. */
   proof?: "apply_idempotent" | "converges";
+
+  /** The merge axes a render iteration's stack exercised. */
   mergeFeatures?: string[];
 }
 
@@ -235,10 +276,19 @@ type MutationClass = "create" | "update" | "delete" | "clean";
 
 type CoverageEvent = [WitnessSection, MutationClass];
 
+/** The mutation class a successful write's method proves. */
 const CLASS_BY_METHOD: Record<string, MutationClass> = {
   POST: "create",
   PATCH: "update",
   DELETE: "delete",
+};
+
+/** A standalone create needs live state the battery never seeds, so create is required only where delete plus create is the drift write (no update role). */
+const REQUIRED_CLASSES: Record<WitnessSection, MutationClass[]> = {
+  labels: ["update", "delete", "clean"],
+  autolinks: ["create", "delete", "clean"],
+  milestones: ["update", "clean"],
+  deploy_keys: ["create", "delete", "clean"],
 };
 
 /**
@@ -354,6 +404,63 @@ interface InjectedFault {
   classLabel: string;
 }
 
+/** The injected fault's label when it fired; undefined when none was injected, or it never fired (a problem is recorded). */
+function firedFaultClass(
+  report: ScenarioReport,
+  fault: InjectedFault | undefined,
+  problems: string[],
+): string | undefined {
+  if (fault === undefined) {
+    return undefined;
+  }
+  const fired = assertFaultFired(report.faultsFired, fault.key, problems);
+  return fired ? fault.classLabel : undefined;
+}
+
+/** A fully-granted apply proves a fixpoint: apply-idempotence, or convergence alone when a fault is injected. */
+function proofFor(fixpoint: boolean, fault: InjectedFault | undefined): IterationResult["proof"] {
+  if (!fixpoint) {
+    return undefined;
+  }
+  return fault === undefined ? "apply_idempotent" : "converges";
+}
+
+/**
+ * The per-section checks and the result fold (foldSectionOutcomes mirrors orchestrate.ts's rollup), which run only
+ * on a "ran" verdict: a preflight abort reports "failed" over an EMPTY table by design.
+ */
+function ranProblems(
+  prediction: RunPrediction,
+  meta: ScenarioMeta,
+  report: ScenarioReport,
+  observed: Record<string, string>,
+): string[] {
+  const problems: string[] = [];
+  for (const section of prediction.sections) {
+    const got = observed[section.key];
+    if (got === undefined) {
+      problems.push(
+        `${section.key}: predicted {${[...section.allowed].join(",")}} but the section is absent from the summary`,
+      );
+      continue;
+    }
+    if (!section.allowed.has(got as never)) {
+      problems.push(
+        `${section.key}: observed "${got}" not in predicted {${[...section.allowed].join(",")}} (grades ${section.grades.join("|")})`,
+      );
+    }
+  }
+  const folded = foldSectionOutcomes(Object.values(observed), meta.mode === "check");
+  if (report.outputs.result !== folded) {
+    problems.push(
+      `self-consistency: result output "${report.outputs.result}" != "${folded}" folded from the summary outcomes`,
+    );
+  }
+  problems.push(...summaryTableProblems(report.summary, prediction.sections.length));
+  return problems;
+}
+
+/** The leak sweeps run in runScenario over the primary run and every rerun; a fuzz-side sweep would double-report. */
 async function runPredicted(
   scenario: Scenario,
   meta: ScenarioMeta,
@@ -361,24 +468,15 @@ async function runPredicted(
 ): Promise<IterationResult> {
   const prediction = predictOutcomes(meta);
   const fixpoint = prediction.fullyGranted && meta.mode === "apply";
-  const proof: IterationResult["proof"] =
-    fixpoint && opts.fault === undefined ? "apply_idempotent" : fixpoint ? "converges" : undefined;
+  const proof = proofFor(fixpoint, opts.fault);
   scenario.expect = {
     exit_code: [...prediction.allowedExitCodes],
     fixpoint: proof,
   };
 
   const report = await runScenario(scenario);
-  const problems: string[] = [];
-
-  problems.push(...report.failures);
-  let faultClass: string | undefined;
-  if (opts.fault !== undefined) {
-    const fired = assertFaultFired(report.faultsFired, opts.fault.key, problems);
-    faultClass = fired ? opts.fault.classLabel : undefined;
-  }
-  // A preflight abort reports "failed" over an EMPTY table by design, so the per-section checks and
-  // the result fold (foldSectionOutcomes mirrors orchestrate.ts's rollup) run only on a "ran" verdict.
+  const problems: string[] = [...report.failures];
+  const faultClass = firedFaultClass(report, opts.fault, problems);
   const observed = parseSummaryOutcomes(report.summary);
   const verdict = judgePreflightAbort(prediction.preflightAborts, {
     summary: report.summary,
@@ -389,29 +487,8 @@ async function runPredicted(
     problems.push(verdict.problem);
   }
   if (verdict.kind === "ran") {
-    for (const section of prediction.sections) {
-      const got = observed[section.key];
-      if (got === undefined) {
-        problems.push(
-          `${section.key}: predicted {${[...section.allowed].join(",")}} but the section is absent from the summary`,
-        );
-        continue;
-      }
-      if (!section.allowed.has(got as never)) {
-        problems.push(
-          `${section.key}: observed "${got}" not in predicted {${[...section.allowed].join(",")}} (grades ${section.grades.join("|")})`,
-        );
-      }
-    }
-    const folded = foldSectionOutcomes(Object.values(observed), meta.mode === "check");
-    if (report.outputs.result !== folded) {
-      problems.push(
-        `self-consistency: result output "${report.outputs.result}" != "${folded}" folded from the summary outcomes`,
-      );
-    }
-    problems.push(...summaryTableProblems(report.summary, prediction.sections.length));
+    problems.push(...ranProblems(prediction, meta, report, observed));
   }
-  // The leak sweeps run in runScenario over the primary run and every rerun; a fuzz-side sweep would double-report.
 
   return iterationResult(problems, {
     artifactDir: failureArtifacts(scenario, report, problems),
@@ -501,9 +578,9 @@ async function rejectionIteration(seed: number, spec: RejectionSpec): Promise<It
   const scenario: Scenario = {
     name: `fuzz-input-${spec.label}-${seed}`,
     tiers: ["mock"],
-    ...(spec.settingsRaw !== undefined
-      ? { settings_raw: spec.settingsRaw }
-      : { settings: spec.settings }),
+    ...(spec.settingsRaw === undefined
+      ? { settings: spec.settings }
+      : { settings_raw: spec.settingsRaw }),
     inputs: { mode: spec.mode ?? rng.pick(["apply", "check"]) },
     denial_style: "fine_grained",
     owner_kind: "org",
@@ -557,13 +634,13 @@ function nonMappingRawSpec(rng: Rng): RejectionSpec {
 async function inputFuzzIteration(seed: number): Promise<IterationResult> {
   const rng = new Rng(seed);
   const roll = rng.int(4);
-  const spec =
-    roll === 2
-      ? unparseableRawSpec(rng)
-      : roll === 3
-        ? nonMappingRawSpec(rng)
-        : invalidDocSpec(rng.fork("case"));
-  return rejectionIteration(seed, spec);
+  if (roll === 2) {
+    return rejectionIteration(seed, unparseableRawSpec(rng));
+  }
+  if (roll === 3) {
+    return rejectionIteration(seed, nonMappingRawSpec(rng));
+  }
+  return rejectionIteration(seed, invalidDocSpec(rng.fork("case")));
 }
 
 /** Mirrors the mock's CorruptOption modes. */
@@ -672,6 +749,19 @@ interface MultiRunOptions {
   reportFaultDegrades?: boolean;
 }
 
+/** The redaction counterfactual's verdict: its problems, and its artifact directory when the runner dumped one. */
+interface Counterfactual {
+  problems: string[];
+  artifactDir?: string;
+}
+
+/** What a raw target may still receive, by first path segment: the parse gate stops it before any section call, and the report channel's marker-label ensure-create is POST-only, so a labels GET or PATCH is a section call leaking through. */
+const RAW_TARGET_ALLOWED_BY_HEAD: Record<string, ReadonlySet<string>> = {
+  contents: new Set(["GET"]),
+  labels: new Set(["POST"]),
+  issues: new Set(["GET", "POST", "PATCH"]),
+};
+
 /**
  * One predicate for the random-stream gate and the fixpoint battery draw, so the two cannot diverge.
  * Empty per-target masks is deliberately NARROWER than fully granted (a mask granting write everywhere
@@ -695,8 +785,255 @@ function multiIdempotenceEligible(meta: MultiScenarioMeta): boolean {
 }
 
 /** Shared by the gate and the battery draw so they cannot diverge; an empty kept set exits 1 by design. */
-function discoveryConvergeEligible(meta: ReturnType<typeof genDiscoveryScenario>["meta"]): boolean {
+function discoveryConvergeEligible(meta: DiscoveryScenarioMeta): boolean {
   return predictDiscovery(meta.pool, meta.filters).length > 0;
+}
+
+/** Compared on displayKey: a redacted target is keyed "private repository #N", never its slug; a real slug where a placeholder was expected shows up as an unpredicted key. */
+function repoResultProblems(
+  prediction: MultiPrediction,
+  results: Record<string, string>,
+): string[] {
+  const problems: string[] = [];
+  for (const repo of prediction.repos) {
+    const got = results[repo.displayKey];
+    if (got === undefined) {
+      problems.push(
+        `${repo.displayKey}: predicted {${[...repo.allowedResults].join(",")}} but the repo is absent from repos-result`,
+      );
+      continue;
+    }
+    if (!repo.allowedResults.has(got)) {
+      problems.push(
+        `${repo.displayKey}: result "${got}" not in predicted {${[...repo.allowedResults].join(",")}}`,
+      );
+    }
+  }
+  const predictedKeys = new Set(prediction.repos.map((r) => r.displayKey));
+  for (const key of Object.keys(results)) {
+    if (!predictedKeys.has(key)) {
+      problems.push(`${key}: reported in repos-result but not predicted`);
+    }
+  }
+  return problems;
+}
+
+/** The surfaces a detail-suppression regression reaches: stdout and stderr minus the mask and trace lines, the summary, and every output. */
+function renderedPublicSurfaces(report: ScenarioReport): string {
+  return [
+    stripDebugLines(stripMaskLines(report.stdout)),
+    stripDebugLines(stripMaskLines(report.stderr)),
+    report.summary,
+    ...Object.values(report.outputs),
+  ].join("\n");
+}
+
+/**
+ * {failed} alone would also cover an unrelated pre-validation exception, so a raw target must show ITS gate wording
+ * on a public surface; a redacted one must NOT, and this target is the only source of that wording.
+ */
+function rawTargetWordingProblems(
+  repo: MultiRepoMeta,
+  raw: "unparseable" | "non-mapping",
+  renderedPublic: string,
+): string[] {
+  const wording = raw === "unparseable" ? "cannot parse" : "must be a YAML mapping";
+  if (repo.redaction.kind === "redacted") {
+    if (renderedPublic.includes(wording)) {
+      return [
+        `raw target ${displayKeyOf(repo)}: gate wording "${wording}" leaked to a public surface despite redaction`,
+      ];
+    }
+    return [];
+  }
+  if (!renderedPublic.includes(wording)) {
+    return [
+      `raw target ${repo.slug}: failure does not carry the promised gate wording "${wording}"`,
+    ];
+  }
+  return [];
+}
+
+/** Every request to the raw target outside RAW_TARGET_ALLOWED_BY_HEAD, each a section call the parse gate should have stopped. */
+function rawTargetRequestProblems(slug: string, requests: LoggedRequest[]): string[] {
+  const probePath = `/repos/${slug}`;
+  const base = `${probePath}/`;
+  const problems: string[] = [];
+  for (const request of requests) {
+    const isProbe = request.pathname === probePath;
+    if (!isProbe && !request.pathname.startsWith(base)) {
+      continue;
+    }
+    const head = isProbe ? "" : (request.pathname.slice(base.length).split("/")[0] ?? "");
+    const allowed = isProbe
+      ? request.method === "GET"
+      : (RAW_TARGET_ALLOWED_BY_HEAD[head]?.has(request.method) ?? false);
+    if (!allowed) {
+      problems.push(
+        `raw target ${slug}: unexpected request ${request.method} ${request.pathname} - the parse gate must stop the target before any section call`,
+      );
+    }
+  }
+  return problems;
+}
+
+function rawTargetProblems(meta: MultiScenarioMeta, report: ScenarioReport): string[] {
+  const renderedPublic = renderedPublicSurfaces(report);
+  const problems: string[] = [];
+  for (const repo of meta.repos) {
+    if (repo.target.kind !== "raw-invalid") {
+      continue;
+    }
+    problems.push(...rawTargetWordingProblems(repo, repo.target.raw, renderedPublic));
+    problems.push(...rawTargetRequestProblems(repo.slug, report.requests));
+  }
+  return problems;
+}
+
+/**
+ * The counterfactual proves the leak test is not vacuous: the SAME scenario under private-repos: show
+ * must surface a canary on a RENDERED surface, not merely a ::debug:: trace, because detail-suppression
+ * regressions affect rendered output. Only canaries are checked: it is DETAIL suppression this guards.
+ * A rejected counterfactual proves nothing about canary flow, and swallowing it would strand the artifact the runner dumped.
+ */
+async function redactionCounterfactual(
+  scenario: Scenario,
+  meta: MultiScenarioMeta,
+  prediction: MultiPrediction,
+): Promise<Counterfactual> {
+  const canaries = meta.privateRepos === "redact" ? meta.repos.flatMap(canariesOf) : [];
+  if (canaries.length === 0) {
+    return { problems: [] };
+  }
+  // The counterfactual runs fault-free, so its exit set is priced without the core fault; coreFault
+  // is the only fault the oracle prices in (a report failure never fails the run).
+  const shownExits =
+    meta.coreFault === undefined
+      ? prediction.allowedExitCodes
+      : predictMulti({ ...meta, coreFault: undefined }).allowedExitCodes;
+  const shown = await runScenario({
+    ...scenario,
+    // Anything that stops the counterfactual from starting, or kills the canary's target, would read as "no canary surfaced".
+    //   a delivering channel + show         -> rejected at config parse (show redacts nothing)
+    //   report_public_key without artifact  -> rejected too
+    //   an exhausting fault                 -> could kill the very target whose canary must surface
+    faults: undefined,
+    expect: { exit_code: [...shownExits] },
+    inputs: {
+      ...scenario.inputs,
+      private_repos: "show",
+      private_report: "none",
+      report_public_key: undefined,
+    },
+  });
+  const problems: string[] = [];
+  if (!shown.ok) {
+    const where = shown.artifactDir === undefined ? "" : ` (artifact: ${shown.artifactDir})`;
+    problems.push(`counterfactual run${where}: ${shown.failures.join("; ")}`);
+  }
+  if (shown.artifactDir !== undefined) {
+    markReportTitle(shown.artifactDir, "redaction counterfactual");
+  }
+  const rendered = renderedPublicSurfaces(shown);
+  if (!canaries.some((c) => rendered.includes(c))) {
+    problems.push(
+      "counterfactual: no canary surfaced in a rendered surface under private-repos: show, so the redacted leak check is vacuous",
+    );
+  }
+  return { problems, artifactDir: shown.artifactDir };
+}
+
+/** The writes to the issue routes, which neither a faulted lookup nor the artifact channel may make. */
+function issueRouteWrites(requests: LoggedRequest[]): LoggedRequest[] {
+  return requests.filter((r) => r.method !== "GET" && /\/issues(\/|$|\?)/.test(r.pathname));
+}
+
+/** Under a faulted lookup the contract flips to the degrade: no issue created or patched, the safe warning at least once. */
+function reportDegradeProblems(report: ScenarioReport): string[] {
+  const problems: string[] = [];
+  const issueWrites = issueRouteWrites(report.requests);
+  if (issueWrites.length > 0) {
+    const sample = issueWrites.map((r) => `${r.method} ${r.pathname}`).join(", ");
+    problems.push(`report fault: issue writes happened despite the faulted lookup: ${sample}`);
+  }
+  const degradeWarnings = report.stdout
+    .split("\n")
+    .filter((line) => line.includes("could not deliver the private report")).length;
+  if (degradeWarnings < 1) {
+    problems.push(
+      "report fault: no safe degrade warning fired despite a delivering target attempting the report",
+    );
+  }
+  return problems;
+}
+
+/**
+ * A delivering redacted target's OWN report issue is the one private surface where full detail legitimately lands,
+ * so its canaries must reach the recorded body (suppression did not eat the report). Only the -name canary is
+ * asserted: the label name reaches the report in every mode, the description canaries surface in check mode only.
+ * A carrier without one is a convention drift, not a skip.
+ */
+function reportCanaryProblems(meta: MultiScenarioMeta, report: ScenarioReport): string[] {
+  const problems: string[] = [];
+  for (const repo of meta.repos) {
+    const canaries = canariesOf(repo);
+    if (!reportDelivers(repo) || canaries.length === 0) {
+      continue;
+    }
+    const body = deliveredIssueBody(report.requests, repo.slug);
+    if (body === undefined) {
+      problems.push(`report: no issue body delivered for the redacted target ${repo.slug}`);
+      continue;
+    }
+    const nameCanary = canaries.find((c) => c.endsWith("-name"));
+    if (nameCanary === undefined) {
+      problems.push(`report: ${repo.slug} has canaries but no -name canary to assert in the body`);
+    } else if (!body.includes(nameCanary)) {
+      problems.push(`report: issue body for ${repo.slug} is missing canary ${nameCanary}`);
+    }
+  }
+  return problems;
+}
+
+/**
+ * Under the artifact channel the harness never sees a delivered body (the upload fails safely:
+ * ACTIONS_RUNTIME_TOKEN is absent), so the leak invariant is the positive proof. One artifact is uploaded after
+ * the whole loop, so exactly one warning: a per-target repeat or a silent zero fails here.
+ */
+function artifactChannelProblems(meta: MultiScenarioMeta, report: ScenarioReport): string[] {
+  const problems: string[] = [];
+  const issueWrites = issueRouteWrites(report.requests);
+  if (issueWrites.length > 0) {
+    const sample = issueWrites.map((r) => `${r.method} ${r.pathname}`).join(", ");
+    problems.push(`artifact channel wrote to the issue routes: ${sample}`);
+  }
+  const composed = meta.repos.some((r) => reportDelivers(r));
+  const uploadWarnings = report.stdout
+    .split("\n")
+    .filter((line) => line.includes("could not upload the private report artifact")).length;
+  if (composed && uploadWarnings !== 1) {
+    problems.push(
+      `artifact channel composed a report but emitted ${uploadWarnings} upload-failure warning(s), expected exactly 1`,
+    );
+  }
+  return problems;
+}
+
+/**
+ * Folded from repos-result, not the summary: a multi summary repeats section keys per target, which
+ * parseSummaryOutcomes would overwrite. A config-fatal run's repos-result is the empty map by design.
+ */
+function reposResultFoldProblems(report: ScenarioReport, check: boolean): string[] {
+  if (Object.keys(report.reposResult).length === 0) {
+    return [];
+  }
+  const folded = foldRepoResults(Object.values(report.reposResult), check);
+  if (report.outputs.result === folded) {
+    return [];
+  }
+  return [
+    `self-consistency: result output "${report.outputs.result}" != "${folded}" folded from repos-result`,
+  ];
 }
 
 async function runMultiPredicted(
@@ -719,220 +1056,32 @@ async function runMultiPredicted(
 
   const report = await runScenario(scenario);
   const problems: string[] = [];
-  const extraArtifactDirs: string[] = [];
-  let faultClass: string | undefined;
-  if (opts.fault !== undefined) {
-    const fired = assertFaultFired(report.faultsFired, opts.fault.key, problems);
-    faultClass = fired ? opts.fault.classLabel : undefined;
-  }
+  const faultClass = firedFaultClass(report, opts.fault, problems);
   // The generator forces one private target, so an empty forbidden set is a generator regression that would make the leak check vacuous.
   if (meta.privateRepos === "redact" && prediction.forbidden.length === 0) {
     problems.push("redact run produced an empty forbidden set - the leak check would be vacuous");
   }
   problems.push(...report.failures);
-  // Compared on displayKey: a redacted target is keyed "private repository #N", never its slug.
-  const results = parseReposResult(report.outputs["repos-result"]);
-  for (const repo of prediction.repos) {
-    const got = results[repo.displayKey];
-    if (got === undefined) {
-      problems.push(
-        `${repo.displayKey}: predicted {${[...repo.allowedResults].join(",")}} but the repo is absent from repos-result`,
-      );
-      continue;
-    }
-    if (!repo.allowedResults.has(got)) {
-      problems.push(
-        `${repo.displayKey}: result "${got}" not in predicted {${[...repo.allowedResults].join(",")}}`,
-      );
-    }
-  }
-  // A real slug where a placeholder was expected shows up here as an unpredicted key.
-  const predictedKeys = new Set(prediction.repos.map((r) => r.displayKey));
-  for (const key of Object.keys(results)) {
-    if (!predictedKeys.has(key)) {
-      problems.push(`${key}: reported in repos-result but not predicted`);
-    }
-  }
-  // {failed} alone would also cover an unrelated pre-validation exception, so a raw target must show ITS
-  // gate wording on a public surface; a redacted one must NOT, and this target is the only source of that wording.
-  const renderedPublic = [
-    stripDebugLines(stripMaskLines(report.stdout)),
-    stripDebugLines(stripMaskLines(report.stderr)),
-    report.summary,
-    ...Object.values(report.outputs),
-  ].join("\n");
-  for (const repo of meta.repos) {
-    if (repo.target.kind !== "raw-invalid") {
-      continue;
-    }
-    const wording = repo.target.raw === "unparseable" ? "cannot parse" : "must be a YAML mapping";
-    if (repo.redaction.kind === "redacted") {
-      if (renderedPublic.includes(wording)) {
-        problems.push(
-          `raw target ${displayKeyOf(repo)}: gate wording "${wording}" leaked to a public surface despite redaction`,
-        );
-      }
-    } else if (!renderedPublic.includes(wording)) {
-      problems.push(
-        `raw target ${repo.slug}: failure does not carry the promised gate wording "${wording}"`,
-      );
-    }
-    // The parse gate stops the target before any section call; the report channel's marker-label
-    // ensure-create is POST-only, so a labels list or edit here is a section call leaking through.
-    const probePath = `/repos/${repo.slug}`;
-    const base = `${probePath}/`;
-    const allowedByHead: Record<string, ReadonlySet<string>> = {
-      contents: new Set(["GET"]),
-      labels: new Set(["POST"]),
-      issues: new Set(["GET", "POST", "PATCH"]),
-    };
-    for (const request of report.requests) {
-      const isProbe = request.pathname === probePath;
-      if (!isProbe && !request.pathname.startsWith(base)) {
-        continue;
-      }
-      const head = isProbe ? "" : (request.pathname.slice(base.length).split("/")[0] ?? "");
-      const allowed = isProbe
-        ? request.method === "GET"
-        : (allowedByHead[head]?.has(request.method) ?? false);
-      if (!allowed) {
-        problems.push(
-          `raw target ${repo.slug}: unexpected request ${request.method} ${request.pathname} - the parse gate must stop the target before any section call`,
-        );
-      }
-    }
-  }
+  problems.push(
+    ...repoResultProblems(prediction, parseReposResult(report.outputs["repos-result"])),
+  );
+  problems.push(...rawTargetProblems(meta, report));
   problems.push(...checkLeaks(report, prediction.forbidden));
-
-  // The counterfactual proves the leak test is not vacuous: the SAME scenario under private-repos: show
-  // must surface a canary on a RENDERED surface, not merely a ::debug:: trace, because detail-suppression
-  // regressions affect rendered output. Only canaries are checked: it is DETAIL suppression this guards.
-  if (meta.privateRepos === "redact") {
-    const canaries = meta.repos.flatMap(canariesOf);
-    if (canaries.length > 0) {
-      // The counterfactual runs fault-free, so its exit set is priced without the core fault; coreFault
-      // is the only fault the oracle prices in (a report failure never fails the run).
-      const shownExits =
-        meta.coreFault === undefined
-          ? prediction.allowedExitCodes
-          : predictMulti({ ...meta, coreFault: undefined }).allowedExitCodes;
-      const shown = await runScenario({
-        ...scenario,
-        // Anything that stops the counterfactual from starting, or kills the canary's target, would read as "no canary surfaced".
-        //   a delivering channel + show         -> rejected at config parse (show redacts nothing)
-        //   report_public_key without artifact  -> rejected too
-        //   an exhausting fault                 -> could kill the very target whose canary must surface
-        faults: undefined,
-        expect: { exit_code: [...shownExits] },
-        inputs: {
-          ...scenario.inputs,
-          private_repos: "show",
-          private_report: "none",
-          report_public_key: undefined,
-        },
-      });
-      // A rejected counterfactual proves nothing about canary flow, and swallowing it would strand the artifact the runner dumped.
-      if (!shown.ok) {
-        const where = shown.artifactDir === undefined ? "" : ` (artifact: ${shown.artifactDir})`;
-        problems.push(`counterfactual run${where}: ${shown.failures.join("; ")}`);
-      }
-      if (shown.artifactDir !== undefined) {
-        markReportTitle(shown.artifactDir, "redaction counterfactual");
-        extraArtifactDirs.push(shown.artifactDir);
-      }
-      const rendered = [
-        stripDebugLines(stripMaskLines(shown.stdout)),
-        stripDebugLines(stripMaskLines(shown.stderr)),
-        shown.summary,
-        ...Object.values(shown.outputs),
-      ].join("\n");
-      if (!canaries.some((c) => rendered.includes(c))) {
-        problems.push(
-          "counterfactual: no canary surfaced in a rendered surface under private-repos: show, so the redacted leak check is vacuous",
-        );
-      }
-    }
-  }
-
-  // A delivering redacted target's OWN report issue is the one private surface where full detail
-  // legitimately lands, so its canaries must reach the recorded body (suppression did not eat the report).
-  // Under a faulted lookup the contract flips to the degrade: no issue created or patched, the safe warning at least once.
+  const counterfactual = await redactionCounterfactual(scenario, meta, prediction);
+  problems.push(...counterfactual.problems);
   if (meta.privateReport === "issue" && opts.reportFaultDegrades === true) {
-    const issueWrites = report.requests.filter(
-      (r) => r.method !== "GET" && /\/issues(\/|$|\?)/.test(r.pathname),
-    );
-    if (issueWrites.length > 0) {
-      const sample = issueWrites.map((r) => `${r.method} ${r.pathname}`).join(", ");
-      problems.push(`report fault: issue writes happened despite the faulted lookup: ${sample}`);
-    }
-    const degradeWarnings = report.stdout
-      .split("\n")
-      .filter((line) => line.includes("could not deliver the private report")).length;
-    if (degradeWarnings < 1) {
-      problems.push(
-        "report fault: no safe degrade warning fired despite a delivering target attempting the report",
-      );
-    }
+    problems.push(...reportDegradeProblems(report));
   } else if (meta.privateReport === "issue") {
-    for (const repo of meta.repos) {
-      const canaries = canariesOf(repo);
-      if (!reportDelivers(repo) || canaries.length === 0) {
-        continue;
-      }
-      const body = deliveredIssueBody(report.requests, repo.slug);
-      if (body === undefined) {
-        problems.push(`report: no issue body delivered for the redacted target ${repo.slug}`);
-        continue;
-      }
-      // Only the -name canary is asserted: the label name reaches the report in every mode, the
-      // description canaries surface in check mode only. A carrier without one is a convention drift, not a skip.
-      const nameCanary = canaries.find((c) => c.endsWith("-name"));
-      if (nameCanary === undefined) {
-        problems.push(
-          `report: ${repo.slug} has canaries but no -name canary to assert in the body`,
-        );
-      } else if (!body.includes(nameCanary)) {
-        problems.push(`report: issue body for ${repo.slug} is missing canary ${nameCanary}`);
-      }
-    }
+    problems.push(...reportCanaryProblems(meta, report));
   }
-
-  // Under the artifact channel the harness never sees a delivered body (the upload fails safely:
-  // ACTIONS_RUNTIME_TOKEN is absent), so the leak invariant above is the positive proof.
   if (meta.privateReport === "artifact") {
-    const issueWrites = report.requests.filter(
-      (r) => r.method !== "GET" && /\/issues(\/|$|\?)/.test(r.pathname),
-    );
-    if (issueWrites.length > 0) {
-      const sample = issueWrites.map((r) => `${r.method} ${r.pathname}`).join(", ");
-      problems.push(`artifact channel wrote to the issue routes: ${sample}`);
-    }
-    const composed = meta.repos.some((r) => reportDelivers(r));
-    // One artifact is uploaded after the whole loop, so exactly one warning: a per-target repeat or a silent zero fails here.
-    const uploadWarnings = report.stdout
-      .split("\n")
-      .filter((line) => line.includes("could not upload the private report artifact")).length;
-    if (composed && uploadWarnings !== 1) {
-      problems.push(
-        `artifact channel composed a report but emitted ${uploadWarnings} upload-failure warning(s), expected exactly 1`,
-      );
-    }
+    problems.push(...artifactChannelProblems(meta, report));
   }
-
-  // Folded from repos-result, not the summary: a multi summary repeats section keys per target, which
-  // parseSummaryOutcomes would overwrite. A config-fatal run's repos-result is the empty map by design.
-  if (Object.keys(report.reposResult).length > 0) {
-    const folded = foldRepoResults(Object.values(report.reposResult), meta.mode === "check");
-    if (report.outputs.result !== folded) {
-      problems.push(
-        `self-consistency: result output "${report.outputs.result}" != "${folded}" folded from repos-result`,
-      );
-    }
-  }
+  problems.push(...reposResultFoldProblems(report, meta.mode === "check"));
 
   return iterationResult(problems, {
     artifactDir: failureArtifacts(scenario, report, problems),
-    extraArtifactDirs,
+    extraArtifactDirs: counterfactual.artifactDir === undefined ? [] : [counterfactual.artifactDir],
     sections: [],
     faultClass,
     proof,
@@ -957,9 +1106,61 @@ async function discoveryFuzzIteration(seed: number): Promise<IterationResult> {
   return runDiscoveryPredicted(scenario, meta);
 }
 
+/** Placeholders are numbered over the kept repos in kept order (matching planRedaction); discovery has no per-repo probe, so the planted visibility is the only one. */
+function expectedDiscoveryKeys(kept: string[], meta: DiscoveryScenarioMeta): Set<string> {
+  const redact = meta.privateRepos === "redact";
+  const visibilityOf = new Map(meta.pool.map((r) => [r.slug, r.visibility ?? "public"]));
+  const expectedKeys = new Set<string>();
+  let ordinal = 0;
+  for (const slug of kept) {
+    const isPrivate = redact && visibilityOf.get(slug) !== "public";
+    if (isPrivate) {
+      ordinal += 1;
+      expectedKeys.add(redactionPlaceholder(ordinal));
+    } else {
+      expectedKeys.add(slug);
+    }
+  }
+  return expectedKeys;
+}
+
+function discoveryKeyProblems(expectedKeys: Set<string>, got: Set<string>): string[] {
+  const problems: string[] = [];
+  for (const key of expectedKeys) {
+    if (!got.has(key)) {
+      problems.push(`discovery expected key ${key} but it is absent from repos-result`);
+    }
+  }
+  for (const key of got) {
+    if (!expectedKeys.has(key)) {
+      problems.push(`discovery processed ${key} but it was not an expected key`);
+    }
+  }
+  return problems;
+}
+
+/** Under redact every non-public pool slug is forbidden; the generator forces one non-public pool repo, so an empty forbidden set is a generator regression. */
+function discoveryLeakProblems(meta: DiscoveryScenarioMeta, report: ScenarioReport): string[] {
+  if (meta.privateRepos !== "redact") {
+    return [];
+  }
+  const forbidden = meta.pool
+    .filter((r) => (r.visibility ?? "public") !== "public")
+    .map((r) => r.slug);
+  const problems: string[] = [];
+  if (forbidden.length === 0) {
+    problems.push(
+      "redact discovery run produced an empty forbidden set - the leak check would be vacuous",
+    );
+  }
+  problems.push(...checkLeaks(report, forbidden));
+  return problems;
+}
+
+/** Discovery is always apply mode; the kept-empty error and the discovery-fatal path leave repos-result the empty map by design. */
 async function runDiscoveryPredicted(
   scenario: Scenario,
-  meta: ReturnType<typeof genDiscoveryScenario>["meta"],
+  meta: DiscoveryScenarioMeta,
   opts: { fault?: InjectedFault } = {},
 ): Promise<IterationResult> {
   const kept = predictDiscovery(meta.pool, meta.filters);
@@ -976,60 +1177,13 @@ async function runDiscoveryPredicted(
 
   const report = await runScenario(scenario);
   const problems: string[] = [...report.failures];
-  let faultClass: string | undefined;
-  if (opts.fault !== undefined) {
-    const fired = assertFaultFired(report.faultsFired, opts.fault.key, problems);
-    faultClass = fired ? opts.fault.classLabel : undefined;
-  }
+  const faultClass = firedFaultClass(report, opts.fault, problems);
   const results = parseReposResult(report.outputs["repos-result"]);
-  const got = new Set(Object.keys(results));
-
-  const redact = meta.privateRepos === "redact";
-  const visibilityOf = new Map(meta.pool.map((r) => [r.slug, r.visibility ?? "public"]));
-  // Placeholders are numbered over the kept repos in kept order (matching planRedaction); discovery
-  // has no per-repo probe, so the planted visibility is the only one.
-  const expectedKeys = new Set<string>();
-  let ordinal = 0;
-  for (const slug of kept) {
-    const isPrivate = redact && visibilityOf.get(slug) !== "public";
-    if (isPrivate) {
-      ordinal += 1;
-      expectedKeys.add(redactionPlaceholder(ordinal));
-    } else {
-      expectedKeys.add(slug);
-    }
-  }
-  for (const key of expectedKeys) {
-    if (!got.has(key)) {
-      problems.push(`discovery expected key ${key} but it is absent from repos-result`);
-    }
-  }
-  for (const key of got) {
-    if (!expectedKeys.has(key)) {
-      problems.push(`discovery processed ${key} but it was not an expected key`);
-    }
-  }
-  if (redact) {
-    const forbidden = meta.pool
-      .filter((r) => (r.visibility ?? "public") !== "public")
-      .map((r) => r.slug);
-    // The generator forces one non-public pool repo, so an empty forbidden set is a generator regression.
-    if (forbidden.length === 0) {
-      problems.push(
-        "redact discovery run produced an empty forbidden set - the leak check would be vacuous",
-      );
-    }
-    problems.push(...checkLeaks(report, forbidden));
-  }
-  // Discovery is always apply mode; the kept-empty error and the discovery-fatal path leave repos-result the empty map by design.
-  if (Object.keys(report.reposResult).length > 0) {
-    const folded = foldRepoResults(Object.values(report.reposResult), false);
-    if (report.outputs.result !== folded) {
-      problems.push(
-        `self-consistency: result output "${report.outputs.result}" != "${folded}" folded from repos-result`,
-      );
-    }
-  }
+  problems.push(
+    ...discoveryKeyProblems(expectedDiscoveryKeys(kept, meta), new Set(Object.keys(results))),
+  );
+  problems.push(...discoveryLeakProblems(meta, report));
+  problems.push(...reposResultFoldProblems(report, false));
   return iterationResult(
     problems,
     {
@@ -1072,49 +1226,38 @@ async function mergeValidBatteryRun(
   return runMergePredicted(scenario, meta);
 }
 
-async function runMergePredicted(
-  scenario: Scenario,
-  meta: MergeScenarioMeta,
-): Promise<IterationResult> {
-  const prediction = predictMerge(meta);
-  scenario.expect =
-    prediction.kind !== "merged"
-      ? { exit_code: 1, result: "failed", zero_requests: true }
-      : {
-          exit_code: 0,
-          result: "rendered",
-          zero_requests: true,
-          // The oracle predicts the fold's content; the file is that fold in the canonical order, whose rules
-          // test/engine/canonical.test.ts pins on its own, so this pin is content, never the layers' order.
-          rendered: canonicalDocument(prediction.merged),
-          stdout_contains: prediction.notices.map(describeRemoval),
-          summary_contains: ["Rendered document written to "],
-        };
-  const report = await runScenario(scenario);
-  const problems = [...report.failures];
-  if (UNHANDLED_STACK.test(report.stderr)) {
-    problems.push("unhandled stack in stderr from a merge run");
-  }
-  // Matched on ::error:: lines only: a removal ::notice:: line also starts with the layer name (describeRemoval).
+/**
+ * The run's announcements against the verdict. Matched on ::error:: lines only: a removal ::notice:: line also starts
+ * with the layer name (describeRemoval). mode: render emits no other notices, so the count catches a removal the
+ * oracle did not predict.
+ */
+function mergeAnnouncementProblems(prediction: MergePrediction, report: ScenarioReport): string[] {
+  const lines = report.stdout.split("\n");
   const errorNames = (site: string): boolean =>
-    report.stdout.split("\n").some((line) => line.startsWith("::error::") && line.includes(site));
+    lines.some((line) => line.startsWith("::error::") && line.includes(site));
   if (prediction.kind === "refused") {
     if (!errorNames(prediction.layer)) {
-      problems.push(`refused stack: no ::error:: line names the refused layer ${prediction.layer}`);
+      return [`refused stack: no ::error:: line names the refused layer ${prediction.layer}`];
     }
-  } else if (prediction.kind === "invalid") {
-    if (!errorNames("the rendered settings document")) {
-      problems.push("invalid fold: no ::error:: line names the rendered settings document");
-    }
-  } else {
-    // mode: render emits no other notices, so the count catches a removal the oracle did not predict.
-    const announced = report.stdout.split("\n").filter((line) => line.startsWith("::notice::"));
-    if (announced.length !== prediction.notices.length) {
-      problems.push(
-        `the run announced ${announced.length} removal(s); the oracle predicted ${prediction.notices.length}`,
-      );
-    }
+    return [];
   }
+  if (prediction.kind === "invalid") {
+    if (!errorNames("the rendered settings document")) {
+      return ["invalid fold: no ::error:: line names the rendered settings document"];
+    }
+    return [];
+  }
+  const announced = lines.filter((line) => line.startsWith("::notice::"));
+  if (announced.length !== prediction.notices.length) {
+    return [
+      `the run announced ${announced.length} removal(s); the oracle predicted ${prediction.notices.length}`,
+    ];
+  }
+  return [];
+}
+
+/** Every section any layer of the stack declares, for the coverage tally. */
+function layerSections(meta: MergeScenarioMeta): SectionKey[] {
   const sections = new Set<SectionKey>();
   for (const layer of meta.layers) {
     for (const key of Object.keys(layer.doc)) {
@@ -1123,11 +1266,38 @@ async function runMergePredicted(
       }
     }
   }
+  return [...sections];
+}
+
+async function runMergePredicted(
+  scenario: Scenario,
+  meta: MergeScenarioMeta,
+): Promise<IterationResult> {
+  const prediction = predictMerge(meta);
+  scenario.expect =
+    prediction.kind === "merged"
+      ? {
+          exit_code: 0,
+          result: "rendered",
+          zero_requests: true,
+          // The oracle predicts the fold's content; the file is that fold in the canonical order, whose rules
+          // test/engine/canonical.test.ts pins on its own, so this pin is content, never the layers' order.
+          rendered: canonicalDocument(prediction.merged),
+          stdout_contains: prediction.notices.map(describeRemoval),
+          summary_contains: ["Rendered document written to "],
+        }
+      : { exit_code: 1, result: "failed", zero_requests: true };
+  const report = await runScenario(scenario);
+  const problems = [...report.failures];
+  if (UNHANDLED_STACK.test(report.stderr)) {
+    problems.push("unhandled stack in stderr from a merge run");
+  }
+  problems.push(...mergeAnnouncementProblems(prediction, report));
   return iterationResult(
     problems,
     {
       artifactDir: failureArtifacts(scenario, report, problems),
-      sections: [...sections],
+      sections: layerSections(meta),
       mergeFeatures: meta.features,
     },
     `[merge ${prediction.kind}] `,
@@ -1138,6 +1308,7 @@ async function runMergePredicted(
 
 /** The mock's transport FaultOption kinds; echo_422, a validation rejection with no transient form, stays with the curated scenarios. */
 const FAULT_KINDS = ["rate_limit_403", "429_then_200", "connection_drop", "server_error"] as const;
+
 type FaultKind = (typeof FAULT_KINDS)[number];
 
 /** A budget of RETRY_BUDGET outlasts the client's retries; a budget of 1 is a transient (for the kinds it retries at all, see faultKills). */
@@ -1396,7 +1567,7 @@ function injectContentsFault(
   exhausting: boolean,
 ): { fault: InjectedFault } {
   const fatal = faultKills(kind, exhausting);
-  const times = kind === "rate_limit_403" ? 1 : exhausting ? RETRY_BUDGET : 1;
+  const times = exhausting && kind !== "rate_limit_403" ? RETRY_BUDGET : 1;
   scenario.faults = [{ endpoint: "core.contentsGet", kind, times }];
   meta.coreFault = { key: "core.contentsGet", fatal };
   return {
@@ -1429,7 +1600,7 @@ async function discoveryFaultIteration(seed: number): Promise<IterationResult> {
 /** Checked on the raw output, not parseReposResult: it maps absent, malformed, and {} to the same empty object, hiding a stray emit. */
 async function fatalDiscoveryRun(
   scenario: Scenario,
-  meta: ReturnType<typeof genDiscoveryScenario>["meta"],
+  meta: DiscoveryScenarioMeta,
   faultClass: string,
 ): Promise<IterationResult> {
   scenario.expect = { exit_code: 1 };
@@ -1648,6 +1819,7 @@ async function discoveryConvergesBatteryRun(seed: number): Promise<IterationResu
   }
   return result;
 }
+
 async function faultFuzzIteration(seed: number): Promise<IterationResult> {
   const roll = new Rng(seed ^ 0x7f4a7c15).int(5);
   if (roll === 0) {
@@ -1662,252 +1834,290 @@ async function faultFuzzIteration(seed: number): Promise<IterationResult> {
   return sectionFaultIteration(seed);
 }
 
-async function main(): Promise<number> {
-  const parsed = parseFlags(process.argv.slice(2), process.env);
-  if (!parsed.ok) {
-    console.error(parsed.error);
-    return 2;
+/** One random-stream iteration, dispatched by its seed's roll, with the mode its line and tallies name. */
+async function runIteration(
+  seed: number,
+  flags: Flags,
+): Promise<{ mode: string; result: IterationResult }> {
+  const roll = new Rng(seed ^ 0x5bd1e995).int(8);
+  if (roll < 2) {
+    return { mode: "multi", result: await multiRepoFuzzIteration(seed) };
   }
-  const { flags } = parsed;
-  // `explicit` covers both pinning styles, so `FUZZ_SEED=X --iterations 1` replays exactly like `--seed X --iterations 1`.
-  const explicit = flags.seed !== undefined;
-  const master = flags.seed ?? (crypto.getRandomValues(new Uint32Array(1))[0] as number);
-  // One iteration under an explicit seed runs THAT iteration seed, so a printed seed replays directly.
-  const replayOne = flags.iterations === 1 && explicit;
-  console.log(`fuzz master seed: ${master} (replay: --seed ${master})`);
-  console.log(`iterations: ${flags.iterations}`);
-
-  const coverage = new Map<SectionKey, number>();
-  const mutationHistogram = new Map<WitnessSection, Map<MutationClass, number>>();
-  const recordCoverage = (events: CoverageEvent[] | undefined): void => {
-    for (const [section, cls] of events ?? []) {
-      const counts = mutationHistogram.get(section) ?? new Map<MutationClass, number>();
-      counts.set(cls, (counts.get(cls) ?? 0) + 1);
-      mutationHistogram.set(section, counts);
+  if (roll === 2) {
+    return { mode: "input", result: await inputFuzzIteration(seed) };
+  }
+  if (roll === 3) {
+    if (new Rng(seed ^ 0x1b873593).bool()) {
+      return { mode: "fault", result: await faultFuzzIteration(seed) };
     }
+    return { mode: "chaos", result: await chaosFuzzIteration(seed) };
+  }
+  if (roll === 4) {
+    return { mode: "discovery", result: await discoveryFuzzIteration(seed) };
+  }
+  if (new Rng(seed ^ 0x27d4eb2f).int(4) === 0) {
+    return { mode: "render", result: await mergeFuzzIteration(seed, { sections: flags.sections }) };
+  }
+  return { mode: "standard", result: await standardIteration(seed, { sections: flags.sections }) };
+}
+
+/** What a soak tallies over its iterations and batteries, for the coverage report at the end. */
+interface SoakTally {
+  /** Per section, the iterations that exercised it (random stream only). */
+  coverage: Map<SectionKey, number>;
+
+  /** Per witness section, the mutation classes reached: a successful write's method, or "clean" for a matching witness observed clean. */
+  mutationHistogram: Map<WitnessSection, Map<MutationClass, number>>;
+
+  /** Per fault class label, the runs it fired in. */
+  faultHistogram: Map<string, number>;
+
+  /** Per "mode:proof", the random-stream runs that armed the proof; makes a starving gate visible (multi idempotence at ~5% eligibility), the battery guarantees each proof once per soak regardless. */
+  proofCounts: Map<string, number>;
+
+  /** Per merge feature, the render stacks that exercised it. */
+  mergeHistogram: Map<string, number>;
+}
+
+function newTally(): SoakTally {
+  return {
+    coverage: new Map(),
+    mutationHistogram: new Map(),
+    faultHistogram: new Map(),
+    proofCounts: new Map(),
+    mergeHistogram: new Map(),
   };
-  const failingSeeds: number[] = [];
+}
+
+function increment<K>(histogram: Map<K, number>, key: K): void {
+  histogram.set(key, (histogram.get(key) ?? 0) + 1);
+}
+
+/** The tallies every run feeds, battery or random stream: witness coverage, the fault class, the merge features. */
+function recordRun(tally: SoakTally, result: IterationResult): void {
+  for (const [section, cls] of result.coverage ?? []) {
+    const counts = tally.mutationHistogram.get(section) ?? new Map<MutationClass, number>();
+    increment(counts, cls);
+    tally.mutationHistogram.set(section, counts);
+  }
+  if (result.faultClass !== undefined) {
+    increment(tally.faultHistogram, result.faultClass);
+  }
+  for (const feature of result.mergeFeatures ?? []) {
+    increment(tally.mergeHistogram, feature);
+  }
+}
+
+/** The random stream also tallies the sections it exercised and the proof it armed. */
+function recordIteration(tally: SoakTally, result: IterationResult, mode: string): void {
+  recordRun(tally, result);
+  for (const section of result.sections) {
+    increment(tally.coverage, section);
+  }
+  if (result.proof !== undefined) {
+    increment(tally.proofCounts, `${mode}:${result.proof}`);
+  }
+}
+
+/** The seed alone draws from the full section pool, so a replay must carry the same --sections. */
+function reportIterationFailure(
+  index: number,
+  mode: string,
+  seed: number,
+  result: IterationResult & { ok: false },
+  flags: Flags,
+): void {
+  const sectionsFlag =
+    (mode === "standard" || mode === "render") && flags.sections
+      ? ` --sections ${flags.sections.join(",")}`
+      : "";
+  const replay = `bun run fuzz --seed ${seed} --iterations 1${sectionsFlag}`;
+  console.log(`  iter ${index} [${mode}] seed ${seed} FAIL: ${result.failure}`);
+  console.log(`    replay: ${replay}`);
+  reportArtifacts(result, replay);
+}
+
+type BatteryEntry = [string, (seed: number) => Promise<IterationResult>];
+
+/** One directed battery, each entry under its own derived seed; the failures it counts replay as the whole battery. */
+async function runBattery(
+  tally: SoakTally,
+  master: number,
+  header: string,
+  seedBase: number,
+  entries: readonly BatteryEntry[],
+): Promise<number> {
+  const batteryReplay = `bun run fuzz --seed ${master} --iterations 0`;
   let failures = 0;
-  const faultHistogram = new Map<string, number>();
-  const recordFaultClass = (cls: string | undefined): void => {
-    if (cls !== undefined) {
-      faultHistogram.set(cls, (faultHistogram.get(cls) ?? 0) + 1);
+  console.log(`\n${header}:`);
+  for (const [index, [name, run]] of entries.entries()) {
+    const seed = iterationSeed(master, seedBase + index);
+    const result = await run(seed);
+    recordRun(tally, result);
+    if (result.ok) {
+      console.log(`  ${name} ok`);
+      continue;
     }
-  };
-  // Makes a starving gate visible (multi idempotence at ~5% eligibility); the battery guarantees each proof once per soak regardless.
-  const proofCounts = new Map<string, number>();
-  const mergeHistogram = new Map<string, number>();
-  const recordMergeFeatures = (features: string[] | undefined): void => {
-    for (const feature of features ?? []) {
-      mergeHistogram.set(feature, (mergeHistogram.get(feature) ?? 0) + 1);
-    }
-  };
+    failures++;
+    console.log(`  ${name} seed ${seed} FAIL: ${result.failure}`);
+    console.log(`    replay: ${batteryReplay}`);
+    reportArtifacts(result, batteryReplay);
+  }
+  return failures;
+}
 
-  for (let i = 0; i < flags.iterations; i++) {
-    const seed = replayOne ? master : iterationSeed(master, i);
-    const roll = new Rng(seed ^ 0x5bd1e995).int(8);
-    let result: IterationResult;
-    let mode: string;
-    if (roll < 2) {
-      mode = "multi";
-      result = await multiRepoFuzzIteration(seed);
-    } else if (roll === 2) {
-      mode = "input";
-      result = await inputFuzzIteration(seed);
-    } else if (roll === 3) {
-      if (new Rng(seed ^ 0x1b873593).bool()) {
-        mode = "fault";
-        result = await faultFuzzIteration(seed);
-      } else {
-        mode = "chaos";
-        result = await chaosFuzzIteration(seed);
+function witnessBatteryEntries(): BatteryEntry[] {
+  const entries: BatteryEntry[] = [];
+  for (const key of WITNESS_SECTIONS) {
+    for (const kind of WITNESS_KINDS[key]) {
+      for (const mode of ["apply", "check"] as const) {
+        entries.push([`${key}/${kind}/${mode}`, (seed) => witnessIteration(seed, key, kind, mode)]);
       }
-    } else if (roll === 4) {
-      mode = "discovery";
-      result = await discoveryFuzzIteration(seed);
-    } else if (new Rng(seed ^ 0x27d4eb2f).int(4) === 0) {
-      mode = "render";
-      result = await mergeFuzzIteration(seed, { sections: flags.sections });
-    } else {
-      mode = "standard";
-      result = await standardIteration(seed, { sections: flags.sections });
-    }
-    for (const section of result.sections) {
-      coverage.set(section, (coverage.get(section) ?? 0) + 1);
-    }
-    recordCoverage(result.coverage);
-    recordFaultClass(result.faultClass);
-    recordMergeFeatures(result.mergeFeatures);
-    if (result.proof !== undefined) {
-      const key = `${mode}:${result.proof}`;
-      proofCounts.set(key, (proofCounts.get(key) ?? 0) + 1);
-    }
-    if (!result.ok) {
-      failures++;
-      failingSeeds.push(seed);
-      // The seed alone draws from the full section pool, so a replay must carry the same --sections.
-      const sectionsFlag =
-        (mode === "standard" || mode === "render") && flags.sections
-          ? ` --sections ${flags.sections.join(",")}`
-          : "";
-      const replay = `bun run fuzz --seed ${seed} --iterations 1${sectionsFlag}`;
-      console.log(`  iter ${i} [${mode}] seed ${seed} FAIL: ${result.failure}`);
-      console.log(`    replay: ${replay}`);
-      reportArtifacts(result, replay);
-      if (failures >= FAILURE_CAP) {
-        console.log(`\nfailure cap (${FAILURE_CAP}) reached; stopping`);
-        break;
-      }
-    } else {
-      console.log(`  iter ${i} [${mode}] seed ${seed} ok`);
     }
   }
+  return entries;
+}
 
-  let batteryFailures = 0;
-  if (!replayOne) {
-    const batteryReplay = `bun run fuzz --seed ${master} --iterations 0`;
-    type BatteryEntry = [string, (seed: number) => Promise<IterationResult>];
-    const runBattery = async (
-      header: string,
-      seedBase: number,
-      entries: readonly BatteryEntry[],
-    ): Promise<void> => {
-      console.log(`\n${header}:`);
-      for (const [index, [name, run]] of entries.entries()) {
-        const seed = iterationSeed(master, seedBase + index);
-        const result = await run(seed);
-        recordCoverage(result.coverage);
-        recordFaultClass(result.faultClass);
-        recordMergeFeatures(result.mergeFeatures);
-        if (result.ok) {
-          console.log(`  ${name} ok`);
-          continue;
-        }
-        batteryFailures++;
-        console.log(`  ${name} seed ${seed} FAIL: ${result.failure}`);
-        console.log(`    replay: ${batteryReplay}`);
-        reportArtifacts(result, batteryReplay);
-      }
-    };
-
-    const witnessEntries: BatteryEntry[] = [];
-    for (const key of WITNESS_SECTIONS) {
-      for (const kind of WITNESS_KINDS[key]) {
-        for (const mode of ["apply", "check"] as const) {
-          witnessEntries.push([
-            `${key}/${kind}/${mode}`,
-            (seed) => witnessIteration(seed, key, kind, mode),
-          ]);
-        }
-      }
-    }
-    await runBattery("witness battery (directed live-state witnesses)", 0x100000, witnessEntries);
-
-    // The random stream covers a sparse subset of the catalog per run; this pass runs all of it, and pins
-    // that every raw pool string still fails the way its pool promises (a yaml upgrade fails here, not in a nightly).
-    const inputSpecs: Array<{ name: string; spec: (rng: Rng) => RejectionSpec }> = [
-      ...INVALID_SETTINGS_CASES.map(({ name, build }) => ({
-        name,
-        spec: (rng: Rng): RejectionSpec => {
-          const { doc, offendingToken } = build(rng);
-          return { label: name, settings: doc, tokens: [offendingToken] };
-        },
-      })),
-      ...UNPARSEABLE_YAML.map((raw, i) => ({
-        name: `raw-unparseable-${i}`,
-        spec: (): RejectionSpec => ({
-          label: `raw-unparseable-${i}`,
-          settingsRaw: raw,
-          tokens: ["cannot read settings", "valid YAML"],
-        }),
-      })),
-      ...NON_MAPPING_YAML.map((raw, i) => ({
-        name: `raw-non-mapping-${i}`,
-        spec: (): RejectionSpec => ({
-          label: `raw-non-mapping-${i}`,
-          settingsRaw: raw,
-          tokens: ["must be a YAML mapping"],
-        }),
-      })),
-    ];
-    await runBattery(
-      "input battery (directed rejection catalog)",
-      0x200000,
-      inputSpecs.map(({ name, spec }, index): BatteryEntry => {
-        const mode = index % 2 === 0 ? ("apply" as const) : ("check" as const);
-        return [
-          `${name} [${mode}]`,
-          (seed) => rejectionIteration(seed, { ...spec(new Rng(seed)), mode }),
-        ];
+/**
+ * The random stream covers a sparse subset of the catalog per run; this pass runs all of it, and pins
+ * that every raw pool string still fails the way its pool promises (a yaml upgrade fails here, not in a nightly).
+ */
+function inputBatteryEntries(): BatteryEntry[] {
+  const inputSpecs: Array<{ name: string; spec: (rng: Rng) => RejectionSpec }> = [
+    ...INVALID_SETTINGS_CASES.map(({ name, build }) => ({
+      name,
+      spec: (rng: Rng): RejectionSpec => {
+        const { doc, offendingToken } = build(rng);
+        return { label: name, settings: doc, tokens: [offendingToken] };
+      },
+    })),
+    ...UNPARSEABLE_YAML.map((raw, i) => ({
+      name: `raw-unparseable-${i}`,
+      spec: (): RejectionSpec => ({
+        label: `raw-unparseable-${i}`,
+        settingsRaw: raw,
+        tokens: ["cannot read settings", "valid YAML"],
       }),
-    );
+    })),
+    ...NON_MAPPING_YAML.map((raw, i) => ({
+      name: `raw-non-mapping-${i}`,
+      spec: (): RejectionSpec => ({
+        label: `raw-non-mapping-${i}`,
+        settingsRaw: raw,
+        tokens: ["must be a YAML mapping"],
+      }),
+    })),
+  ];
+  return inputSpecs.map(({ name, spec }, index): BatteryEntry => {
+    const mode = index % 2 === 0 ? ("apply" as const) : ("check" as const);
+    return [
+      `${name} [${mode}]`,
+      (seed) => rejectionIteration(seed, { ...spec(new Rng(seed)), mode }),
+    ];
+  });
+}
 
-    await runBattery(
-      "fault battery (directed transport faults, every faultable section)",
-      0x300000,
-      faultBatteryPlan(master).map(
-        (plan): BatteryEntry => [
-          `${plan.section}:${plan.kind}/x${plan.exhausting ? RETRY_BUDGET : 1} [${plan.mode}]`,
-          (seed) => faultedSectionRun(seed, plan),
-        ],
-      ),
-    );
-
-    await runBattery(
-      "unfaultable battery (declared reads stay cold in apply)",
-      0x310000,
-      UNFAULTABLE_SECTIONS.map(
-        (section): BatteryEntry => [section, (seed) => unfaultableSectionRun(seed, section)],
-      ),
-    );
-
-    await runBattery("core-fault battery (directed core-path faults)", 0x400000, [
+/** Every directed battery in order; their failure count joins the random stream's. */
+async function runBatteries(tally: SoakTally, master: number): Promise<number> {
+  let failures = 0;
+  failures += await runBattery(
+    tally,
+    master,
+    "witness battery (directed live-state witnesses)",
+    0x100000,
+    witnessBatteryEntries(),
+  );
+  failures += await runBattery(
+    tally,
+    master,
+    "input battery (directed rejection catalog)",
+    0x200000,
+    inputBatteryEntries(),
+  );
+  failures += await runBattery(
+    tally,
+    master,
+    "fault battery (directed transport faults, every faultable section)",
+    0x300000,
+    faultBatteryPlan(master).map(
+      (plan): BatteryEntry => [
+        `${plan.section}:${plan.kind}/x${plan.exhausting ? RETRY_BUDGET : 1} [${plan.mode}]`,
+        (seed) => faultedSectionRun(seed, plan),
+      ],
+    ),
+  );
+  failures += await runBattery(
+    tally,
+    master,
+    "unfaultable battery (declared reads stay cold in apply)",
+    0x310000,
+    UNFAULTABLE_SECTIONS.map(
+      (section): BatteryEntry => [section, (seed) => unfaultableSectionRun(seed, section)],
+    ),
+  );
+  failures += await runBattery(
+    tally,
+    master,
+    "core-fault battery (directed core-path faults)",
+    0x400000,
+    [
       ["core.contentsGet/fatal", contentsFaultBatteryRun],
       ["core.discoveryList/fatal", discoveryFaultBatteryRun],
       ["core.issuesList/degrade", reportFaultBatteryRun],
       ["preflight/budget-consumed", (seed) => preflightFaultRun(seed, false)],
       ["preflight/budget-survives", (seed) => preflightFaultRun(seed, true)],
-    ]);
-
-    // No standard-mode entry: the witness battery's apply combos already arm apply_idempotent.
-    await runBattery("fixpoint battery (directed apply-idempotence / convergence)", 0x500000, [
+    ],
+  );
+  // No standard-mode entry: the witness battery's apply combos already arm apply_idempotent.
+  failures += await runBattery(
+    tally,
+    master,
+    "fixpoint battery (directed apply-idempotence / convergence)",
+    0x500000,
+    [
       ["multi/apply-idempotent", multiIdempotenceBatteryRun],
       ["discovery/converges", discoveryConvergesBatteryRun],
-    ]);
+    ],
+  );
+  // Forced by the generator, so every refusal kind fires each soak instead of waiting on the ~1/30 random draw.
+  failures += await runBattery(tally, master, "merge battery (directed layered merges)", 0x600000, [
+    ...LAYERING_DIRECTIVES.map(
+      (layering): BatteryEntry => [
+        `merge/valid/${layering}`,
+        (seed) => mergeValidBatteryRun(seed, layering),
+      ],
+    ),
+    ...MERGE_REFUSAL_KINDS.map(
+      (refusal): BatteryEntry => [
+        `merge/refused/${refusal}`,
+        (seed) => mergeFuzzIteration(seed, { force: { kind: "refused", refusal } }),
+      ],
+    ),
+  ]);
+  return failures;
+}
 
-    // Forced by the generator, so every refusal kind fires each soak instead of waiting on the ~1/30 random draw.
-    await runBattery("merge battery (directed layered merges)", 0x600000, [
-      ...LAYERING_DIRECTIVES.map(
-        (layering): BatteryEntry => [
-          `merge/valid/${layering}`,
-          (seed) => mergeValidBatteryRun(seed, layering),
-        ],
-      ),
-      ...MERGE_REFUSAL_KINDS.map(
-        (refusal): BatteryEntry => [
-          `merge/refused/${refusal}`,
-          (seed) => mergeFuzzIteration(seed, { force: { kind: "refused", refusal } }),
-        ],
-      ),
-    ]);
+/** A histogram's lines sorted by key, or "(none)". */
+function printHistogram(title: string, histogram: ReadonlyMap<string, number>): void {
+  console.log(`\n${title}:`);
+  if (histogram.size === 0) {
+    console.log("  (none)");
+    return;
   }
+  for (const [key, count] of [...histogram.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    console.log(`  ${key}: ${count}`);
+  }
+}
 
-  console.log("\ncoverage (sections exercised):");
-  for (const key of [...coverage.keys()].sort()) {
-    console.log(`  ${key}: ${coverage.get(key)}`);
-  }
-  // A standalone create needs live state the battery never seeds, so create is required only where
-  // delete plus create is the drift write (no update role).
-  const REQUIRED_CLASSES: Record<WitnessSection, MutationClass[]> = {
-    labels: ["update", "delete", "clean"],
-    autolinks: ["create", "delete", "clean"],
-    milestones: ["update", "clean"],
-    deploy_keys: ["create", "delete", "clean"],
-  };
+/**
+ * The mutation-class histogram per witness section, and the count of sections missing a REQUIRED_CLASSES member
+ * (none is checked under a one-iteration replay, which cannot cover them).
+ */
+function printMutationCoverage(tally: SoakTally, replayOne: boolean): number {
   console.log("\nmutation-class coverage (successful writes from the mock's request log):");
   let coverageFailures = 0;
   for (const key of WITNESS_SECTIONS) {
-    const counts = mutationHistogram.get(key) ?? new Map<MutationClass, number>();
+    const counts = tally.mutationHistogram.get(key) ?? new Map<MutationClass, number>();
     const rendered =
       [...counts.entries()]
         .sort(([a], [b]) => a.localeCompare(b))
@@ -1925,40 +2135,63 @@ async function main(): Promise<number> {
       );
     }
   }
+  return coverageFailures;
+}
 
-  // The battery guarantees every faultable section's primary read and every kind x budget combo per soak,
-  // not their cross product, so an absent class here is not by itself a failure; the histogram is the visibility.
-  console.log("\nfault-class coverage (endpoint kind/verdict fired):");
-  if (faultHistogram.size === 0) {
-    console.log("  (none)");
-  } else {
-    for (const [cls, count] of [...faultHistogram.entries()].sort(([a], [b]) =>
-      a.localeCompare(b),
-    )) {
-      console.log(`  ${cls}: ${count}`);
+/**
+ * The soak's coverage report. The fault battery guarantees every faultable section's primary read and every
+ * kind x budget combo per soak, not their cross product, so an absent fault class is not by itself a failure; the
+ * generator test pins that every merge axis is drawn, so the merge histogram is the per-soak visibility.
+ */
+function printCoverage(tally: SoakTally, replayOne: boolean): number {
+  console.log("\ncoverage (sections exercised):");
+  for (const key of [...tally.coverage.keys()].sort()) {
+    console.log(`  ${key}: ${tally.coverage.get(key)}`);
+  }
+  const coverageFailures = printMutationCoverage(tally, replayOne);
+  printHistogram("fault-class coverage (endpoint kind/verdict fired)", tally.faultHistogram);
+  printHistogram("merge-feature coverage (layered merge axes exercised)", tally.mergeHistogram);
+  printHistogram("fixpoint-proof coverage (random stream, mode:proof)", tally.proofCounts);
+  return coverageFailures;
+}
+
+async function main(): Promise<number> {
+  const parsed = parseFlags(process.argv.slice(2), process.env);
+  if (!parsed.ok) {
+    console.error(parsed.error);
+    return 2;
+  }
+  const { flags } = parsed;
+  // `explicit` covers both pinning styles, so `FUZZ_SEED=X --iterations 1` replays exactly like `--seed X --iterations 1`.
+  const explicit = flags.seed !== undefined;
+  const master = flags.seed ?? (crypto.getRandomValues(new Uint32Array(1))[0] as number);
+  // One iteration under an explicit seed runs THAT iteration seed, so a printed seed replays directly.
+  const replayOne = flags.iterations === 1 && explicit;
+  console.log(`fuzz master seed: ${master} (replay: --seed ${master})`);
+  console.log(`iterations: ${flags.iterations}`);
+
+  const tally = newTally();
+  const failingSeeds: number[] = [];
+  let failures = 0;
+  for (let i = 0; i < flags.iterations; i++) {
+    const seed = replayOne ? master : iterationSeed(master, i);
+    const { mode, result } = await runIteration(seed, flags);
+    recordIteration(tally, result, mode);
+    if (result.ok) {
+      console.log(`  iter ${i} [${mode}] seed ${seed} ok`);
+      continue;
+    }
+    failures++;
+    failingSeeds.push(seed);
+    reportIterationFailure(i, mode, seed, result, flags);
+    if (failures >= FAILURE_CAP) {
+      console.log(`\nfailure cap (${FAILURE_CAP}) reached; stopping`);
+      break;
     }
   }
 
-  // The generator test pins that every merge axis is drawn; this is the per-soak visibility.
-  console.log("\nmerge-feature coverage (layered merge axes exercised):");
-  if (mergeHistogram.size === 0) {
-    console.log("  (none)");
-  } else {
-    for (const [feature, count] of [...mergeHistogram.entries()].sort(([a], [b]) =>
-      a.localeCompare(b),
-    )) {
-      console.log(`  ${feature}: ${count}`);
-    }
-  }
-
-  console.log("\nfixpoint-proof coverage (random stream, mode:proof):");
-  if (proofCounts.size === 0) {
-    console.log("  (none)");
-  } else {
-    for (const [key, count] of [...proofCounts.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-      console.log(`  ${key}: ${count}`);
-    }
-  }
+  const batteryFailures = replayOne ? 0 : await runBatteries(tally, master);
+  const coverageFailures = printCoverage(tally, replayOne);
 
   console.log(`\n${flags.iterations - failures}/${flags.iterations} iterations ok`);
   if (batteryFailures > 0) {

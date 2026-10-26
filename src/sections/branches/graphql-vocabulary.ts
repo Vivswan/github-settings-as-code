@@ -7,6 +7,7 @@ import type { MustBeNever } from "../../types.js";
 import type { BooleanControl } from "./keys.js";
 import type { BranchProtectionConfig } from "./schema.js";
 
+/** Named after the REST keys; the one unobvious twin is allow_fork_syncing, which GitHub spells lockAllowsFetchAndMerge (it only matters on a locked branch). */
 export const GRAPHQL_BOOLEAN_TWINS = {
   enforce_admins: "isAdminEnforced",
   required_linear_history: "requiresLinearHistory",
@@ -19,6 +20,7 @@ export const GRAPHQL_BOOLEAN_TWINS = {
   required_signatures: "requiresCommitSignatures",
 } as const satisfies Record<BooleanControl, string>;
 
+/** The scalar review sub-keys; a wildcard entry may declare no other under required_pull_request_reviews (index.ts refuses them). */
 export const GRAPHQL_REVIEW_TWINS = {
   required_approving_review_count: "requiredApprovingReviewCount",
   require_code_owner_reviews: "requiresCodeOwnerReviews",
@@ -26,15 +28,13 @@ export const GRAPHQL_REVIEW_TWINS = {
   require_last_push_approval: "requireLastPushApproval",
 } as const;
 
+/** contexts only: a wildcard entry declaring the structured checks list is refused (index.ts). */
 export const GRAPHQL_STATUS_CHECK_TWINS = {
   strict: "requiresStrictStatusChecks",
   contexts: "requiredStatusCheckContexts",
 } as const;
 
-/**
- * The keys no REST protection endpoint carries: they ride the updateBranchProtectionRule mutation
- * alone. The ONE spelling; the routed types, the guard, the drift, and the snapshot derive from it.
- */
+/** The keys no REST protection endpoint carries, so they ride the rule mutation alone; the ONE spelling, which the routed types, the guard, the drift, and the snapshot derive from. */
 export const ROUTED_KEYS = [
   "force_push_bypassers",
   "required_deployments",

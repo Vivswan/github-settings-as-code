@@ -55,12 +55,14 @@ function only(...keys: SectionKey[]): SectionSelection {
 
 const BUG = { name: "bug", color: "d73a4a", description: "Something is broken" };
 const DOCS = { name: "docs", color: "0075ca", description: "" };
-const doc = (...labels: Array<typeof BUG>) => ({
-  labels: { _undeclared: "delete", entries: labels },
-});
-const labelsRoute = (slug: string, labels: Array<typeof BUG>) => ({
-  [`GET /repos/${slug}/labels?per_page=100&page=1`]: { data: labels },
-});
+
+function doc(...labels: Array<typeof BUG>) {
+  return { labels: { _undeclared: "delete", entries: labels } };
+}
+
+function labelsRoute(slug: string, labels: Array<typeof BUG>) {
+  return { [`GET /repos/${slug}/labels?per_page=100&page=1`]: { data: labels } };
+}
 
 /** An ISO-8601 UTC instant, the form the run's one moment is stated in. */
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
@@ -461,9 +463,14 @@ describe("runSnapshot refuses a destination that is an authored path under anoth
   type Alias = {
     /** The authored file the alias reaches, relative to the working directory. */
     authored: string;
+
     /** Makes the alias reach the authored path; a case alias needs nothing. */
     link?: (dir: string) => void;
+
+    /** The run's config under `dir`, its destination the alias. */
     cfg: (dir: string) => SnapshotConfig;
+
+    /** The refusal the run logs. */
     message: string;
   };
 
@@ -592,9 +599,15 @@ describe("runSnapshot refuses a destination that is an authored path under anoth
   ])("%s", (_case, alias) => withTempDir("snapshot-flow-", (dir) => refuses(dir, alias)));
 
   type Carried = {
+    /** The authored file a write would land on, relative to the working directory. */
     authored: string;
+
+    /** Makes a written path reach the authored file. */
     link: (cwd: string) => void;
+
+    /** The run's directory config under `dir`. */
     cfg: (dir: string) => DirConfig;
+
     /** Every target the run resolves, central first, with the file it would write and why it must not. */
     targets: Array<{
       slug: string;
@@ -909,6 +922,46 @@ describe("runSnapshot, dir form", () => {
       );
     }));
 
+  /** Runs `first,second` with bob/ linked onto alice/ under `dir`: case-insensitive, the second is refused and the first's file alone lands; case-sensitive, both do. */
+  async function runCasePair(
+    dir: string,
+    first: string,
+    second: string,
+    caseInsensitive: boolean,
+  ): Promise<void> {
+    const api = new MockApi({
+      "GET /repos/alice/R": { data: { private: false } },
+      "GET /repos/bob/r": { data: { private: false } },
+      ...labelsRoute("alice/R", [BUG]),
+      ...labelsRoute("bob/r", [DOCS]),
+    });
+    const cfg = dirCfg(dir, {
+      reposInput: `${first},${second}`,
+      snapshotDir: join(dir, `snapshots-${first.replace("/", "-")}`),
+    });
+    mkdirSync(join(cfg.snapshotDir, "alice"), { recursive: true });
+    symlinkSync("alice", join(cfg.snapshotDir, "bob"));
+    const collected = collectingIo();
+    expect(await run(api, cfg, collected.io)).toBe(caseInsensitive ? 1 : 0);
+    const written = readdirSync(join(cfg.snapshotDir, "alice"));
+    if (!caseInsensitive) {
+      expect(written.sort()).toEqual(["R.yml", "r.yml"]);
+      return;
+    }
+    expect(collected.lines[2]).toEqual({
+      level: "error",
+      line: expect.stringMatching(
+        new RegExp(
+          `^${RegExp.escape(second)}: cannot write the snapshot to .*: the filesystem carries it to the file this run already claimed for ${RegExp.escape(first)}\\. `,
+        ),
+      ),
+    });
+    expect(written).toHaveLength(1);
+    expect(
+      parseYaml(readFileSync(join(cfg.snapshotDir, "alice", written[0] ?? ""), "utf8")),
+    ).toEqual(doc(first === "alice/R" ? BUG : DOCS));
+  }
+
   test("two targets whose leaves differ only in case are one file on a case-insensitive filesystem: the second is refused", () =>
     withTempDir("snapshot-flow-", async (dir) => {
       // Slugs dedupe case-insensitively, so the alias needs two owners folded by a link and leaves spelled apart:
@@ -921,37 +974,7 @@ describe("runSnapshot, dir form", () => {
         ["alice/R", "bob/r"],
         ["bob/r", "alice/R"],
       ] as const) {
-        const api = new MockApi({
-          "GET /repos/alice/R": { data: { private: false } },
-          "GET /repos/bob/r": { data: { private: false } },
-          ...labelsRoute("alice/R", [BUG]),
-          ...labelsRoute("bob/r", [DOCS]),
-        });
-        const cfg = dirCfg(dir, {
-          reposInput: `${first},${second}`,
-          snapshotDir: join(dir, `snapshots-${first.replace("/", "-")}`),
-        });
-        mkdirSync(join(cfg.snapshotDir, "alice"), { recursive: true });
-        symlinkSync("alice", join(cfg.snapshotDir, "bob"));
-        const collected = collectingIo();
-        expect(await run(api, cfg, collected.io)).toBe(caseInsensitive ? 1 : 0);
-        const written = readdirSync(join(cfg.snapshotDir, "alice"));
-        if (caseInsensitive) {
-          expect(collected.lines[2]).toEqual({
-            level: "error",
-            line: expect.stringMatching(
-              new RegExp(
-                `^${RegExp.escape(second)}: cannot write the snapshot to .*: the filesystem carries it to the file this run already claimed for ${RegExp.escape(first)}\\. `,
-              ),
-            ),
-          });
-          expect(written).toHaveLength(1);
-          expect(
-            parseYaml(readFileSync(join(cfg.snapshotDir, "alice", written[0] ?? ""), "utf8")),
-          ).toEqual(doc(first === "alice/R" ? BUG : DOCS));
-        } else {
-          expect(written.sort()).toEqual(["R.yml", "r.yml"]);
-        }
+        await runCasePair(dir, first, second, caseInsensitive);
       }
     }));
 

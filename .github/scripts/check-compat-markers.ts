@@ -17,9 +17,7 @@ import { lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { runMain } from "./lib/entry.js";
 
-/** Built output, dependencies, release-please's changelog (it quotes PR titles, so a removal PR's title would
- * outlive the marker it deleted), and the two files that spell the syntax to define and test it.
- * A trailing slash skips a directory; anything else is one exact path. */
+/** A trailing slash skips a directory, anything else one exact path; CHANGELOG.md quotes PR titles, so a removal PR's title would outlive the marker it deleted, and the last two spell the syntax to define and test it. */
 const SKIPPED_PATHS = [
   "lib/",
   "node_modules/",
@@ -32,14 +30,22 @@ function skipped(path: string): boolean {
   return SKIPPED_PATHS.some((skip) => (skip.endsWith("/") ? path.startsWith(skip) : path === skip));
 }
 
+/** Every candidate on a line, well-formed or not, so a malformed marker is reported rather than missed. */
 const OCCURRENCE = /COMPAT\(/g;
+
+/** The major as digits only, so a marker cannot dodge the gate by leaving it out. */
 const MARKER = /^COMPAT\(v(0|[1-9]\d*)\):(.*)$/;
+
 /** The placeholder inside an inline-code span: a backtick before it (checked at the call) and one after it. */
 const PLACEHOLDER = /^COMPAT\(vN\)[^`]*`/;
-// A description ends at its block comment's closer; in a line comment or Markdown prose it runs to the end of the
-// line. A `#` or `//` before the marker is not an opener: "/* See #123. COMPAT(v3): */" sits in the block comment.
+
+// A description ends at its block comment's closer, else at the end of the line; a `#` or `//` before the marker is no opener, so "/* See #123. COMPAT(v3): */" sits in the block comment.
 const BLOCK_OPENER = /\/\*|<!--/g;
+
+/** The closer of each BLOCK_OPENER alternative. */
 const CLOSER_OF: Readonly<Record<string, string>> = { "/*": "*/", "<!--": "-->" };
+
+/** Quoted in every malformed-marker failure. */
 export const SYNTAX = "COMPAT(v<major>): <what stays working and what to delete>";
 
 export interface Marker {
@@ -143,7 +149,9 @@ function packageVersion(cwd: string): { version: string; major: number } {
 }
 
 export interface CheckOptions {
+  /** The repository root, where package.json and the git tree are read. */
   cwd: string;
+
   /** The major a release cuts; defaults to package.json's. Never below it: a release never targets an older major. */
   targetMajor?: number;
 }

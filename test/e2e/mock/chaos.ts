@@ -12,11 +12,7 @@ import type {
 } from "./contract.js";
 import type { Json, MockResponse } from "./support.js";
 
-/**
- * Stable keys so a scenario or the fuzzer faults an inline route like a section endpoint, at the same pipeline point
- * (after target resolution, before the permission gate). The issue-report values derive from ISSUE_REPORT_ENDPOINTS so
- * they cannot drift from the declared routes.
- */
+/** Stable keys so a scenario or the fuzzer faults an inline route like a section endpoint, at the same pipeline point; the issue-report values derive from ISSUE_REPORT_ENDPOINTS so they cannot drift from the declared routes. */
 const CORE_FAULT_KEYS = {
   "core.discoveryList": "GET /user/repos (multi-repo discovery listing)",
   "core.contentsGet": "GET /repos/{owner}/{repo}/contents/{path} (settings-file fetch)",

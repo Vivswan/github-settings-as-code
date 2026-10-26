@@ -1,9 +1,7 @@
 import { branchesSection } from "../../../src/sections/branches/index.js";
 import type { Row } from "../snapshot-roundtrip.js";
 
-// The GET shape: url keys, {enabled} wrappers, actor objects, the checks list spelled twice. The
-// rule surface beside it: main's GraphQL-only fields, and a wildcard rule that alone protects
-// release/1.0, which the snapshot must therefore not write as a literal entry.
+/** The GET shape (url keys, {enabled} wrappers, actor objects, the checks list spelled twice) beside main's GraphQL-only fields and a wildcard rule that alone protects release/1.0, which the snapshot must not write as a literal entry. */
 export const row: Row = {
   section: branchesSection,
   live: {

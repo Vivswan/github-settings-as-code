@@ -7,15 +7,14 @@ import { err, ok, type Result } from "neverthrow";
 import { SLUG_SEGMENT, type SlugKey, slugKey } from "../github/slug.js";
 import type { ProblemOf } from "../problem.js";
 
+/** What every target carries; `origin` is where it came from, for messages: a file path or the input name. */
 interface TargetBase {
   repo: RepoRef;
-  /** Where this target came from, for messages: a file path or the input name. */
   origin: string;
 }
 
 export type CentralTarget = TargetBase & {
   source: "central";
-  /** The checked-in settings file to read. */
   filePath: string;
 };
 
@@ -23,8 +22,7 @@ export type RemoteTarget = TargetBase & { source: "remote" };
 
 export type Target = CentralTarget | RemoteTarget;
 
-// A "." or ".." owner or name is refused here: GitHub names nothing that way, and as a path segment either resolves
-// the request elsewhere (/repos/../x/labels is /x/labels), so no consumer of a RepoRef guards for them.
+// A "." or ".." owner or name is refused here: GitHub names nothing that way, and as a path segment either resolves the request elsewhere (/repos/../x/labels is /x/labels), so no consumer of a RepoRef guards for them.
 const SLUG_RE = new RegExp(String.raw`^(?!\.\.?/)${SLUG_SEGMENT}/(?!\.\.?$)${SLUG_SEGMENT}$`);
 
 /** PARSED ONCE at a validating boundary, so downstream code never re-splits a string; the only constructor derives all three from one value. */

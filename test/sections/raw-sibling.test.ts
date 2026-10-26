@@ -169,35 +169,27 @@ function replacedAt(value: unknown, path: readonly Step[], replacement: unknown)
 
 /** A YAML alias to an ancestor: the raw walk in engine/validate.ts passes a cycle on to the shape, so a rule meets it. */
 const CYCLE: Record<string, unknown> = {};
+
 CYCLE.self = CYCLE;
 
-/**
- * What a failed sibling leaves in a rule's hands: one value of each JSON kind (the string is one a table lookup finds
- * on Object.prototype), the empty and false primitives (each satisfies a guard written for the other kind: a
- * `.length === 0` read, a falsy test, `[0]` of a string), a number that is not one, a mapping no string conversion
- * survives and a cycle JSON.stringify refuses (a bare rendering into a message throws on either), a mapping whose
- * length is such a value (a length check compares it), and absence (a valid one at a node changes nothing).
- */
+/** What a failed sibling leaves in a rule's hands: one value of each JSON kind, and the ones a guard written for another kind lets through. */
 const RAW_VALUES: readonly unknown[] = [
   1,
-  0,
-  Number.NaN,
+  0, // the empty and false primitives each satisfy a guard written for the other kind: a `.length === 0` read, a falsy test, `[0]` of a string
+  Number.NaN, // a number that is not one
   null,
   false,
-  "toString",
+  "toString", // a string a table lookup finds on Object.prototype
   "",
   {},
-  { toString: null },
-  { length: { toString: null } },
-  CYCLE,
+  { toString: null }, // a mapping no string conversion survives: a bare rendering into a message throws
+  { length: { toString: null } }, // a mapping whose length is such a value: a length check compares it
+  CYCLE, // a cycle JSON.stringify refuses
   [],
-  ABSENT,
+  ABSENT, // absence: a valid value at a node changes nothing
 ];
 
-/**
- * A rule that runs only for a specific string (the wildcard sweep of branches) needs a base holding it, which the
- * generated bases cannot know; these are walked the same way, without variants.
- */
+/** Bases a rule that runs only for a specific string (the wildcard sweep of branches) needs, which the generated bases cannot know; walked the same way, without variants. */
 const SEEDED_BASES: Partial<Record<SectionKey, readonly unknown[]>> = {
   branches: [
     [

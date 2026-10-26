@@ -63,10 +63,7 @@ type SectionSlice =
   | { readonly key: string; readonly kind: "slice" | "knob"; readonly slice: z.ZodType }
   | { readonly key: string; readonly kind: "layered"; readonly slice: z.ZodArray<z.ZodType> };
 
-/**
- * The ONE table of sections and their slices: SettingsFile's shape is built from it, so a property is its section's
- * slice by construction. Its order is the published schema's property order; execution order is SECTION_KEYS.
- */
+/** The ONE table of sections and their slices: SettingsFile's shape is built from it, so a property is its section's slice by construction; its order is the published schema's property order, and execution order is SECTION_KEYS. */
 const SECTION_SLICES = [
   { key: "repository", kind: "slice", slice: RepositoryConfig },
   { key: "labels", kind: "knob", slice: LabelConfig },
@@ -127,6 +124,7 @@ const sectionShape = Object.fromEntries(
   SECTION_SLICES.map((section) => [section.key, composed(section)]),
 ) as SectionShape;
 
+/** The whole document: every section's composed slice, optional, and the two directives. */
 export const SettingsFile = z
   .object({
     ...sectionShape,
@@ -136,6 +134,7 @@ export const SettingsFile = z
     _undeclared: UndeclaredPolicySchema.optional(),
   })
   .meta({ id: "SettingsFile" });
+
 export type SettingsFile = z.infer<typeof SettingsFile>;
 
 /** Every recognized top-level section, in execution order. */
@@ -197,11 +196,7 @@ export const UNDECLARED_POLICY_SECTIONS = [
 
 export type UndeclaredPolicySection = (typeof UNDECLARED_POLICY_SECTIONS)[number];
 
-/**
- * Every list section, in execution order: the knobbed ones and the plain lists whose wrapper takes `_layering` alone.
- * The fold (engine/layers.ts) unions each by the key its module declares; ./sections/registry.ts requires that
- * declaration of every member, so a section added here without one fails to compile.
- */
+/** Every list section in execution order, the knobbed ones and the plain lists whose wrapper takes `_layering` alone; the fold unions each by the key its module declares (registry.ts requires it), so a member added here without one fails to compile. */
 export const LIST_SECTIONS = [
   "labels",
   "rulesets",
@@ -263,10 +258,7 @@ type _KnobListSound = MustBeNever<
   Exclude<(typeof UNDECLARED_POLICY_SECTIONS)[number], KnobbedByType>
 >;
 
-/**
- * Sections whose plain form (no wrapper) matches the Probot Settings app schema; docs/start/migrating-from-probot.md
- * is pinned against this list.
- */
+/** Sections whose plain form (no wrapper) matches the Probot Settings app schema; docs/start/migrating-from-probot.md is pinned against this list. */
 export const PROBOT_PARITY_KEYS = [
   "repository",
   "labels",
@@ -276,14 +268,12 @@ export const PROBOT_PARITY_KEYS = [
   "milestones",
 ] as const satisfies readonly SectionKey[];
 
-/**
- * Directives to the merge, not sections: declared on the document so the published schema types them.
- * validateSectionShapes copies only SECTION_KEYS, so none of them reaches the apply path.
- */
+/** Directives to the merge, not sections: declared on the document so the published schema types them; validateSectionShapes copies only SECTION_KEYS, so none of them reaches the apply path. */
 export const DOCUMENT_DIRECTIVE_KEYS = [
   "_layering",
   "_undeclared",
 ] as const satisfies readonly (keyof SettingsFile)[];
+
 type DocumentDirectiveKey = (typeof DOCUMENT_DIRECTIVE_KEYS)[number];
 
 type _UnlistedSection = MustBeNever<Exclude<keyof SettingsFile, SectionKey | DocumentDirectiveKey>>;

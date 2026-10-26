@@ -15,6 +15,7 @@ function issues(entries: unknown[]): readonly string[] | null {
   );
 }
 
+/** A well-formed ed25519 key: the control each refusal is measured against, and the material two entries share. */
 const BOT_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBotBotBotBotBotBotBotBotBotBotBotBotBotBotB";
 
 /** Assembled at runtime so no source line holds the header a secret scanner flags. */

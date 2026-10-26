@@ -18,7 +18,11 @@ type PathStep = string | number | { readonly key: string };
 
 type ListMatch = "key" | "shape" | "value";
 
-/** A phantom is a non-empty declared field the live object has no key for: a typo, or a write-only field. */
+/**
+ * A phantom is a non-empty declared field the live object has no key for: a typo, or a write-only field. An omitted
+ * delta's `nullable` says the slice accepts `null` at its path, so `<key>: null` is the clearing spelling (an object
+ * has no other).
+ */
 export type Delta =
   | {
       readonly kind: "mismatch";
@@ -43,26 +47,28 @@ export type Delta =
       readonly kind: "omitted";
       readonly path: readonly PathStep[];
       readonly live: unknown;
-      /** The slice accepts `null` at this path, so `<key>: null` is the clearing spelling (an object has no other). */
       readonly nullable: boolean;
     };
 
 /** One field, or the fields whose values together identify an item (a bypass actor's type and id). */
 export type MatchKey = string | readonly string[];
 
+/**
+ * How a declaration is compared with the live object. `matchBy` names, per nested list (by dotted object path below
+ * the root, a list item spelled `[]`: `rules`, `rules[].checks`), the item key to pair by; a missing or repeated key
+ * is a declaration bug.
+ *
+ *   a list not named here  -> object items pair by shape, others by value
+ *   matchBy omitted        -> lists fall back to the default `type` pairing subsetDiff callers use
+ *
+ * `replace` says the write replaces the live object whole, so a non-empty live value at a path the declaration omits
+ * is an `omitted` delta; callers project the live object onto the write's keys first, or server-assigned fields count.
+ */
 export interface DeltaOptions {
-  /**
-   * Per nested list (by dotted object path below the root, a list item spelled `[]`: `rules`, `rules[].checks`), the
-   * item key to pair by; a missing or repeated key is a declaration bug.
-   *
-   * a list not named here  -> object items pair by shape, others by value
-   * matchBy omitted        -> lists fall back to the default `type` pairing subsetDiff callers use
-   */
+  /** The item key each nested list pairs by, under the rules above. */
   readonly matchBy?: Readonly<Record<string, MatchKey>>;
-  /**
-   * The write replaces the live object whole, so a non-empty live value at a path the declaration omits is an
-   * `omitted` delta. Callers project the live object onto the write's keys first, or server-assigned fields count.
-   */
+
+  /** The write replaces the live object whole, so what the declaration omits is swept into `omitted` deltas. */
   readonly replace?: ReplaceSweep;
 }
 
@@ -75,6 +81,12 @@ export interface DeltaOptions {
 export interface ReplaceSweep {
   readonly passthrough: readonly string[];
   readonly nullable: readonly string[];
+}
+
+/** Where the walk stands: `path` as renderPath spells it, `keyPath` as a matchBy or passthrough entry names it (dots, `[]` per list item). */
+interface Site {
+  readonly path: readonly PathStep[];
+  readonly keyPath: string;
 }
 
 function isPassthrough(keyPath: string, passthrough: readonly string[]): boolean {
@@ -99,17 +111,100 @@ function isEmptySetting(value: unknown): boolean {
 /** Marks a live field the object has no own key for, as opposed to one holding undefined. */
 const ABSENT: unique symbol = Symbol("no such live key");
 
+function fieldSite(site: Site, key: string): Site {
+  return {
+    path: [...site.path, key],
+    keyPath: site.keyPath === "" ? key : `${site.keyPath}.${key}`,
+  };
+}
+
+function itemSite(site: Site, step: PathStep): Site {
+  return { path: [...site.path, step], keyPath: `${site.keyPath}[]` };
+}
+
 export function deltas(desired: unknown, live: unknown, opts: DeltaOptions = {}): Delta[] {
   const out: Delta[] = [];
-  walk(desired, live, [], "", opts, out);
+  walk(desired, live, { path: [], keyPath: "" }, opts, out);
   return out;
+}
+
+/** The delta for a desired value the live side lacks (`phantom`) or holds in another shape or value (`mismatch`). */
+function unpaired(
+  absent: boolean,
+  path: readonly PathStep[],
+  desired: unknown,
+  live: unknown,
+): Delta {
+  return absent ? { kind: "phantom", path, desired } : { kind: "mismatch", path, desired, live };
+}
+
+/** A scalar's delta, or null: "" tolerates null and an absent key (GitHub's empty), anything else must equal the live value. */
+function scalarDelta(
+  desired: unknown,
+  absent: boolean,
+  live: unknown,
+  path: readonly PathStep[],
+): Delta | null {
+  if (desired === "" && (live === null || live === undefined)) {
+    return null;
+  }
+  return desired === live ? null : unpaired(absent, path, desired, live);
+}
+
+/** Under `replace`, a non-empty live value at a key the declaration omits is an `omitted` delta, outside the passthrough paths. */
+function sweepOmitted(
+  declared: Readonly<Record<string, unknown>>,
+  live: Readonly<Record<string, unknown>>,
+  site: Site,
+  replace: ReplaceSweep,
+  out: Delta[],
+): void {
+  if (isPassthrough(site.keyPath, replace.passthrough)) {
+    return;
+  }
+
+  for (const [key, value] of Object.entries(live)) {
+    const child = fieldSite(site, key);
+    if (
+      Object.hasOwn(declared, key) ||
+      isEmptySetting(value) ||
+      isPassthrough(child.keyPath, replace.passthrough)
+    ) {
+      continue;
+    }
+
+    out.push({
+      kind: "omitted",
+      path: child.path,
+      live: value,
+      nullable: replace.nullable.includes(child.keyPath),
+    });
+  }
+}
+
+/** A declared mapping against the live one: each declared key walked, then the replace sweep over the live keys. */
+function walkMapping(
+  declared: Readonly<Record<string, unknown>>,
+  live: Readonly<Record<string, unknown>>,
+  site: Site,
+  opts: DeltaOptions,
+  out: Delta[],
+): void {
+  for (const [key, value] of Object.entries(declared)) {
+    // hasOwn, not indexing: a key named like a prototype member (toString) must read as absent, not as the inherited function.
+    const child = Object.hasOwn(live, key) ? live[key] : ABSENT;
+    walk(value, child, fieldSite(site, key), opts, out);
+  }
+
+  if (opts.replace !== undefined) {
+    sweepOmitted(declared, live, site, opts.replace, out);
+  }
 }
 
 function walk(
   desired: unknown,
   live: unknown | typeof ABSENT,
-  path: readonly PathStep[],
-  keyPath: string,
+  site: Site,
   opts: DeltaOptions,
   out: Delta[],
 ): void {
@@ -119,64 +214,31 @@ function walk(
     if (liveValue === null || liveValue === undefined || liveValue === "") {
       return;
     }
-    out.push({ kind: "mismatch", path, desired, live: liveValue });
+    out.push({ kind: "mismatch", path: site.path, desired, live: liveValue });
     return;
   }
+
   if (Array.isArray(desired)) {
     if (!Array.isArray(liveValue)) {
-      out.push(
-        absent
-          ? { kind: "phantom", path, desired }
-          : { kind: "mismatch", path, desired, live: liveValue },
-      );
+      out.push(unpaired(absent, site.path, desired, liveValue));
       return;
     }
-    walkList(desired, liveValue, path, keyPath, opts, out);
+    walkList(desired, liveValue, site, opts, out);
     return;
   }
+
   if (typeof desired === "object") {
     if (!isPlainObject(liveValue)) {
-      out.push(
-        absent
-          ? { kind: "phantom", path, desired }
-          : { kind: "mismatch", path, desired, live: liveValue },
-      );
+      out.push(unpaired(absent, site.path, desired, liveValue));
       return;
     }
-    const declared = desired as Record<string, unknown>;
-    for (const [key, value] of Object.entries(declared)) {
-      // hasOwn, not indexing: a key named like a prototype member (toString) must read as absent, not as the inherited function.
-      const child = Object.hasOwn(liveValue, key) ? liveValue[key] : ABSENT;
-      walk(value, child, [...path, key], keyPath === "" ? key : `${keyPath}.${key}`, opts, out);
-    }
-    if (opts.replace !== undefined && !isPassthrough(keyPath, opts.replace.passthrough)) {
-      for (const [key, value] of Object.entries(liveValue)) {
-        const childPath = keyPath === "" ? key : `${keyPath}.${key}`;
-        if (
-          !Object.hasOwn(declared, key) &&
-          !isEmptySetting(value) &&
-          !isPassthrough(childPath, opts.replace.passthrough)
-        ) {
-          out.push({
-            kind: "omitted",
-            path: [...path, key],
-            live: value,
-            nullable: opts.replace.nullable.includes(childPath),
-          });
-        }
-      }
-    }
+    walkMapping(desired as Record<string, unknown>, liveValue, site, opts, out);
     return;
   }
-  if (desired === "" && (liveValue === null || liveValue === undefined)) {
-    return;
-  }
-  if (desired !== liveValue) {
-    out.push(
-      absent
-        ? { kind: "phantom", path, desired }
-        : { kind: "mismatch", path, desired, live: liveValue },
-    );
+
+  const delta = scalarDelta(desired, absent, liveValue, site.path);
+  if (delta !== null) {
+    out.push(delta);
   }
 }
 
@@ -211,73 +273,118 @@ function itemKey(item: unknown, key: MatchKey, keyPath: string, side: "desired" 
   return parts.map((field) => String(item[field])).join(" ");
 }
 
-function walkList(
+/** The live items by their declared key; a repeated key is a declaration bug, not drift. */
+function liveByKey(live: unknown[], key: MatchKey, keyPath: string): Map<string, unknown> {
+  const byKey = new Map<string, unknown>();
+  for (const item of live) {
+    const itemId = itemKey(item, key, keyPath, "live");
+    if (byKey.has(itemId)) {
+      throw new Error(
+        `BUG: matchBy pairs the list "${keyPath}" by ${describeKey(key)}, but the live list repeats ${JSON.stringify(itemId)}`,
+      );
+    }
+    byKey.set(itemId, item);
+  }
+  return byKey;
+}
+
+/** The live items by `type`, the default pairing, only when types are unique on both sides (ruleset rules); null for a list that repeats them (environment reviewers), which pairs by shape instead. */
+function liveByType(desired: unknown[], live: unknown[]): Map<string, unknown> | null {
+  const desiredTypes = desired.map(typeOf);
+  const liveTypes = live.map(typeOf);
+  const typed =
+    desired.length > 0 &&
+    desiredTypes.every((t) => t !== null) &&
+    new Set(desiredTypes).size === desiredTypes.length &&
+    liveTypes.every((t) => t !== null) &&
+    new Set(liveTypes).size === liveTypes.length;
+  if (!typed) {
+    return null;
+  }
+
+  const byType = new Map<string, unknown>();
+  for (const item of live) {
+    byType.set(typeOf(item) as string, item);
+  }
+  return byType;
+}
+
+/** Each declared item against the live item of its key, the rest of the live list undeclared; a repeated declared key is a declaration bug. */
+function walkKeyed(
   desired: unknown[],
-  live: unknown[],
-  path: readonly PathStep[],
-  keyPath: string,
+  byKey: ReadonlyMap<string, unknown>,
+  key: MatchKey,
+  site: Site,
   opts: DeltaOptions,
   out: Delta[],
 ): void {
-  const declaredKey = opts.matchBy?.[keyPath];
-  if (declaredKey !== undefined) {
-    const liveByKey = new Map<string, unknown>();
-    for (const item of live) {
-      const key = itemKey(item, declaredKey, keyPath, "live");
-      if (liveByKey.has(key)) {
-        throw new Error(
-          `BUG: matchBy pairs the list "${keyPath}" by ${describeKey(declaredKey)}, but the live list repeats ${JSON.stringify(key)}`,
-        );
-      }
-      liveByKey.set(key, item);
-    }
-    walkKeyed(desired, liveByKey, declaredKey, path, keyPath, opts, out);
-    return;
-  }
-  if (opts.matchBy === undefined) {
-    // The default pairing matches by `type` only when types are unique on both sides (ruleset rules); environment reviewers
-    // repeat types and fall through to shape pairing below.
-    const desiredTypes = desired.map(typeOf);
-    const liveTypes = live.map(typeOf);
-    const typed =
-      desired.length > 0 &&
-      desiredTypes.every((t) => t !== null) &&
-      new Set(desiredTypes).size === desiredTypes.length &&
-      liveTypes.every((t) => t !== null) &&
-      new Set(liveTypes).size === liveTypes.length;
-    if (typed) {
-      const liveByType = new Map<string, unknown>();
-      for (const item of live) {
-        liveByType.set(typeOf(item) as string, item);
-      }
-      walkKeyed(desired, liveByType, "type", path, keyPath, opts, out);
-      return;
-    }
-  }
-  const objectList = desired.length > 0 && desired.every(isPlainObject);
-  if (objectList) {
-    // Order-insensitive; a live item nothing pairs with is undeclared because a full-payload write would remove it.
-    // Items pair on the declared fields alone, so under `replace` a paired item's extra live fields read as omitted.
-    const { replace: _replace, ...subset } = opts;
-    const liveItems = [...live];
-    for (const [index, item] of desired.entries()) {
-      const matchIndex = liveItems.findIndex(
-        (candidate) => deltas(item, candidate, subset).length === 0,
+  const declared = new Set<string>();
+  for (const item of desired) {
+    const itemId = itemKey(item, key, site.keyPath, "desired");
+    if (declared.has(itemId)) {
+      throw new Error(
+        `BUG: matchBy pairs the list "${site.keyPath}" by ${describeKey(key)}, but the declared list repeats ${JSON.stringify(itemId)}`,
       );
-      if (matchIndex === -1) {
-        out.push({ kind: "missing", path: [...path, index], desired: item, match: "shape" });
-      } else {
-        if (opts.replace !== undefined) {
-          walk(item, liveItems[matchIndex], [...path, index], `${keyPath}[]`, opts, out);
-        }
-        liveItems.splice(matchIndex, 1);
-      }
     }
-    for (const leftover of liveItems) {
-      out.push({ kind: "undeclared", path, live: leftover, match: "shape" });
+    declared.add(itemId);
+    const match = byKey.get(itemId);
+    const at = itemSite(site, { key: itemId });
+    if (match === undefined) {
+      out.push({ kind: "missing", path: at.path, desired: item, match: "key" });
+    } else {
+      walk(item, match, at, opts, out);
     }
-    return;
   }
+
+  for (const [itemId, item] of byKey) {
+    if (!declared.has(itemId)) {
+      out.push({
+        kind: "undeclared",
+        path: [...site.path, { key: itemId }],
+        live: item,
+        match: "key",
+      });
+    }
+  }
+}
+
+/** Mapping items pair by shape, order-insensitive, on the declared fields alone: a live item nothing pairs with is undeclared because a full-payload write would remove it, and under `replace` a paired item's extra live fields read as omitted. */
+function walkByShape(
+  desired: unknown[],
+  live: unknown[],
+  site: Site,
+  opts: DeltaOptions,
+  out: Delta[],
+): void {
+  const { replace: _replace, ...subset } = opts;
+  const liveItems = [...live];
+  for (const [index, item] of desired.entries()) {
+    const matchIndex = liveItems.findIndex(
+      (candidate) => deltas(item, candidate, subset).length === 0,
+    );
+    if (matchIndex === -1) {
+      out.push({ kind: "missing", path: [...site.path, index], desired: item, match: "shape" });
+      continue;
+    }
+
+    if (opts.replace !== undefined) {
+      walk(item, liveItems[matchIndex], itemSite(site, index), opts, out);
+    }
+    liveItems.splice(matchIndex, 1);
+  }
+
+  for (const leftover of liveItems) {
+    out.push({ kind: "undeclared", path: site.path, live: leftover, match: "shape" });
+  }
+}
+
+/** Any other list (scalars, an empty one, mixed items) pairs by value: the first occurrence of a value the other side lacks is one delta. */
+function walkByValue(
+  desired: unknown[],
+  live: unknown[],
+  path: readonly PathStep[],
+  out: Delta[],
+): void {
   const desiredSet = new Set(desired.map((v) => JSON.stringify(v)));
   const liveSet = new Set(live.map((v) => JSON.stringify(v)));
   for (const [index, value] of desired.entries()) {
@@ -286,6 +393,7 @@ function walkList(
       out.push({ kind: "missing", path, desired: value, match: "value" });
     }
   }
+
   for (const [index, value] of live.entries()) {
     const json = JSON.stringify(value);
     if (!desiredSet.has(json) && live.findIndex((v) => JSON.stringify(v) === json) === index) {
@@ -294,37 +402,32 @@ function walkList(
   }
 }
 
-function walkKeyed(
+/** The pairing a list takes: its matchBy key, else `type` when no matchBy was given and types are unique, else shape for mapping items, else value. */
+function walkList(
   desired: unknown[],
-  liveByKey: ReadonlyMap<string, unknown>,
-  key: MatchKey,
-  path: readonly PathStep[],
-  keyPath: string,
+  live: unknown[],
+  site: Site,
   opts: DeltaOptions,
   out: Delta[],
 ): void {
-  const declared = new Set<string>();
-  for (const item of desired) {
-    const itemId = itemKey(item, key, keyPath, "desired");
-    if (declared.has(itemId)) {
-      throw new Error(
-        `BUG: matchBy pairs the list "${keyPath}" by ${describeKey(key)}, but the declared list repeats ${JSON.stringify(itemId)}`,
-      );
-    }
-    declared.add(itemId);
-    const match = liveByKey.get(itemId);
-    const at = [...path, { key: itemId }];
-    if (match === undefined) {
-      out.push({ kind: "missing", path: at, desired: item, match: "key" });
-    } else {
-      walk(item, match, at, `${keyPath}[]`, opts, out);
-    }
+  const declaredKey = opts.matchBy?.[site.keyPath];
+  if (declaredKey !== undefined) {
+    walkKeyed(desired, liveByKey(live, declaredKey, site.keyPath), declaredKey, site, opts, out);
+    return;
   }
-  for (const [itemId, item] of liveByKey) {
-    if (!declared.has(itemId)) {
-      out.push({ kind: "undeclared", path: [...path, { key: itemId }], live: item, match: "key" });
-    }
+
+  const byType = opts.matchBy === undefined ? liveByType(desired, live) : null;
+  if (byType !== null) {
+    walkKeyed(desired, byType, "type", site, opts, out);
+    return;
   }
+
+  if (desired.length > 0 && desired.every(isPlainObject)) {
+    walkByShape(desired, live, site, opts, out);
+    return;
+  }
+
+  walkByValue(desired, live, site.path, out);
 }
 
 /**
@@ -332,15 +435,17 @@ function walkKeyed(
  * the path as a settings-file reader would spell it.
  */
 export function renderPath(root: string, path: readonly PathStep[]): string {
-  return path.reduce<string>(
-    (at, step) =>
-      typeof step === "string"
-        ? at === ""
-          ? step
-          : `${at}.${step}`
-        : `${at}[${typeof step === "number" ? step : step.key}]`,
-    root,
-  );
+  let at = root;
+  for (const step of path) {
+    if (typeof step === "number") {
+      at = `${at}[${step}]`;
+    } else if (typeof step === "string") {
+      at = at === "" ? step : `${at}.${step}`;
+    } else {
+      at = `${at}[${step.key}]`;
+    }
+  }
+  return at;
 }
 
 function mismatchLine(at: string, desired: unknown, live: unknown): string {
@@ -377,6 +482,30 @@ function emptyFor(live: unknown): string | null {
   }
 }
 
+/** The line for a declared item the live list lacks, worded by the pairing that looked for it. */
+function missingLine(at: string, match: ListMatch, desired: unknown): string {
+  switch (match) {
+    case "key":
+      return `${at}: missing live`;
+    case "shape":
+      return `${at}: no matching live entry for ${JSON.stringify(desired)}`;
+    case "value":
+      return `${at}: missing ${JSON.stringify(desired)}`;
+  }
+}
+
+/** The line for a live item the declaration lacks, worded by the pairing that met it. */
+function undeclaredLine(at: string, match: ListMatch, live: unknown): string {
+  switch (match) {
+    case "key":
+      return `${at}: present live but not declared`;
+    case "shape":
+      return `${at}: live entry not declared: ${JSON.stringify(live)}`;
+    case "value":
+      return `${at}: unexpected ${JSON.stringify(live)}`;
+  }
+}
+
 export function renderDelta(root: string, delta: Delta): string {
   const at = renderPath(root, delta.path);
   switch (delta.kind) {
@@ -385,17 +514,9 @@ export function renderDelta(root: string, delta: Delta): string {
     case "phantom":
       return mismatchLine(at, delta.desired, undefined);
     case "missing":
-      return delta.match === "key"
-        ? `${at}: missing live`
-        : delta.match === "shape"
-          ? `${at}: no matching live entry for ${JSON.stringify(delta.desired)}`
-          : `${at}: missing ${JSON.stringify(delta.desired)}`;
+      return missingLine(at, delta.match, delta.desired);
     case "undeclared":
-      return delta.match === "key"
-        ? `${at}: present live but not declared`
-        : delta.match === "shape"
-          ? `${at}: live entry not declared: ${JSON.stringify(delta.live)}`
-          : `${at}: unexpected ${JSON.stringify(delta.live)}`;
+      return undeclaredLine(at, delta.match, delta.live);
     case "omitted": {
       const key = renderPath("", delta.path);
       const empty = delta.nullable ? "null" : emptyFor(delta.live);

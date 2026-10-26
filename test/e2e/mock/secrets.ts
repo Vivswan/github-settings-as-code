@@ -11,8 +11,6 @@ import sodium from "libsodium-wrappers";
 
 export const MOCK_SECRETS_PUBLIC_KEY = "G68uvmju1lvQh0Pd06U8yh3vlO0JsWLMQR7v3mIpSWc=";
 
-const MOCK_SECRETS_PRIVATE_KEY = "RoPFQaBuTO6VMxNqrLqb3QyW2FOWCmRBwDpyziVyXHs="; // gitleaks:allow
-
 export const MOCK_SECRETS_KEY_ID = "568250167242549743";
 
 export function mockSodiumReady(): Promise<void> {
@@ -25,12 +23,15 @@ export function mockSodiumReady(): Promise<void> {
  * ciphertext's base64 round-trip.
  */
 export function unsealSecretValue(encryptedValueB64: string): string | null {
+  // The private half sits beside its one reader: gitleaks' allow directive must share the literal's line, a trailing
+  // comment the member-shape check refuses on a module constant.
+  const privateKey = "RoPFQaBuTO6VMxNqrLqb3QyW2FOWCmRBwDpyziVyXHs="; // gitleaks:allow
   try {
     const sealed = sodium.from_base64(encryptedValueB64, sodium.base64_variants.ORIGINAL);
     const opened = sodium.crypto_box_seal_open(
       sealed,
       sodium.from_base64(MOCK_SECRETS_PUBLIC_KEY, sodium.base64_variants.ORIGINAL),
-      sodium.from_base64(MOCK_SECRETS_PRIVATE_KEY, sodium.base64_variants.ORIGINAL),
+      sodium.from_base64(privateKey, sodium.base64_variants.ORIGINAL),
     );
     return sodium.to_string(opened);
   } catch {

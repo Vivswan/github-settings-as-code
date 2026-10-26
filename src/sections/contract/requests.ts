@@ -35,6 +35,24 @@ export type OptsArg<E extends EndpointDecl, Extra> = [PathParams<E["route"]>] ex
   ? [opts?: { params?: undefined } & Extra]
   : [opts: { params: Readonly<Record<PathParams<E["route"]>, string>> } & Extra];
 
+/**
+ * One list read's pages: `extract` selects the list from a page's body (a bare array, or a {total_count, <key>: []}
+ * envelope) and answers null for a page without one, which `shape` names in the malformed line.
+ */
+interface PageWalk {
+  readonly path: string;
+  readonly extract: (data: unknown) => unknown[] | null;
+  readonly shape: string;
+  readonly describe?: string;
+}
+
+/** One page of a GraphQL connection as the loop reads it: the nodes, and whether and where the walk continues. */
+interface ConnectionPage {
+  readonly nodes: unknown[];
+  readonly hasNextPage: boolean;
+  readonly endCursor: unknown;
+}
+
 /** The client's `failed` line as the section's failure: no status classifies it, so the line stands as given. */
 function unanswered(failed: string): SectionFailure {
   return { kind: "transport", message: failed };
@@ -241,16 +259,13 @@ export async function probeAbsent<E extends EndpointDecl>(
   return ok({ data: result.data });
 }
 
-/** `extract` selects the list from one page's body (bare array, or a {total_count, <key>: []} envelope). */
 async function listPages(
   ctx: SectionContext,
   section: SectionMeta,
   endpoint: EndpointDecl,
-  path: string,
-  extract: (data: unknown) => unknown[] | null,
-  shape: string,
-  describe?: string,
+  walk: PageWalk,
 ): Promise<Result<unknown[], SectionFailure>> {
+  const { path, extract, shape, describe } = walk;
   // A page without the list ends the walk there, so its malformed diagnosis stands ahead of whatever a later page
   // would answer.
   const result = await ctx.api.tryList(path, {
@@ -287,15 +302,12 @@ export async function listAll<E extends EndpointDecl>(
 ): Promise<Result<unknown[], SectionFailure>> {
   const opts = args[0];
   const path = expand(endpoint, ctx, opts?.params, opts?.query);
-  return listPages(
-    ctx,
-    section,
-    endpoint,
+  return listPages(ctx, section, endpoint, {
     path,
-    (data) => (Array.isArray(data) ? data : null),
-    "a list",
-    opts?.describe,
-  );
+    extract: (data) => (Array.isArray(data) ? data : null),
+    shape: "a list",
+    describe: opts?.describe,
+  });
 }
 
 /** For endpoints wrapping the list in an envelope (GET /actions/workflows returns {total_count, workflows: []}). */
@@ -308,18 +320,15 @@ export async function listAllEnveloped<E extends EndpointDecl>(
 ): Promise<Result<unknown[], SectionFailure>> {
   const opts = args[0];
   const path = expand(endpoint, ctx, opts?.params, opts?.query);
-  return listPages(
-    ctx,
-    section,
-    endpoint,
+  return listPages(ctx, section, endpoint, {
     path,
-    (data) => {
+    extract: (data) => {
       const chunk = (data as Record<string, unknown> | null)?.[envelopeKey];
       return Array.isArray(chunk) ? chunk : null;
     },
-    `a "${envelopeKey}" list`,
-    opts?.describe,
-  );
+    shape: `a "${envelopeKey}" list`,
+    describe: opts?.describe,
+  });
 }
 
 /** The GraphQL sibling of call(); the failing request renders as `GRAPHQL <opName>` where a REST error shows method and path. */
@@ -361,8 +370,9 @@ function graphqlErrorTolerated(
 
 /**
  * Tolerated error types come back as { error }; the set defaults to the declared outcomes, and an explicit
- * `tolerate` only tolerates FEWER. Tolerance reads the OBSERVED GraphQL types (graphqlErrorTolerated),
- * never the folded HTTP status.
+ * `tolerate` only tolerates FEWER (graphqlOp keeps the literal `outcomes` keys, so a tolerate naming an undeclared
+ * type does not compile). Tolerance reads the OBSERVED GraphQL types (graphqlErrorTolerated), never the folded
+ * HTTP status.
  */
 export async function tryCallGraphql<O extends GraphqlOpDecl>(
   ctx: SectionContext,
@@ -370,7 +380,6 @@ export async function tryCallGraphql<O extends GraphqlOpDecl>(
   op: O,
   variables: Readonly<GraphqlVariablesOf<O>>,
   opts?: {
-    // graphqlOp preserves the literal `outcomes` keys, so a tolerate naming an undeclared type does not compile.
     tolerate?: readonly (keyof O["outcomes"] & GraphqlTolerableError)[];
     describe?: string;
   },
@@ -388,11 +397,56 @@ export async function tryCallGraphql<O extends GraphqlOpDecl>(
   return ok(result);
 }
 
+/** The connection a page's data carries under `path`, or null when it lacks nodes or pageInfo.hasNextPage. */
+function connectionOf(
+  data: Record<string, unknown>,
+  path: readonly string[],
+): ConnectionPage | null {
+  const connection = path.reduce<unknown>(
+    (node, key) => (node as Record<string, unknown> | null)?.[key],
+    data,
+  ) as { nodes?: unknown; pageInfo?: { hasNextPage?: unknown; endCursor?: unknown } } | null;
+  const nodes = connection?.nodes;
+  const pageInfo = connection?.pageInfo;
+  if (!Array.isArray(nodes) || typeof pageInfo?.hasNextPage !== "boolean") {
+    return null;
+  }
+  return { nodes, hasNextPage: pageInfo.hasNextPage, endCursor: pageInfo.endCursor };
+}
+
 /**
- * The cursor loop lives here so paging cannot drift between sections. Declared error outcomes come back
- * as { error } only on the FIRST page: absence describes the whole resource, and a tolerated type
- * mid-walk means the connection vanished under the loop.
+ * One page of the walk. A declared error outcome comes back as { error } only on the FIRST page (a null cursor):
+ * absence describes the whole resource, and a tolerated type mid-walk means the connection vanished under the loop.
  */
+async function connectionPage(
+  ctx: SectionContext,
+  section: SectionMeta,
+  op: GraphqlPaginatedReadDecl,
+  variables: Readonly<Record<string, unknown>>,
+  cursor: string | null,
+): Promise<Result<{ page: ConnectionPage } | { error: ApiError }, SectionFailure>> {
+  const result = await ctx.api.tryGraphql(op, { ...variables, cursor }, ctx.repo.slug);
+  if ("failed" in result) {
+    return err(unanswered(result.failed));
+  }
+  if ("error" in result) {
+    if (cursor === null && graphqlErrorTolerated(result.error, toleratedGraphqlErrors(op))) {
+      return ok(result);
+    }
+    return err(failureFor(section, "GRAPHQL", op.name, result.error, { op }));
+  }
+  const page = connectionOf(result.data, op.connection.path);
+  if (page === null) {
+    const path = op.connection.path.join(".");
+    return err({
+      kind: "malformed",
+      message: `${section.key}: GRAPHQL ${op.name} returned a response without a "${path}" connection carrying nodes and pageInfo{hasNextPage, endCursor}, so the list cannot be paginated. The operation's query must select both under that path`,
+    });
+  }
+  return ok({ page });
+}
+
+/** The cursor loop lives here so paging cannot drift between sections. */
 export async function listGraphqlConnection<O extends GraphqlPaginatedReadDecl>(
   ctx: SectionContext,
   section: SectionMeta,
@@ -400,42 +454,27 @@ export async function listGraphqlConnection<O extends GraphqlPaginatedReadDecl>(
   // The `cursor?: never` pin: the loop owns the variable, so a call site supplying its own does not compile.
   variables: Readonly<GraphqlVariablesOf<O>> & { cursor?: never },
 ): Promise<Result<{ items: unknown[] } | { error: ApiError }, SectionFailure>> {
-  const path = op.connection.path;
   const items: unknown[] = [];
   let cursor: string | null = null;
   for (;;) {
-    const result = await ctx.api.tryGraphql(op, { ...variables, cursor }, ctx.repo.slug);
-    if ("failed" in result) {
-      return err(unanswered(result.failed));
+    const answered = await connectionPage(ctx, section, op, variables, cursor);
+    if (answered.isErr()) {
+      return err(answered.error);
     }
+    const result = answered.value;
     if ("error" in result) {
-      if (cursor === null && graphqlErrorTolerated(result.error, toleratedGraphqlErrors(op))) {
-        return ok(result);
-      }
-      return err(failureFor(section, "GRAPHQL", op.name, result.error, { op }));
+      return ok(result);
     }
-    const connection = path.reduce<unknown>(
-      (node, key) => (node as Record<string, unknown> | null)?.[key],
-      result.data,
-    ) as { nodes?: unknown; pageInfo?: { hasNextPage?: unknown; endCursor?: unknown } } | null;
-    const nodes = connection?.nodes;
-    const pageInfo = connection?.pageInfo;
-    if (!Array.isArray(nodes) || typeof pageInfo?.hasNextPage !== "boolean") {
-      return err({
-        kind: "malformed",
-        message: `${section.key}: GRAPHQL ${op.name} returned a response without a "${path.join(".")}" connection carrying nodes and pageInfo{hasNextPage, endCursor}, so the list cannot be paginated. The operation's query must select both under that path`,
-      });
-    }
+    const { nodes, hasNextPage, endCursor } = result.page;
     items.push(...nodes);
-    if (!pageInfo.hasNextPage) {
+    if (!hasNextPage) {
       return ok({ items });
     }
-    const endCursor = pageInfo.endCursor;
     if (typeof endCursor !== "string" || endCursor === cursor) {
       // hasNextPage without a fresh endCursor would loop forever.
       return err({
         kind: "malformed",
-        message: `${section.key}: GRAPHQL ${op.name} reported hasNextPage without a new endCursor at "${path.join(".")}", so the pagination cannot advance. The operation's query must select pageInfo{hasNextPage, endCursor}`,
+        message: `${section.key}: GRAPHQL ${op.name} reported hasNextPage without a new endCursor at "${op.connection.path.join(".")}", so the pagination cannot advance. The operation's query must select pageInfo{hasNextPage, endCursor}`,
       });
     }
     cursor = endCursor;

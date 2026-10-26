@@ -29,6 +29,11 @@ function workflowPath(declared: string): string {
   return declared.includes("/") ? declared : `.github/workflows/${declared}`;
 }
 
+/** Every disabled_* live state is "disabled": the effective state plan() compares and snapshot() reads back. */
+function effectiveState(workflow: LiveWorkflow): "active" | "disabled" {
+  return workflow.state === "active" ? "active" : "disabled";
+}
+
 /**
  * The workflows that still have a file, by path, under the duplicate-live guard; plan() and snapshot()
  * both index through it. A "deleted" workflow has no file behind it anymore, so it is absent.
@@ -92,7 +97,7 @@ export const workflowsSection = {
             );
             continue;
           }
-          const liveState = match.state === "active" ? "active" : "disabled";
+          const liveState = effectiveState(match);
           if (liveState === workflow.state) {
             continue;
           }
@@ -117,8 +122,7 @@ export const workflowsSection = {
         return plan;
       });
   },
-  // Every disabled_* live state reads back as "disabled", the effective state apply compares; a
-  // "deleted" workflow has no file and would only plan as unfixable drift, so it is left out.
+  // A "deleted" workflow has no file and would only plan as unfixable drift, so it is left out.
   async snapshot(ctx) {
     return ctx.read.list
       .listAllEnveloped("workflows", LiveWorkflow)
@@ -129,10 +133,7 @@ export const workflowsSection = {
           return { value: undefined, notes: [] };
         }
         return {
-          value: present.map((w) => ({
-            path: w.path,
-            state: w.state === "active" ? ("active" as const) : ("disabled" as const),
-          })),
+          value: present.map((w) => ({ path: w.path, state: effectiveState(w) })),
           notes: [],
         };
       });

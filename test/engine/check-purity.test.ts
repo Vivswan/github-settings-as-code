@@ -13,10 +13,7 @@ import { SECTION_KEYS } from "../../src/schema.js";
 import { MOCK_SECRETS_KEY_ID, MOCK_SECRETS_PUBLIC_KEY } from "../e2e/mock/secrets.js";
 import { MockApi } from "../mock-api.js";
 
-/**
- * Declared values chosen to MISMATCH the live data below, so every handler walks its drift paths rather than the clean early returns; the wrapped
- * declarations exercise both undeclared-policy settings.
- */
+/** Declared values chosen to MISMATCH the live data below, so every handler walks its drift paths rather than the clean early returns; the wrapped declarations exercise both undeclared-policy settings. */
 const FIXTURES: Record<SectionKey, unknown> = {
   repository: { description: "declared", enable_vulnerability_alerts: true },
   labels: { _undeclared: "keep", entries: [{ name: "bug", color: "d73a4a" }] },

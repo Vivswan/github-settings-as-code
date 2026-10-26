@@ -90,32 +90,33 @@ describe("coverage gaps anti-test", () => {
   }
 
   // Each REST {param} becomes a placeholder segment, since matchesTemplate takes a CONCRETE path.
+  function collisionsOf(
+    gap: string,
+    routes: ReadonlyArray<Route>,
+    ops: ReadonlyArray<GraphqlDocument & { readonly name: string }>,
+  ): string[] {
+    const { method, target } = parseGap(gap);
+    if (method === "GraphQL") {
+      return ops
+        .filter((op) => rootFields(op).includes(target))
+        .map((op) => `${gap} -> ${op.name}`);
+    }
+    const concrete = target.replace(/\{[^}]+\}/g, "_param_");
+    return routes
+      .filter(
+        (route) =>
+          endpointMethod(route) === method && matchesTemplate(endpointPath(route), concrete),
+      )
+      .map((route) => `${gap} -> ${route}`);
+  }
+
+  /** Every gap endpoint that a registered endpoint or operation answers, as `gap -> match` lines in row order. */
   function gapCollisions(
     rows: readonly GapRow[],
     routes: ReadonlyArray<Route>,
     ops: ReadonlyArray<GraphqlDocument & { readonly name: string }>,
   ): string[] {
-    const collisions: string[] = [];
-    for (const row of rows) {
-      for (const gap of row.endpoints) {
-        const { method, target } = parseGap(gap);
-        if (method === "GraphQL") {
-          for (const op of ops) {
-            if (rootFields(op).includes(target)) {
-              collisions.push(`${gap} -> ${op.name}`);
-            }
-          }
-          continue;
-        }
-        const concrete = target.replace(/\{[^}]+\}/g, "_param_");
-        for (const route of routes) {
-          if (endpointMethod(route) === method && matchesTemplate(endpointPath(route), concrete)) {
-            collisions.push(`${gap} -> ${route}`);
-          }
-        }
-      }
-    }
-    return collisions;
+    return rows.flatMap((row) => row.endpoints.flatMap((gap) => collisionsOf(gap, routes, ops)));
   }
 
   test("no gap endpoint matches a registered endpoint or GraphQL operation", () => {

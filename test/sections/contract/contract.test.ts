@@ -865,26 +865,26 @@ describe("planContext read port", () => {
     // The same at the type level, on the section declaring every kind of role.
     const ctx = planContext(environmentsSection, new MockApi({}), REPO);
     // @ts-expect-error a REST write role is not on the port
-    ctx.read.update;
+    void ctx.read.update;
     // @ts-expect-error nor a GraphQL mutation
-    ctx.read.pin;
+    void ctx.read.pin;
     // @ts-expect-error nor a role the section never declared
-    ctx.read.typo;
+    void ctx.read.typo;
     // @ts-expect-error nor the raw client: every request goes through a bound read
-    ctx.api;
+    void ctx.api;
     // A posture narrows the helpers: an "absent" primary read offers no must-succeed call and neither list,
     // @ts-expect-error
-    ctx.read.probe.call;
+    void ctx.read.probe.call;
     // @ts-expect-error
-    ctx.read.probe.listAll;
+    void ctx.read.probe.listAll;
     // @ts-expect-error
-    ctx.read.probe.listAllEnveloped;
+    void ctx.read.probe.listAllEnveloped;
     // a "denied" one no 404-tolerant helper.
     const denied = planContext(rulesetsSection, new MockApi({}), REPO);
     // @ts-expect-error
-    denied.read.list.probeAbsent;
+    void denied.read.list.probeAbsent;
     // @ts-expect-error
-    denied.read.list.tryCall;
+    void denied.read.list.tryCall;
     expect([typeof ctx.read.probe.probeAbsent, typeof denied.read.list.listAll]).toEqual([
       "function",
       "function",
@@ -919,13 +919,13 @@ describe("planContext read port", () => {
     });
     const ctx = planContext(advisory, api, REPO);
     // @ts-expect-error an advisory read offers no must-succeed call
-    ctx.read.probe.call;
+    void ctx.read.probe.call;
     // @ts-expect-error nor an absence probe
-    ctx.read.probe.probeAbsent;
+    void ctx.read.probe.probeAbsent;
     // @ts-expect-error nor a list
-    ctx.read.probe.listAll;
+    void ctx.read.probe.listAll;
     // @ts-expect-error nor an enveloped list
-    ctx.read.probe.listAllEnveloped;
+    void ctx.read.probe.listAllEnveloped;
     expect(await ctx.read.probe.tryCall(z.unknown(), { params: { branch: "main" } })).toEqual(
       ok({ error: { status: 500, message: "Internal Server Error", body: "" } }),
     );
@@ -956,7 +956,7 @@ describe("planContext read port", () => {
     } as const satisfies SectionMeta;
     const ctx = planContext(both, new MockApi({}), REPO);
     // @ts-expect-error the denied posture's call is not offered under advisory
-    ctx.read.probe.call;
+    void ctx.read.probe.call;
   });
 
   test("an execution-phase read demands the ExecTools token only a thunk holds, REST and GraphQL alike", async () => {
@@ -1269,9 +1269,15 @@ describe("a marked request's failure is rebuilt on the engine's side of the clie
     ).then(unwrap);
 
   test.each<{
+    /** The wire and the client's answer, as the case title. */
     wire: string;
+
+    /** The call under test. */
     run: () => Promise<unknown>;
+
+    /** The whole message the thrown error carries. */
     thrown: string;
+
     /** The rebuilt failure's kind; absent where the client's own throw passes through untouched. */
     kind?: SectionFailure["kind"];
   }>([

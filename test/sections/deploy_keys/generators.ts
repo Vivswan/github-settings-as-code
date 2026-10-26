@@ -1,5 +1,6 @@
 /**
- * The deploy_keys fuzz generator fragment.
+ * The deploy_keys fuzz generator fragment. The pool's key comments are load-bearing: the mock strips them on storage
+ * the way GitHub does, so a converging apply proves the section compares algorithm + blob, not the string.
  */
 
 import { deployKeysSection } from "../../../src/sections/deploy_keys/index.js";
@@ -14,12 +15,7 @@ import {
 } from "../../e2e/generators/gen-support.js";
 import type { Rng } from "../../e2e/generators/prng.js";
 
-/**
- * Each title owns one blob, DISTINCT from the others (GitHub rejects a reused public key with a 422, and the section
- * refuses the pair at validation), so two layers naming one title agree on its material and two titles never share
- * one. The comments are load-bearing: the mock strips them on storage the way GitHub does, so a converging apply
- * proves the section compares algorithm + blob, not the string.
- */
+/** Each title owns one blob, distinct from the others (GitHub 422s a reused public key and the section refuses the pair), so two layers naming one title agree on its material. */
 const DEPLOY_KEY_POOL = {
   bot: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIE2e2eFuzzAlphaAlphaAlphaAlphaAlphaAlphaAlph deploy@alpha",
   ci: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIE2e2eFuzzBravoBravoBravoBravoBravoBravoBrav deploy@bravo",
@@ -29,8 +25,10 @@ const DEPLOY_KEY_POOL = {
     "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTZAAAAIbmlzdHAyNTYAAABBBe2e deploy@delta",
 } as const;
 
+/** The pool's titles in declaration order; genDeployKeys walks a run of them from a random start. */
 const DEPLOY_KEY_TITLES = Object.keys(DEPLOY_KEY_POOL) as (keyof typeof DEPLOY_KEY_POOL)[];
 
+/** The generator for one title, its key pinned to that title's blob. */
 const genDeployKey = (title: keyof typeof DEPLOY_KEY_POOL) =>
   generatorFromSlice(DeployKeyConfig, {
     fields: { title: () => `deploy-${title}`, key: () => DEPLOY_KEY_POOL[title] },

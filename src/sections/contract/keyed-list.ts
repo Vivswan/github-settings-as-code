@@ -19,31 +19,22 @@ import {
  * layer's to choose, never the module's.
  */
 export interface KeyedListLayering {
-  /**
-   * Folded as the planner folds them (a label claims its name plus its pre-rename name); null when the
-   * entry carries none, which the layer boundary refuses.
-   */
+  /** Folded as the planner folds them (a label claims its name plus its pre-rename name); null when the entry carries none, which the layer boundary refuses. */
   readonly keys: (entry: Readonly<Record<string, unknown>>) => readonly string[] | null;
+
   /** The entry field the keys come from, for refusal prose ("name", "type"). */
   readonly keyField: string;
+
   /** The field's kind in the same prose ("string" unless said otherwise; a reviewer's `id` is "numeric"). */
   readonly keyKind?: string;
-  /**
-   * Fields of a merged entry that are themselves keyed lists (rulesets' `rules`, an environment's `variables`). A
-   * nested list arrives as a bare list or a nested `{_undeclared, entries}` wrapper and unions by its own key under
-   * the directive its entry inherits; its wrapper takes no `_layering` (nestedKnobbed in ../shared/schema-helpers.ts).
-   */
+
+  /** Entry fields that are themselves keyed lists (rulesets' `rules`, an environment's `variables`), each unioning by its own key under the directive its entry inherits. */
   readonly nested?: Readonly<Record<string, KeyedListLayering>>;
-  /**
-   * The dotted paths a `_remove: true` entry may carry beside the marker: the key field's own unless the key spans
-   * several (a reviewer is its `type` and `id`). Any other path on a removal is refused at the layer boundary by name.
-   */
+
+  /** The dotted paths a `_remove: true` entry may carry beside the marker, the key field's own when omitted (a reviewer's are `type` and `id`); the layer boundary refuses any other by name. */
   readonly removalPaths?: readonly string[];
-  /**
-   * A NESTED list's `_undeclared` default (an environment's variables), the last fallback engine/undeclared.ts resolves a
-   * nested wrapper without a policy to; absent on a nested list that takes no knob (a ruleset's rules, reviewers).
-   * test/sections/registry.test.ts pins it to the nested wrappers the schema declares.
-   */
+
+  /** A nested list's `_undeclared` default (an environment's variables), engine/undeclared.ts's last fallback for a policy-less nested wrapper; absent where the nested list takes no knob (a ruleset's rules), as test/sections/registry.test.ts pins. */
   readonly undeclaredDefault?: UndeclaredPolicy;
 }
 

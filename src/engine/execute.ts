@@ -4,10 +4,10 @@
  * classifies, beside what landed before it.
  */
 
-import { ok } from "neverthrow";
+import { err, ok, type Result } from "neverthrow";
 import type { RepoRef } from "../discovery/targets.js";
 import type { GitHubClient } from "../github/api.js";
-import { endpointMethod } from "../sections/contract/endpoints.js";
+import { type EndpointDecl, endpointMethod } from "../sections/contract/endpoints.js";
 import { type SectionFailure, sectionFailure, thrown } from "../sections/contract/errors.js";
 import type { SectionContext, SectionMeta } from "../sections/contract/module.js";
 import type { ExecTools, SectionPlan } from "../sections/contract/plan.js";
@@ -28,6 +28,19 @@ interface PlanExecutionBase {
 type PlanExecution =
   | (PlanExecutionBase & { readonly status: "applied" })
   | (PlanExecutionBase & { readonly status: "failed"; readonly failure: SectionFailure });
+
+type PlannedOp = SectionPlan["ops"][number];
+
+/** What the operations of one plan share: the section and the context its requests go out under. */
+interface PlanRun {
+  readonly ctx: SectionContext;
+  readonly section: SectionMeta;
+}
+
+/** What one operation's request ended in: a response GitHub accepted, or a tolerated error's note in place of one. */
+type Requested =
+  | { readonly kind: "landed"; readonly response: unknown }
+  | { readonly kind: "tolerated"; readonly note: string };
 
 /**
  * OWN property only: an erased plan carries a bare string role, and an inherited name ("constructor") must read as
@@ -77,6 +90,152 @@ function secretRecorder(tools: ExecTools): { exec: ExecTools; resolved: () => bo
   return { exec, resolved: () => resolved };
 }
 
+/** The REST write under the operation's role: its `before` hook, its payload, then the call, a tolerated status answering with the operation's own outcome. */
+async function requestDeclared(
+  run: PlanRun,
+  endpoint: EndpointDecl,
+  op: PlannedOp,
+  exec: ExecTools,
+  resolved: () => boolean,
+): Promise<Result<Requested, SectionFailure>> {
+  if (endpointMethod(endpoint.route) === "GET") {
+    // Only the erased view can name a read; executing it would render a change line for a request that changed nothing.
+    throw new Error(
+      `BUG: ${run.section.key} planned an operation under role "${op.role}", which is a read endpoint (${endpoint.route}); only write roles are plannable`,
+    );
+  }
+
+  const before = await op.before?.(exec);
+  if (before?.isErr()) {
+    return err(before.error);
+  }
+
+  const payload = typeof op.payload === "function" ? await op.payload(exec) : ok(op.payload);
+  if (payload.isErr()) {
+    return err(payload.error);
+  }
+
+  const request = {
+    params: op.params,
+    query: op.query,
+    payload: payload.value,
+    carriesSecret: resolved(),
+    describe: op.describe,
+  };
+  if (op.tolerate === undefined) {
+    const called = await callDeclared(run.ctx, run.section, endpoint, request);
+    return called.map((response): Requested => ({ kind: "landed", response }));
+  }
+
+  const called = await tryCallDeclared(run.ctx, run.section, endpoint, {
+    ...request,
+    tolerated: declaredTolerance(endpoint, op.tolerate.statuses),
+  });
+  if (called.isErr()) {
+    return err(called.error);
+  }
+
+  const result = called.value;
+  if (!("error" in result)) {
+    return ok({ kind: "landed", response: result.data });
+  }
+
+  const outcome = op.tolerate.outcome(result.error);
+  if (outcome.failure !== undefined) {
+    return err(sectionFailure("refused", outcome.failure));
+  }
+
+  return ok({ kind: "tolerated", note: outcome.note });
+}
+
+/** The GraphQL write under the operation's role, once no REST endpoint claims it: its `before` hook, its variables, then the call. */
+async function requestGraphql(
+  run: PlanRun,
+  op: PlannedOp,
+  exec: ExecTools,
+  resolved: () => boolean,
+): Promise<Result<Requested, SectionFailure>> {
+  const graphqlOp = declared(run.section.graphql, op.role);
+  if (graphqlOp === undefined) {
+    throw new Error(
+      `BUG: ${run.section.key} planned an operation under role "${op.role}", which names no declared endpoint or GraphQL operation`,
+    );
+  }
+
+  if (graphqlOp.kind !== "write") {
+    throw new Error(
+      `BUG: ${run.section.key} planned an operation under role "${op.role}", which is a GraphQL ${graphqlOp.kind} operation; only write roles are plannable`,
+    );
+  }
+
+  const before = await op.before?.(exec);
+  if (before?.isErr()) {
+    return err(before.error);
+  }
+
+  const variables =
+    typeof op.variables === "function" ? await op.variables(exec) : ok(op.variables ?? {});
+  if (variables.isErr()) {
+    return err(variables.error);
+  }
+
+  const called = await callGraphql(run.ctx, run.section, graphqlOp, variables.value, {
+    describe: op.describe,
+    carriesSecret: resolved(),
+  });
+  return called.map((response): Requested => ({ kind: "landed", response }));
+}
+
+/** One operation's request: the REST endpoint declared under its role, else the GraphQL write (the two role spaces are disjoint). */
+async function request(
+  run: PlanRun,
+  op: PlannedOp,
+  exec: ExecTools,
+  resolved: () => boolean,
+): Promise<Result<Requested, SectionFailure>> {
+  if (typeof op.role !== "string") {
+    // A number would coerce onto a matching key and a symbol would enter the property-key path.
+    throw new Error(
+      `BUG: ${run.section.key} planned an operation whose role is a ${typeof op.role}, not the name of a declared write`,
+    );
+  }
+
+  const endpoint = declared(run.section.endpoints, op.role);
+  if (endpoint !== undefined) {
+    return requestDeclared(run, endpoint, op, exec, resolved);
+  }
+
+  return requestGraphql(run, op, exec, resolved);
+}
+
+/** The change lines of a landed request, its capture hook run: a request that landed must render a line. */
+function changeLines(
+  section: SectionMeta,
+  op: PlannedOp,
+  response: unknown,
+): Result<readonly string[], SectionFailure> {
+  const rendered = typeof op.change === "function" ? op.change(response) : ok(op.change);
+  rejectThenable(section, op.role, "change thunk", rendered);
+  if (rendered.isErr()) {
+    return err(rendered.error);
+  }
+
+  const lines = rendered.value;
+  if (lines.length === 0) {
+    throw new Error(
+      `BUG: ${section.key}: operation "${op.role}" rendered no change line for a request that landed`,
+    );
+  }
+
+  const captured = op.capture?.(response);
+  rejectThenable(section, op.role, "capture hook", captured);
+  if (captured?.isErr()) {
+    return err(captured.error);
+  }
+
+  return ok(typeof lines === "string" ? [lines] : lines);
+}
+
 export async function executePlan(
   plan: SectionPlan,
   section: SectionMeta,
@@ -84,131 +243,45 @@ export async function executePlan(
   repo: RepoRef,
   tools: ExecTools,
 ): Promise<PlanExecution> {
-  const ctx: SectionContext = {
-    api,
-    repo,
-    check: false,
-    resolveSecret: (reference) => tools.resolveSecret(reference),
+  const run: PlanRun = {
+    ctx: { api, repo, check: false, resolveSecret: (reference) => tools.resolveSecret(reference) },
+    section,
   };
   const changes: string[] = [];
   const notes: string[] = [];
   let landed = 0;
+  const failed = (failure: SectionFailure): PlanExecution => ({
+    status: "failed",
+    changes,
+    notes,
+    landed,
+    failure,
+  });
   for (const op of plan.ops) {
     const { exec, resolved } = secretRecorder(tools);
     try {
-      let response: unknown;
-      if (typeof op.role !== "string") {
-        // A number would coerce onto a matching key and a symbol would enter the property-key path.
-        throw new Error(
-          `BUG: ${section.key} planned an operation whose role is a ${typeof op.role}, not the name of a declared write`,
-        );
+      const requested = await request(run, op, exec, resolved);
+      if (requested.isErr()) {
+        return failed(requested.error);
       }
-      const endpoint = declared(section.endpoints, op.role);
-      if (endpoint !== undefined) {
-        if (endpointMethod(endpoint.route) === "GET") {
-          // Only the erased view can name a read; executing it would render a change line for a request that changed nothing.
-          throw new Error(
-            `BUG: ${section.key} planned an operation under role "${op.role}", which is a read endpoint (${endpoint.route}); only write roles are plannable`,
-          );
-        }
-        const before = await op.before?.(exec);
-        if (before?.isErr()) {
-          return { status: "failed", changes, notes, landed, failure: before.error };
-        }
-        const payload = typeof op.payload === "function" ? await op.payload(exec) : ok(op.payload);
-        if (payload.isErr()) {
-          return { status: "failed", changes, notes, landed, failure: payload.error };
-        }
-        const request = {
-          params: op.params,
-          query: op.query,
-          payload: payload.value,
-          carriesSecret: resolved(),
-          describe: op.describe,
-        };
-        if (op.tolerate === undefined) {
-          const called = await callDeclared(ctx, section, endpoint, request);
-          if (called.isErr()) {
-            return { status: "failed", changes, notes, landed, failure: called.error };
-          }
-          response = called.value;
-        } else {
-          const called = await tryCallDeclared(ctx, section, endpoint, {
-            ...request,
-            tolerated: declaredTolerance(endpoint, op.tolerate.statuses),
-          });
-          if (called.isErr()) {
-            return { status: "failed", changes, notes, landed, failure: called.error };
-          }
-          const result = called.value;
-          if ("error" in result) {
-            const outcome = op.tolerate.outcome(result.error);
-            if (outcome.failure !== undefined) {
-              return {
-                status: "failed",
-                changes,
-                notes,
-                landed,
-                failure: sectionFailure("refused", outcome.failure),
-              };
-            }
-            notes.push(outcome.note);
-            continue;
-          }
-          response = result.data;
-        }
-      } else {
-        const graphqlOp = declared(section.graphql, op.role);
-        if (graphqlOp === undefined) {
-          throw new Error(
-            `BUG: ${section.key} planned an operation under role "${op.role}", which names no declared endpoint or GraphQL operation`,
-          );
-        }
-        if (graphqlOp.kind !== "write") {
-          throw new Error(
-            `BUG: ${section.key} planned an operation under role "${op.role}", which is a GraphQL ${graphqlOp.kind} operation; only write roles are plannable`,
-          );
-        }
-        const before = await op.before?.(exec);
-        if (before?.isErr()) {
-          return { status: "failed", changes, notes, landed, failure: before.error };
-        }
-        const variables =
-          typeof op.variables === "function" ? await op.variables(exec) : ok(op.variables ?? {});
-        if (variables.isErr()) {
-          return { status: "failed", changes, notes, landed, failure: variables.error };
-        }
-        const called = await callGraphql(ctx, section, graphqlOp, variables.value, {
-          describe: op.describe,
-          carriesSecret: resolved(),
-        });
-        if (called.isErr()) {
-          return { status: "failed", changes, notes, landed, failure: called.error };
-        }
-        response = called.value;
+
+      if (requested.value.kind === "tolerated") {
+        notes.push(requested.value.note);
+        continue;
       }
+
       landed++;
-      const rendered = typeof op.change === "function" ? op.change(response) : ok(op.change);
-      rejectThenable(section, op.role, "change thunk", rendered);
+      const rendered = changeLines(section, op, requested.value.response);
       if (rendered.isErr()) {
-        return { status: "failed", changes, notes, landed, failure: rendered.error };
+        return failed(rendered.error);
       }
-      const lines = rendered.value;
-      if (lines.length === 0) {
-        throw new Error(
-          `BUG: ${section.key}: operation "${op.role}" rendered no change line for a request that landed`,
-        );
-      }
-      const captured = op.capture?.(response);
-      rejectThenable(section, op.role, "capture hook", captured);
-      if (captured?.isErr()) {
-        return { status: "failed", changes, notes, landed, failure: captured.error };
-      }
-      changes.push(...(typeof lines === "string" ? [lines] : lines));
+
+      changes.push(...rendered.value);
     } catch (error) {
       // The client's own throw on an unmarked request, or a BUG invariant: reported beside what landed.
-      return { status: "failed", changes, notes, landed, failure: thrown(error) };
+      return failed(thrown(error));
     }
   }
+
   return { status: "applied", changes, notes, landed };
 }

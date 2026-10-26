@@ -7,10 +7,7 @@ import { deployKeysSection } from "../../../src/sections/deploy_keys/index.js";
 import { type ListMockSpec, mockFragmentFor } from "../../e2e/mock/list-fragment.js";
 import { type SectionRestHandlers, storedKeyMaterial } from "../../e2e/mock/support.js";
 
-/**
- * The material is stored comment-free the way GitHub normalizes it, the audit fields are fixed so a
- * repeat apply stays byte-stable, and uniqueness is by stored material: GitHub allows repeated titles.
- */
+/** The material is stored comment-free the way GitHub normalizes it, the audit fields are fixed so a repeat apply stays byte-stable, and uniqueness is by stored material, since GitHub allows repeated titles. */
 export const DEPLOY_KEYS_MOCK: ListMockSpec = {
   collection: (state) => state.deploy_keys,
   defaults: { read_only: false },
@@ -24,6 +21,7 @@ export const DEPLOY_KEYS_MOCK: ListMockSpec = {
   unique: (key) => storedKeyMaterial(String(key.key ?? "")),
 };
 
+/** The handlers derived from the section's declaration over the spec above. */
 export const deployKeysMockHandlers: SectionRestHandlers<"deploy_keys"> = mockFragmentFor(
   deployKeysSection,
   DEPLOY_KEYS_MOCK,

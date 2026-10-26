@@ -1,7 +1,4 @@
-/**
- * `deploy_keys:` section: deploy keys matched by exact title; the declared material is a PUBLIC key.
- * Immutable upstream (no update role), so a changed key or read_only flag is delete plus recreate.
- */
+/** `deploy_keys:` section: deploy keys matched by exact title; the declared material is a PUBLIC key. */
 
 import { ok } from "neverthrow";
 import { z } from "zod";
@@ -16,11 +13,7 @@ import {
   parseStoredKey,
 } from "./schema.js";
 
-/**
- * A live deploy key with its material parsed ONCE, at the response boundary: the two-field shape is the
- * documented contract, the algorithm is GitHub's call. Material off that shape fails the read as a body
- * outside the documented shape, so no hook downstream re-parses or re-checks it.
- */
+// The material is parsed ONCE, at the response boundary: a key off the two-field shape fails the read as a body outside the documented shape, so no hook downstream re-parses it; the algorithm is GitHub's call.
 const LiveDeployKey = z
   .looseObject({
     id: z.number(),
@@ -41,6 +34,7 @@ const LiveDeployKey = z
     return { ...live, key: parsed.value.material, algorithm: parsed.value.algorithm };
   });
 
+// No update route: a deploy key is immutable upstream, so a changed key or read_only flag is delete plus recreate.
 const ENDPOINTS = {
   list: {
     route: "GET /repos/{owner}/{repo}/keys",

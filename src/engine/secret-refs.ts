@@ -19,14 +19,13 @@ export interface SecretRef {
   readonly name: string;
 }
 
+/** A whole-value reference: `$` and nothing but an environment variable name. */
 const REFERENCE_RE = /^\$[A-Z_][A-Z0-9_]*$/;
 
+/** A reference anywhere inside a value, the shape that would ship verbatim. */
 const EMBEDDED_REFERENCE_RE = /\$[A-Z_][A-Z0-9_]*/;
 
-/**
- * INPUT_* holds the action's own inputs (INPUT_TOKEN is the admin token); the rest are runner and workflow context.
- * Routing any of them into a settings value would make the settings file an exfiltration channel.
- */
+/** INPUT_* holds the action's own inputs (INPUT_TOKEN is the admin token) and the rest are runner and workflow context; routing any of them into a settings value would make the settings file an exfiltration channel. */
 export const RESERVED_REF_PREFIXES = ["INPUT_", "GITHUB_", "ACTIONS_", "RUNNER_", "NODE_"] as const;
 
 /**
@@ -68,6 +67,7 @@ export function validateSecretRef(
 export interface ResolvedSecretRefs {
   /** Resolved plaintext, keyed by env var name (two fields may share one). */
   values: Record<string, string>;
+
   /** Every distinct plaintext value, for the caller to register with masking. */
   mask: string[];
 }

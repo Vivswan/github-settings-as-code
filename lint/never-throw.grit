@@ -2,7 +2,7 @@
 // BUG: invariant (a programming error no user can cause) or a bare rethrow of the catch binding; anything else is a
 // failure the caller should receive as a Result.
 //
-// Reach and exemptions are the plugin's `overrides` entry in biome.json, with `includes` relative to the repository
+// Reach and exemptions are the plugin's `overrides` entry in biome.local.jsonc, with `includes` relative to the repository
 // root; a top-level `plugins[].includes` matches the absolute path (biomejs/biome#11082), so the checkout's parent
 // directories would decide the reach. The rule covers src/** only; .github/scripts/ stays exempt by policy, since a
 // build script may throw on a user-caused failure.

@@ -531,10 +531,7 @@ export function genInvalidSettings(rng: Rng): InvalidSettingsCase & { name: stri
   return { name, ...build(rng) };
 }
 
-/**
- * Bodies the yaml package GENUINELY throws on. Single-repo they hit the "cannot read settings ... valid YAML" path
- * (src/flows/single.ts), multi-repo the "cannot parse <slug>" target gate (src/flows/multi.ts); both fire before any section runs.
- */
+/** Bodies the yaml package GENUINELY throws on; single-repo they hit the "cannot read settings ... valid YAML" path (src/flows/single.ts), multi-repo the "cannot parse <slug>" target gate (src/flows/multi.ts), both before any section runs. */
 export const UNPARSEABLE_YAML = [
   "labels: [oops, unclosed",
   "{",
@@ -543,8 +540,5 @@ export const UNPARSEABLE_YAML = [
   "a: [1, 2\nb: 3",
 ] as const;
 
-/**
- * Bodies that parse but not to a mapping, so they fail validateSettingsDoc's top-level "must be a YAML mapping" check
- * instead of the parser; in multi mode the same wording fires with the slug as the source label.
- */
+/** Bodies that parse but not to a mapping, so they fail validateSettingsDoc's top-level "must be a YAML mapping" check instead of the parser; multi mode fires the same wording with the slug as the source label. */
 export const NON_MAPPING_YAML = ["- a\n- b", "just a string"] as const;

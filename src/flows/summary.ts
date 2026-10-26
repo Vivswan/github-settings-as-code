@@ -118,6 +118,17 @@ export function writeMultiSummary(io: SummaryIo, views: PublicTargetView[], mode
   io.summary(lines.join("\n"));
 }
 
+/** The rollup's first line: how many of the targets' snapshots were written under the directory. */
+function writtenLine(written: number, total: number, snapshotDir: string): string {
+  if (written === 0) {
+    return `No snapshot was written under ${markdownCell(snapshotDir)}.`;
+  }
+  if (written === total) {
+    return `Snapshots written under ${markdownCell(snapshotDir)}.`;
+  }
+  return `${written} of ${total} snapshots written under ${markdownCell(snapshotDir)}.`;
+}
+
 /** The snapshot-dir summary: the fleet rollup with each target's file and the run's moment, then one section table per target. */
 export function writeSnapshotDirSummary(
   io: SummaryIo,
@@ -129,11 +140,7 @@ export function writeSnapshotDirSummary(
   const lines = [
     `## github-settings-as-code (snapshot, ${countNoun(views.length, "repository", "repositories")})`,
     "",
-    written === 0
-      ? `No snapshot was written under ${markdownCell(snapshotDir)}.`
-      : written === views.length
-        ? `Snapshots written under ${markdownCell(snapshotDir)}.`
-        : `${written} of ${views.length} snapshots written under ${markdownCell(snapshotDir)}.`,
+    writtenLine(written, views.length, snapshotDir),
     "",
     snapshotTakenLine(takenAt),
     "",

@@ -51,11 +51,7 @@ export type RepoSecretsKey =
   | "codespaces_secrets"
   | "agents_secrets";
 
-/**
- * The factory derives the routes from THIS map, so a key paired with another family's segment (which the
- * mock would faithfully serve, hiding the swap) is unrepresentable; the `satisfies` pins each VALUE to the
- * segment its own KEY spells, so a fifth family breaking the `<segment>_secrets` naming must say so here.
- */
+/** The routes derive from THIS map, so a key paired with another family's segment (which the mock would faithfully serve) is unrepresentable; the `satisfies` pins each value to the segment its key spells. */
 const SECRETS_SEGMENTS = {
   actions_secrets: "actions",
   dependabot_secrets: "dependabot",
@@ -63,10 +59,7 @@ const SECRETS_SEGMENTS = {
   agents_secrets: "agents",
 } as const satisfies { [K in RepoSecretsKey]: SegmentOfSecretsKey<K> };
 
-/**
- * The factory derives the runtime shape from THIS map, so a key paired with another family's config
- * (structurally identical, invisible to every gate) is unrepresentable.
- */
+/** The runtime shape derives from THIS map, so a key paired with another family's config (structurally identical, invisible to every gate) is unrepresentable. */
 const SECRETS_ENTRIES = {
   actions_secrets: ActionsSecretConfig,
   dependabot_secrets: DependabotSecretConfig,
@@ -120,12 +113,7 @@ type _WidePlanIsEveryFamilyPlan = MustBeNever<
   PlanMisfits<RepoSecretsKey, WideEndpoints, SecretsTable>
 >;
 
-/**
- * Checked HERE as a fresh object literal, once per family key: the factory hands ../../registry.ts a module
- * IDENTIFIER, where excess-property checking no longer runs, so a `known` key no entry type carries any
- * more would otherwise compile silently. The intersection admits a key present in ANY constituent, but a
- * key only one family dropped breaks SecretEntry and the shared plan signature first.
- */
+/** Checked HERE as a fresh literal, once per family key: ../../registry.ts receives a module IDENTIFIER, where excess-property checking no longer runs, so a `known` key no entry type carries would otherwise compile silently. */
 const CLOSED_SURFACE = {
   known: { name: true, value: true },
   consequence: "the API body carries only the sealed value, so the key would silently do nothing",
@@ -134,6 +122,10 @@ const CLOSED_SURFACE = {
   ClosedSurfaceOf<"codespaces_secrets"> &
   ClosedSurfaceOf<"agents_secrets">;
 
+/**
+ * The intersection CLOSED_SURFACE satisfies admits a key present in ANY family, but a key only one family
+ * dropped breaks SecretEntry and the shared plan signature first.
+ */
 type ClosedSurfaceOf<K extends RepoSecretsKey> = NonNullable<SectionModule<K>["closedSurface"]>;
 
 /** The module shape repoSecretsSection() mints (SectionModule<K> at the registry). */
@@ -159,10 +151,7 @@ export interface RepoSecretsSectionModule<K extends RepoSecretsKey> {
  */
 export function repoSecretsSection<K extends RepoSecretsKey>(
   family: KeyedValuesFamily<K> & {
-    /**
-     * The fine-grained "Codespaces secrets" permission gates even the GETs (list, public-key) at write;
-     * the writes are write-graded by method already.
-     */
+    /** The fine-grained "Codespaces secrets" permission gates even the GETs (list, public-key) at write; the writes are write-graded by method already. */
     readonly accessGrade?: "write";
   },
 ): RepoSecretsSectionModule<K> {

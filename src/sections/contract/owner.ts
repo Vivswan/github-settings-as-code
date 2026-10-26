@@ -35,11 +35,7 @@ interface OrgProbePort {
   };
 }
 
-/**
- * Whether each owner is a personal account, per client (one client is one run's token): the first
- * gated section probes, the rest read the answer. A failed probe (a denial, a server error) is not
- * kept, so every section reports it through its own port.
- */
+/** Per client (one client is one run's token), whether each owner is a personal account: the first gated section probes, the rest read the answer, and a failed probe (a denial, a server error) is not kept. */
 const personalByClient = new WeakMap<
   GitHubClient,
   Map<string, Promise<Result<boolean, SectionFailure>>>

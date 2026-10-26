@@ -9,6 +9,10 @@ import { requestHeaders } from "./dispatch.js";
 import { type MockState, named } from "./state.js";
 import type { Handler } from "./support.js";
 
+/**
+ * @param opts.headers - request headers in any casing; the context lower-cases them like the pipeline does
+ * @param opts.grade - the token's grade on the endpoint's permission; write, the mask default, unless a test narrows it
+ */
 export function handlerTestContext(
   key: SectionEndpointKey,
   state: MockState,
@@ -16,9 +20,7 @@ export function handlerTestContext(
     body?: unknown;
     params?: Record<string, string>;
     query?: Record<string, string>;
-    /** Request headers in any casing; the context lower-cases them like the pipeline does. */
     headers?: Record<string, string>;
-    /** The token's grade on the endpoint's permission; write, the mask default, unless a test narrows it. */
     grade?: MaskGrade;
   } = {},
 ): Parameters<Handler>[0] {

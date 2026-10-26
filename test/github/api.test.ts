@@ -687,68 +687,90 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     },
   );
 
-  test.each([
+  /** A request whose response echoes the secret it carried, with what the error must keep and must lose. */
+  interface EchoedSecret {
+    readonly method: string;
+    readonly path: string;
+    readonly payload: Record<string, unknown>;
+    readonly response: () => Response;
+    readonly status: number;
+    readonly masked: string;
+    readonly fragments: readonly string[];
+    readonly limited: boolean;
+  }
+  test.each<[string, EchoedSecret]>([
     [
       "a JSON 422 echoing a config.secret",
-      "POST",
-      "/repos/hookco/hookrepo/hooks",
-      { name: "web", config: { url: "https://example.test/hook", secret: hostileSecret } },
-      () =>
-        new Response(
-          JSON.stringify({
-            message: `Validation Failed: secret ${hostileSecret} is too weak`,
-            errors: [{ resource: "Hook", field: "secret", value: hostileSecret }],
-            documentation_url: "https://docs.github.com/rest/repos/webhooks",
-          }),
-          { status: 422, headers: { "content-type": "application/json" } },
-        ),
-      422,
-      '"secret":"***"',
-      ["he said", "back", "slash", "too weak", "Hook"],
-      false,
+      {
+        method: "POST",
+        path: "/repos/hookco/hookrepo/hooks",
+        payload: {
+          name: "web",
+          config: { url: "https://example.test/hook", secret: hostileSecret },
+        },
+        response: () =>
+          new Response(
+            JSON.stringify({
+              message: `Validation Failed: secret ${hostileSecret} is too weak`,
+              errors: [{ resource: "Hook", field: "secret", value: hostileSecret }],
+              documentation_url: "https://docs.github.com/rest/repos/webhooks",
+            }),
+            { status: 422, headers: { "content-type": "application/json" } },
+          ),
+        status: 422,
+        masked: '"secret":"***"',
+        fragments: ["he said", "back", "slash", "too weak", "Hook"],
+        limited: false,
+      },
     ],
     [
       "a plain-text 400 echoing a TOP-LEVEL secret",
-      "PATCH",
-      "/repos/hookco/hookrepo/hooks/1/config",
-      { url: "https://example.test/hook", content_type: "json", secret: hostileSecret },
-      () => new Response(`nope: ${hostileSecret}`, { status: 400 }),
-      400,
-      '"secret":"***"',
-      ["he said", "back", "slash", "nope"],
-      false,
+      {
+        method: "PATCH",
+        path: "/repos/hookco/hookrepo/hooks/1/config",
+        payload: { url: "https://example.test/hook", content_type: "json", secret: hostileSecret },
+        response: () => new Response(`nope: ${hostileSecret}`, { status: 400 }),
+        status: 400,
+        masked: '"secret":"***"',
+        fragments: ["he said", "back", "slash", "nope"],
+        limited: false,
+      },
     ],
     [
       "a plain-text 400 echoing an encrypted_value",
-      "PUT",
-      "/repos/hookco/hookrepo/actions/secrets/K",
-      { encrypted_value: hostileSecret, key_id: "1" },
-      () => new Response(`rejected: ${hostileSecret}`, { status: 400 }),
-      400,
-      '"encrypted_value":"***"',
-      ["he said", "back", "slash", "rejected"],
-      false,
+      {
+        method: "PUT",
+        path: "/repos/hookco/hookrepo/actions/secrets/K",
+        payload: { encrypted_value: hostileSecret, key_id: "1" },
+        response: () => new Response(`rejected: ${hostileSecret}`, { status: 400 }),
+        status: 400,
+        masked: '"encrypted_value":"***"',
+        fragments: ["he said", "back", "slash", "rejected"],
+        limited: false,
+      },
     ],
     [
       // The structural signals are read whatever the body's shape: this plaintext body never says "rate limit", so only the retry-after
       // header proves the classification, and it must survive the wholesale replacement.
       "a plain-text 403 with retry-after echoing a TOP-LEVEL secret",
-      "PATCH",
-      "/repos/hookco/hookrepo/hooks/1/config",
-      { url: "https://example.test/hook", content_type: "json", secret: hostileSecret },
-      () =>
-        new Response(`Forbidden: ${hostileSecret}`, {
-          status: 403,
-          headers: { "retry-after": "60" },
-        }),
-      403,
-      '"secret":"***"',
-      ["he said", "back", "slash", "Forbidden"],
-      true,
+      {
+        method: "PATCH",
+        path: "/repos/hookco/hookrepo/hooks/1/config",
+        payload: { url: "https://example.test/hook", content_type: "json", secret: hostileSecret },
+        response: () =>
+          new Response(`Forbidden: ${hostileSecret}`, {
+            status: 403,
+            headers: { "retry-after": "60" },
+          }),
+        status: 403,
+        masked: '"secret":"***"',
+        fragments: ["he said", "back", "slash", "Forbidden"],
+        limited: true,
+      },
     ],
   ])(
     "%s is replaced wholesale; only the status and the rate-limit classification survive",
-    async (_shape, method, path, payload, response, status, masked, fragments, limited) => {
+    async (_shape, { method, path, payload, response, status, masked, fragments, limited }) => {
       const wire = JSON.stringify(payload);
       const sent = stubFetchCapturingBodies(response);
       const dbg = traceIo();

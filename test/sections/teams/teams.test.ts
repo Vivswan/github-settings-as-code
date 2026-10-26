@@ -1,3 +1,8 @@
+/**
+ * The teams section through its registered module, since the owner gate the registry composes is part of the
+ * behavior under test.
+ */
+
 import { describe, expect, test } from "bun:test";
 import type { SectionInput } from "../../../src/sections/contract/declared.js";
 import type { SectionModule } from "../../../src/sections/contract/module.js";
@@ -11,7 +16,6 @@ import { REPO, unwrap } from "../section-run.js";
 import { validatedInput } from "../validated-input.js";
 import { teamsMockHandlers } from "./mock.js";
 
-/** The registered module: the owner gate the registry composes is part of the behavior under test. */
 const gated = sectionModule("teams") as SectionModule<"teams"> &
   Required<Pick<SectionModule<"teams">, "snapshot">>;
 

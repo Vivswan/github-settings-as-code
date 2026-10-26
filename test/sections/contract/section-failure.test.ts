@@ -1,3 +1,8 @@
+/**
+ * failureFor's ladder: its order decides the kind (a rate-limited 403 is never a denial), and the line it renders is
+ * the one the loops report.
+ */
+
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import type { EndpointDecl } from "../../../src/sections/contract/endpoints.js";
@@ -7,7 +12,6 @@ import type { SectionContext, SectionMeta } from "../../../src/sections/contract
 import { listAll } from "../../../src/sections/contract/requests.js";
 import { MockApi } from "../../mock-api.js";
 
-/** The ladder's order decides the kind (a rate-limited 403 is never a denial); the line is the one the loops report. */
 const section: SectionMeta = {
   key: "rulesets",
   permission: { repo: ["administration"] },

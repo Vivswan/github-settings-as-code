@@ -38,16 +38,14 @@ import type {
   EnvironmentVariableConfig,
 } from "./schema.js";
 
-/**
- * Stripped from the environment PUT body by splitEntry; each plans as its own sub-resource after
- * the PUT, so none can leak into the PUT payload or the environment diff.
- */
+/** Stripped from the environment PUT body by splitEntry and planned as sub-resources after the PUT, so no nested list leaks into the PUT payload or the environment diff. */
 export const NESTED_KEYS = [
   "variables",
   "secrets",
   "deployment_branch_policies",
   "deployment_protection_rules",
 ] as const satisfies readonly (keyof EnvironmentConfig)[];
+
 export type NestedKey = (typeof NESTED_KEYS)[number];
 
 type NestedDeclared = { [K in NestedKey]: NonNullable<EnvironmentConfig[K]> };
@@ -79,28 +77,22 @@ export interface NestedPlan {
  * properties strictly, so a planner paired with the wrong key's entry type is a compile error.
  */
 interface NestedPlanner<K extends NestedKey> {
-  /**
-   * The policy for live sub-resources the declared list omits. The section-level "untouched"
-   * default describes sibling environments, not the resources inside one, so each key states its own.
-   */
+  /** The section's "untouched" default describes sibling environments, not the resources inside one, so each key states its own policy for the live sub-resources its list omits. */
   defaultPolicy: UndeclaredPolicy;
-  /**
-   * Beside a declared environment that does not exist yet: its sub-resources cannot be listed,
-   * so every entry plans as a create against an empty environment.
-   */
+
+  /** Beside a declared environment that does not exist yet, whose sub-resources cannot be listed, so every entry plans as a create. */
   missingNote: (envName: string) => string;
+
   /** The list's file-only checks (two entries naming one resource), run by the section's validate hook; plan() trusts them. */
   validate: (entries: readonly NestedEntry<K>[], envName: string) => readonly DeclaredIssue[];
+
+  /** liveEnv is undefined for an environment the plan creates: its sub-resources 404 until the PUT lands, so the planner reads nothing and plans every entry as a create. */
   plan: (
     ctx: EnvironmentsRestContext,
     section: SectionMeta,
     envName: string,
     policy: UndeclaredPolicy,
     entries: readonly NestedEntry<K>[],
-    /**
-     * undefined for an environment the plan creates: its sub-resources 404 until the PUT lands,
-     * so the planner reads nothing and plans every entry as a create.
-     */
     liveEnv: LiveEnvironmentBody | undefined,
   ) => Promise<Result<NestedPlan, SectionFailure>>;
 }
@@ -202,15 +194,11 @@ export async function planNested<K extends NestedKey>(
   }));
 }
 
-/**
- * Scalars the environment PUT does not accept: splitEntry strips them beside NESTED_KEYS, and each
- * applies through its own routed operation after every PUT (pinned rides the GraphQL pin mutations).
- * The lockstep types pin this list to EnvironmentRoutedScalars, where schema.ts declares routed-ness;
- * a routed scalar declared on EnvironmentConfig itself would ride the PUT body unnoticed.
- */
+// Stripped from the PUT body beside NESTED_KEYS and applied through their own routed operations after every PUT; the lockstep types below hold the list equal to EnvironmentRoutedScalars, where schema.ts declares routed-ness.
 const ROUTED_SCALAR_KEYS = [
   "pinned",
 ] as const satisfies readonly (keyof EnvironmentRoutedScalars)[];
+
 type RoutedScalarKey = (typeof ROUTED_SCALAR_KEYS)[number];
 type _RoutedScalarsComplete = MustBeNever<Exclude<keyof EnvironmentRoutedScalars, RoutedScalarKey>>;
 type _RoutedScalarsSound = MustBeNever<Exclude<RoutedScalarKey, keyof EnvironmentRoutedScalars>>;

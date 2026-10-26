@@ -45,23 +45,112 @@ type PagesWirePayload = Omit<PagesSite, "source"> & { source?: PagesSourceWire }
  */
 type PagesCreateBody = Pick<PagesWirePayload, "build_type" | "source">;
 
-/**
- * The site body must be a mapping: PagesConfig accepts null (the declared "Pages off"), so a null 200
- * would otherwise read back as a declaration that DISABLES the site.
- */
+// A mapping only: PagesConfig accepts null as the declared "Pages off", so a null 200 would otherwise read back as a declaration that DISABLES the site.
 const LiveSite = z.looseObject({});
 
-/**
- * A note, not a parse error: nothing in the file tells an Enterprise Cloud organization from github.com,
- * where GitHub reports `public: true` and drops the field from the update. Only that signature (live
- * true, declared false) earns it: a live non-public site proves the host supports visibility, so the
- * PUT can make it public and the drift is ordinary.
- */
+// A note, not a parse error, since nothing in the file tells an Enterprise Cloud organization from github.com; only live true beside declared false earns it, as a live non-public site proves the host supports visibility.
 const PUBLIC_VISIBILITY_NOTE =
   "pages.public: site visibility is settable only for organizations on GitHub Enterprise Cloud; " +
   "elsewhere GitHub reports public: true and ignores the field on the update, so this drift never " +
   "converges. Remove pages.public unless the repository belongs to an Enterprise Cloud organization";
 
+type PagesPlan = SectionPlan<PlannedOp<typeof ENDPOINTS>>;
+
+/** `pages: null` disables a live site; with no site the note says what else the 404 may mean. */
+function disablePlan(missing: boolean): PagesPlan {
+  if (missing) {
+    // A 404 is ambiguous: no Pages site, or a fine-grained token without the Pages permission.
+    // The non-null path stays loud either way (the POST would fail); this no-op path must say so.
+    return {
+      ops: [],
+      notes: [
+        "pages: declared null and GitHub reports no Pages site, so there is nothing to disable. A fine-grained token missing the Pages permission gets the same answer; if this repo does have a Pages site, grant the token Pages read and write",
+      ],
+      drift: [],
+    };
+  }
+
+  return {
+    ops: [
+      {
+        role: "remove",
+        drift: [
+          "pages: enabled live but the settings file declares pages: null; apply will disable GitHub Pages",
+        ],
+        change: "disabled GitHub Pages",
+      },
+    ],
+    notes: [],
+    drift: [],
+  };
+}
+
+/**
+ * A live site is updated in place where it diverges. The site mapping passes unknown keys through, so a
+ * key the GET never echoes would re-PUT on every apply without converging; the note names it beside the
+ * drift it causes. A site key the GET omits (https_enforced on a site created without it) is drift the
+ * PUT resolves, so only a key outside the site shape is noted.
+ */
+function updatePlan(payload: PagesWirePayload, live: Record<string, unknown>): PagesPlan {
+  const plan: PagesPlan = { ops: [], notes: [], drift: [] };
+  const phantom = phantomKeys(payload, live).filter(
+    (name) => !Object.hasOwn(PAGES_SITE_SHAPE, name),
+  );
+  if (phantom.length > 0) {
+    plan.notes.push(phantomNote("pages", phantom, "Pages site", "this PUT will re-run"));
+  }
+
+  const drift = subsetDiff(payload, live, "pages");
+  if (hasDrift(drift)) {
+    plan.ops.push({
+      role: "update",
+      payload,
+      drift,
+      change: "updated GitHub Pages configuration",
+    });
+    if (payload.public === false && live.public === true) {
+      plan.notes.push(PUBLIC_VISIBILITY_NOTE);
+    }
+  }
+
+  return plan;
+}
+
+/** Enabling a site is the create POST, which takes build_type and source alone, then the update PUT for whatever else is declared. */
+function enablePlan(payload: PagesWirePayload): PagesPlan {
+  const plan: PagesPlan = { ops: [], notes: [], drift: [] };
+  const create: PagesCreateBody = {};
+  if (payload.build_type !== undefined) {
+    create.build_type = payload.build_type;
+  }
+  if (payload.source !== undefined) {
+    create.source = payload.source;
+  }
+  plan.ops.push({
+    role: "create",
+    payload: create,
+    drift: [
+      "pages: declared in the settings file but GitHub Pages is not enabled on the repo; apply will enable it",
+    ],
+    change: "enabled GitHub Pages",
+  });
+
+  const rest = Object.keys(payload).filter((k) => !Object.hasOwn(create, k));
+  if (rest.length > 0) {
+    plan.ops.push({
+      role: "update",
+      payload,
+      drift: [
+        `pages: the create call takes only build_type and source, so apply will then set the remaining configuration (${rest.join(", ")})`,
+      ],
+      change: "applied remaining Pages configuration",
+    });
+  }
+
+  return plan;
+}
+
+/** The `pages:` section module; a declared null disables the site. */
 export const pagesSection = {
   key: "pages",
   undeclaredDefault: "untouched",
@@ -71,84 +160,21 @@ export const pagesSection = {
   // source: null or a source without a branch.
   shape: PagesConfig,
   async plan(ctx, desired) {
-    const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
     return ctx.read.get.probeAbsent(LiveSite).map((probe) => {
       if (desired === null) {
-        if ("missing" in probe) {
-          // A 404 is ambiguous: no Pages site, or a fine-grained token without the Pages permission.
-          // The non-null path stays loud either way (the POST would fail); this no-op path must say so.
-          plan.notes.push(
-            "pages: declared null and GitHub reports no Pages site, so there is nothing to disable. A fine-grained token missing the Pages permission gets the same answer; if this repo does have a Pages site, grant the token Pages read and write",
-          );
-          return plan;
-        }
-        plan.ops.push({
-          role: "remove",
-          drift: [
-            "pages: enabled live but the settings file declares pages: null; apply will disable GitHub Pages",
-          ],
-          change: "disabled GitHub Pages",
-        });
-        return plan;
+        return disablePlan("missing" in probe);
       }
+
       // The source is split off so the no-source form never carries a source key at all: an own
-      // `source: undefined` would count as a remainder below.
+      // `source: undefined` would count as a remainder in enablePlan.
       const { source, ...restConfig } = desired;
       const payload: PagesWirePayload =
         source === undefined ? restConfig : { ...restConfig, source: wireSource(source) };
+      if ("missing" in probe) {
+        return enablePlan(payload);
+      }
 
-      if (!("missing" in probe)) {
-        // The site mapping passes unknown keys through, so a key the GET never echoes would re-PUT on
-        // every apply without converging; the note names it beside the drift it causes. A site key the
-        // GET omits (https_enforced on a site created without it) is drift the PUT resolves, so only a
-        // key outside the site shape is noted.
-        const phantom = phantomKeys(payload, probe.data).filter(
-          (name) => !Object.hasOwn(PAGES_SITE_SHAPE, name),
-        );
-        if (phantom.length > 0) {
-          plan.notes.push(phantomNote("pages", phantom, "Pages site", "this PUT will re-run"));
-        }
-        const drift = subsetDiff(payload, probe.data, "pages");
-        if (hasDrift(drift)) {
-          plan.ops.push({
-            role: "update",
-            payload,
-            drift,
-            change: "updated GitHub Pages configuration",
-          });
-          if (payload.public === false && probe.data.public === true) {
-            plan.notes.push(PUBLIC_VISIBILITY_NOTE);
-          }
-        }
-        return plan;
-      }
-      const create: PagesCreateBody = {};
-      if (payload.build_type !== undefined) {
-        create.build_type = payload.build_type;
-      }
-      if (payload.source !== undefined) {
-        create.source = payload.source;
-      }
-      plan.ops.push({
-        role: "create",
-        payload: create,
-        drift: [
-          "pages: declared in the settings file but GitHub Pages is not enabled on the repo; apply will enable it",
-        ],
-        change: "enabled GitHub Pages",
-      });
-      const rest = Object.keys(payload).filter((k) => !Object.hasOwn(create, k));
-      if (rest.length > 0) {
-        plan.ops.push({
-          role: "update",
-          payload,
-          drift: [
-            `pages: the create call takes only build_type and source, so apply will then set the remaining configuration (${rest.join(", ")})`,
-          ],
-          change: "applied remaining Pages configuration",
-        });
-      }
-      return plan;
+      return updatePlan(payload, probe.data);
     });
   },
   // No site is nothing to declare (not `pages: null`, which would DISABLE Pages on apply); the

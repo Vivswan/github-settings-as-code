@@ -83,6 +83,60 @@ function keyMatches(pattern: string, site: string): boolean {
   return /^<[^<>]+>$/.test(instance);
 }
 
+/** The sites one description claims (overlapping brace alternatives claim a site once), and each alternative that
+ * names nothing: every alternative must name a site of its own, so a removed factory member cannot hide behind its
+ * siblings. */
+function sitesClaimedBy(
+  description: SchemaDescription,
+  sites: ReadonlyMap<string, Site>,
+): { claimed: Set<string>; problems: string[] } {
+  const claimed = new Set<string>();
+  const problems: string[] = [];
+  for (const pattern of expandBraces(description.key)) {
+    const matched = [...sites.keys()].filter((site) => keyMatches(pattern, site));
+    if (matched.length === 0) {
+      const spelled =
+        pattern === description.key ? `"${pattern}"` : `"${pattern}" (from "${description.key}")`;
+      problems.push(`${description.source}: ${spelled} describes nothing in the schema`);
+    }
+    for (const site of matched) {
+      claimed.add(site);
+    }
+  }
+  return { claimed, problems };
+}
+
+/** One site's description written in, or the problem: none where one is required, or more than one. The
+ * description goes first, whatever order the generator emitted: one convention, stable diffs. A bare $ref takes no
+ * siblings in draft-7, so it moves under allOf, as zod itself emits a described reference. */
+function describeSite(
+  site: string,
+  { node, required }: Site,
+  claimed: readonly SchemaDescription[],
+): string | undefined {
+  const [only, ...more] = claimed;
+  if (only === undefined) {
+    return required && !node.description
+      ? `${site} has no description in any docs file`
+      : undefined;
+  }
+  if (more.length > 0) {
+    const sources = claimed.map((d) => `${d.source} ("${d.key}")`).join(", ");
+    return `${site} is described more than once: ${sources}`;
+  }
+  const rest = Object.fromEntries(Object.entries(node).filter(([k]) => k !== "description"));
+  for (const key of Object.keys(node)) {
+    delete node[key];
+  }
+  node.description = only.text;
+  if (typeof rest.$ref === "string") {
+    node.allOf = [rest];
+  } else {
+    Object.assign(node, rest);
+  }
+  return undefined;
+}
+
 /** In place. Throws one error listing every problem, so a docs sweep fixes them in one pass. */
 export function attachDescriptions(
   definitions: Record<string, JsonSchemaNode>,
@@ -92,49 +146,16 @@ export function attachDescriptions(
   const claims = new Map<string, SchemaDescription[]>();
   const problems: string[] = [];
   for (const description of descriptions) {
-    // Each brace alternative must name a site of its own, so a removed factory member cannot
-    // hide behind its siblings; overlapping alternatives still claim a site once.
-    const claimedHere = new Set<string>();
-    for (const pattern of expandBraces(description.key)) {
-      let matched = 0;
-      for (const site of sites.keys()) {
-        if (keyMatches(pattern, site)) {
-          matched++;
-          if (!claimedHere.has(site)) {
-            claimedHere.add(site);
-            claims.set(site, [...(claims.get(site) ?? []), description]);
-          }
-        }
-      }
-      if (matched === 0) {
-        const spelled =
-          pattern === description.key ? `"${pattern}"` : `"${pattern}" (from "${description.key}")`;
-        problems.push(`${description.source}: ${spelled} describes nothing in the schema`);
-      }
+    const found = sitesClaimedBy(description, sites);
+    problems.push(...found.problems);
+    for (const site of found.claimed) {
+      claims.set(site, [...(claims.get(site) ?? []), description]);
     }
   }
-  for (const [site, { node, required }] of sites) {
-    const claimed = claims.get(site) ?? [];
-    if (claimed.length === 0) {
-      if (required && !node.description) {
-        problems.push(`${site} has no description in any docs file`);
-      }
-    } else if (claimed.length > 1) {
-      const sources = claimed.map((d) => `${d.source} ("${d.key}")`).join(", ");
-      problems.push(`${site} is described more than once: ${sources}`);
-    } else {
-      // Description first, whatever order the generator emitted: one convention, stable diffs. A bare $ref takes no
-      // siblings in draft-7, so it moves under allOf, as zod itself emits a described reference.
-      const rest = Object.fromEntries(Object.entries(node).filter(([k]) => k !== "description"));
-      for (const key of Object.keys(node)) {
-        delete node[key];
-      }
-      node.description = claimed[0]?.text;
-      if (typeof rest.$ref === "string") {
-        node.allOf = [rest];
-      } else {
-        Object.assign(node, rest);
-      }
+  for (const [site, at] of sites) {
+    const problem = describeSite(site, at, claims.get(site) ?? []);
+    if (problem !== undefined) {
+      problems.push(problem);
     }
   }
   if (problems.length > 0) {

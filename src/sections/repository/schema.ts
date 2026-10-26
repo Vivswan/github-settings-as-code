@@ -58,11 +58,7 @@ type GetOnlyKey = Exclude<
   keyof RepoPatchBody | UndocumentedPatchField | "topics"
 >;
 
-/**
- * Declared, a GET-only key drifts on every run: the diff sees the live value, the PATCH ignores the
- * field, and nothing converges. Pinned both ways to the vendored spec, so a GET field appearing in the
- * PATCH body drops out here at compile time and a new GET-only field fails to compile until listed.
- */
+/** A declared GET-only key would drift on every run (the PATCH ignores it), so the parse refuses it; the satisfies and the MustBeNever below pin the list both ways to the vendored spec. */
 const GET_ONLY_KEYS = [
   "id",
   "node_id",
@@ -181,14 +177,15 @@ type _ReviewerModesComplete = MustBeNever<
   | Exclude<(typeof REVIEWER_MODES)[number], NonNullable<BypassReviewer["mode"]>>
 >;
 
-/** The `status` vocabulary the GET reports; the PATCH descriptor types the field as a bare string, so the GET's
- * enum is the one GitHub publishes for it. */
+/** The GET's status vocabulary; the PATCH descriptor types the field as a bare string, so the GET's enum is the one GitHub publishes for it. */
 const FeatureStatus = z.enum(FEATURE_STATUSES, {
   error: (issue) =>
     `${describeValue(issue.input)} is not a feature status; use "enabled" or "disabled"`,
 });
 
-const listKeys = (keys: readonly string[]) => keys.map((key) => JSON.stringify(key)).join(", ");
+function listKeys(keys: readonly string[]): string {
+  return keys.map((key) => JSON.stringify(key)).join(", ");
+}
 
 /** GitHub answers 422 to an unknown sub-key here, so the closed shape says so before any request. */
 function closedKeyError(
@@ -254,17 +251,19 @@ const securityAndAnalysisShape = {
   secret_scanning_validity_checks: FeatureToggle.optional(),
 } satisfies Record<keyof SecurityAndAnalysisPatch | UndocumentedSecurityField, z.ZodType>;
 
+/** The GET's dependabot_security_updates is the automated-security-fixes toggle, which has its own key. */
+function securityAndAnalysisHint(key: string): string | undefined {
+  return key === "dependabot_security_updates"
+    ? `"dependabot_security_updates" is reported by GitHub here but the PATCH rejects it; declare enable_automated_security_fixes instead`
+    : undefined;
+}
+
 /** The sub-keys the PATCH accepts, in lockstep with the shape; the snapshot reads exactly these back. */
 export const SECURITY_AND_ANALYSIS_PATCH_FIELDS = Object.keys(
   securityAndAnalysisShape,
 ) as readonly (keyof typeof securityAndAnalysisShape)[];
 
-/** The GET's dependabot_security_updates is the automated-security-fixes toggle, which has its own key. */
-const securityAndAnalysisHint = (key: string): string | undefined =>
-  key === "dependabot_security_updates"
-    ? `"dependabot_security_updates" is reported by GitHub here but the PATCH rejects it; declare enable_automated_security_fixes instead`
-    : undefined;
-
+/** The closed security_and_analysis mapping; its unknown-key refusal sends the dependabot key to its own toggle. */
 const SecurityAndAnalysisConfig = z
   .strictObject(securityAndAnalysisShape, {
     error: closedKeyError(
@@ -292,6 +291,7 @@ const COMMIT_MESSAGE_VOCABULARIES = {
   merge_commit_title: MERGE_COMMIT_TITLES,
   merge_commit_message: MERGE_COMMIT_MESSAGES,
 } as const satisfies { [K in CommitMessageKey]: readonly CommitMessageValue<K>[] };
+
 type _CommitMessageVocabulariesComplete = MustBeNever<
   {
     [K in CommitMessageKey]: Exclude<
@@ -303,10 +303,7 @@ type _CommitMessageVocabulariesComplete = MustBeNever<
 
 type Vocabulary<K extends CommitMessageKey> = (typeof COMMIT_MESSAGE_VOCABULARIES)[K][number];
 
-/**
- * The squash pairs GitHub documents: any other title/message pair answers 422
- * (invalid_squash_commit_setting_combo). The merge family has no documented matrix, so it gets none.
- */
+/** The squash pairs GitHub documents; any other title/message pair answers 422 (invalid_squash_commit_setting_combo), and the merge family has no documented matrix. */
 const SQUASH_COMMIT_PAIRS = {
   PR_TITLE: ["PR_BODY", "BLANK", "COMMIT_MESSAGES"],
   COMMIT_OR_PR_TITLE: ["COMMIT_MESSAGES"],
@@ -327,7 +324,6 @@ function legalPairs(pairs: PairTable): string {
 interface CommitMessageFamily {
   readonly titleKey: string;
   readonly messageKey: string;
-  /** Title to the messages it may pair with; undefined when GitHub documents no matrix. */
   readonly pairs: PairTable | undefined;
   readonly legalHint: string;
 }
@@ -424,15 +420,8 @@ function commitMessagePairRules(): Record<string, unknown>[] {
 
 // --- Topics -----------------------------------------------------------------------
 
-/**
- * GitHub's topic rule, matched on the declared spelling: 1 to 50 characters, each a letter, digit, or hyphen,
- * starting with a letter or digit. Uppercase passes and folds to lowercase on the wire (normalizeTopics), so the
- * grammar spells [A-Za-z]: the published schema cannot fold, and a lowercase-only pattern there would refuse the
- * `Copier` the runtime accepts. The pattern is the grammar on both sides; a refinement would not reach the schema.
- */
 const TOPIC_GRAMMAR = "[A-Za-z0-9][A-Za-z0-9-]{0,49}";
 const TOPIC_PATTERN = new RegExp(`^${TOPIC_GRAMMAR}$`);
-/** The comma form: the same grammar per segment, with the whitespace around a segment trimmed away. */
 const TOPIC_LIST_PATTERN = new RegExp(`^\\s*${TOPIC_GRAMMAR}\\s*(,\\s*${TOPIC_GRAMMAR}\\s*)*$`);
 const MAX_TOPICS = 20;
 
@@ -447,7 +436,11 @@ function declaredTopics(raw: string | readonly string[]): string[] {
   return typeof raw === "string" ? raw.split(",").map((t) => t.trim()) : [...raw];
 }
 
-/** The wire form: lowercased and deduped. */
+/**
+ * The wire form: lowercased and deduped. The grammar is a regex pattern so the published schema carries it, and
+ * it spells [A-Za-z] because that schema cannot fold case as this does: a lowercase-only pattern would refuse the
+ * `Copier` the runtime accepts.
+ */
 export function normalizeTopics(raw: string | readonly string[]): string[] {
   return [...new Set(declaredTopics(raw).map((t) => t.toLowerCase()))];
 }
@@ -456,9 +449,9 @@ const topicName = z.string().regex(TOPIC_PATTERN, {
   error: (issue) => topicRefusal(String(issue.input)),
 });
 
-/** The comma form fails as one string, so the refusal names the segment at fault. */
 const topicList = z.string().regex(TOPIC_LIST_PATTERN, {
   error: (issue) => {
+    // The comma form fails as one string, so the segment at fault is found here to name it.
     const segments = declaredTopics(String(issue.input));
     const index = segments.findIndex((segment) => !TOPIC_PATTERN.test(segment));
     const where = segments.length > 1 ? ` (entry ${index + 1} of the comma list)` : "";
@@ -500,12 +493,7 @@ function creationPolicy() {
     .optional();
 }
 
-/**
- * Every PATCH field but `name`, typed as the API takes it, so null and a quoted boolean fail at
- * parse instead of as GitHub's 422. `satisfies` pins the table both ways: a PATCH field missing here,
- * or a key the PATCH lacks, fails to compile. `name` stays passthrough and out of the snapshot: a
- * settings file reused on another repository would rename it.
- */
+/** Every PATCH field but name, typed as the API takes it so null and a quoted boolean fail at parse rather than as a 422; name stays passthrough and out of the snapshot, since a settings file reused on another repository would rename it. */
 const patchFieldShape = {
   description: CLEARABLE,
   homepage: CLEARABLE,
@@ -543,8 +531,7 @@ export const PATCH_FIELDS = Object.keys(
   patchFieldShape,
 ) as readonly (keyof typeof patchFieldShape)[];
 
-// --- The section --------------------------------------------------------------------
-
+/** The declared repository: mapping: the PATCH fields, topics, the feature toggles, and the two GraphQL-routed keys. */
 export const RepositoryConfig = z
   .looseObject({
     ...patchFieldShape,
@@ -572,6 +559,7 @@ export const RepositoryConfig = z
     }),
   )
   .meta({ id: "RepositoryConfig", allOf: commitMessagePairRules() });
+
 export type RepositoryConfig = z.infer<typeof RepositoryConfig>;
 
 /** The parsed commit-message fields are the spec's unions; a widened enum would type them as string. */

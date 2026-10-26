@@ -38,7 +38,7 @@ import {
   once,
   tokenValues,
 } from "./inputs.js";
-import { type CliStreams, cliIo, type MaskedStreams, maskedStreams } from "./io.js";
+import { type CliIo, type CliStreams, cliIo, type MaskedStreams, maskedStreams } from "./io.js";
 
 /** Every subcommand, in help order; the package smoke asserts the installed help names each. */
 export const CLI_COMMANDS = [
@@ -53,6 +53,7 @@ export const CLI_COMMANDS = [
 
 type CliCommand = (typeof CLI_COMMANDS)[number];
 
+/** What `--help` says of each subcommand. */
 const DESCRIPTION: Readonly<Record<CliCommand, string>> = {
   check: "Report drift between a settings file and the live repository; exits 1 on any drift",
   apply: "Apply a settings file to the repository",
@@ -84,15 +85,31 @@ interface Globals {
 }
 
 export interface ProgramOptions {
+  /** The environment and the client factory. */
   readonly host: CliHost;
+
   /** The output boundary every writer, the parser included, goes through. */
   readonly streams: MaskedStreams;
+
   /** Color the level labels and the permissions table; defaults to picocolors' detection. */
   readonly colors?: boolean;
+
   /** Run a parsed config to its end; tests capture the config here instead of running it. */
   readonly execute?: (cfg: RunConfig, io: Io) => Promise<RunEnd>;
+
   /** Run a parsed init config to its rendering; tests capture the config here instead of running it. */
   readonly executeInit?: (cfg: InitConfig, io: Io) => Promise<Rendered>;
+}
+
+/** What every subcommand's action shares; `exit` records the code main() returns. */
+interface Wiring {
+  readonly host: CliHost;
+  readonly streams: MaskedStreams;
+  readonly bold: (text: string) => string;
+  readonly execute: (cfg: RunConfig, io: Io) => Promise<RunEnd>;
+  readonly executeInit: (cfg: InitConfig, io: Io) => Promise<Rendered>;
+  readonly openIo: (globals: Globals) => CliIo;
+  readonly exit: (code: number) => void;
 }
 
 /** The production host: process.env and the real client. */
@@ -105,6 +122,133 @@ export function processHost(): CliHost {
 
 /** A terminal has no Actions artifact service, so the artifact report channel is refused at the parse. */
 const CLI_CAPABILITIES = { artifactUpload: false } as const;
+
+/** The root command with the four global flags, every line it prints going through the masked streams. */
+function rootProgram(streams: MaskedStreams): Command {
+  return new Command()
+    .name("github-settings-as-code")
+    .description(
+      "Apply, check, render, and validate declarative GitHub repository settings (also installed as gsac)",
+    )
+    .addOption(
+      new Option(
+        "--token <value>",
+        `${INPUT_DECLS.token.description} Falls back to GITHUB_TOKEN.`,
+      ).argParser(once("token")),
+    )
+    .option("--json", "Print the outputs as one JSON object on stdout; log lines move to stderr")
+    .addOption(
+      new Option(
+        "--summary <file>",
+        "Append the run's markdown summary to this file (under GitHub Actions, the step summary when absent)",
+      ).argParser(once("summary")),
+    )
+    .option("--verbose", "Show the debug trace on stderr")
+    .exitOverride()
+    .configureOutput({
+      writeOut: (text) => streams.stdout.write(text),
+      writeErr: (text) => streams.stderr.write(text),
+    });
+}
+
+/** Print a file-only command's result the way `--json` asks. */
+function present(streams: MaskedStreams, rendered: Rendered, globals: Globals): void {
+  if (globals.json === true) {
+    streams.stdout.write(`${JSON.stringify(rendered.json)}\n`);
+    return;
+  }
+
+  for (const line of rendered.lines) {
+    streams.stdout.write(`${line}\n`);
+  }
+}
+
+/** check, apply, render, and snapshot: each reads its flags as the action's inputs and runs its mode. */
+function addModeCommands(program: Command, wiring: Wiring): void {
+  for (const [name, mode] of Object.entries(MODE_COMMANDS) as [CliCommand, Mode][]) {
+    const command = program.command(name).description(DESCRIPTION[name]);
+    const subcommand = modeSubcommand(mode);
+    for (const input of subcommand.flags) {
+      command.addOption(inputOption(input, subcommand));
+    }
+
+    command.action(async function (this: Command) {
+      const values = this.optsWithGlobals<Globals & Record<string, unknown>>();
+      const { io, flush } = wiring.openIo(values);
+      const read = argvReader(mode, values);
+      // The envelope carries the fatal problem's text beside the outputs; the line itself is already on stderr.
+      let fatal: string | undefined;
+      const code = await parseConfig(read, wiring.host.env, CLI_CAPABILITIES).match(
+        async (cfg) => {
+          const end = await wiring.execute(cfg, io);
+          fatal = end.fatal === undefined ? undefined : describeProblem(end.fatal);
+          return end.exitCode;
+        },
+        async (problem) => {
+          fatal = describeProblem(problem);
+          return failRun(io, problem);
+        },
+      );
+      wiring.exit(code);
+      flush(fatal);
+    });
+  }
+}
+
+/** init: the snapshot flags of one repository, with the settings file as the destination. */
+function addInitCommand(program: Command, wiring: Wiring): void {
+  const init = program.command("init").description(DESCRIPTION.init);
+  for (const input of INIT_INPUTS) {
+    init.addOption(
+      input === "settings-file"
+        ? inputOption(input, INIT_SUBCOMMAND, INIT_SETTINGS_FILE_DESCRIPTION)
+        : inputOption(input, INIT_SUBCOMMAND),
+    );
+  }
+
+  init
+    .option("--force", "Replace the settings file when it already exists; without it, init refuses")
+    .action(async function (this: Command) {
+      const values = this.optsWithGlobals<
+        Globals & { force?: boolean } & Record<string, unknown>
+      >();
+      const { io } = wiring.openIo(values);
+      const read = argvReader("snapshot", values);
+      const rendered = await parseInitConfig(read, values.force === true, wiring.host.env).match(
+        (cfg) => wiring.executeInit(cfg, io),
+        async (problem) => failInit(io, problem, snapshotFileDestination(read)),
+      );
+      present(wiring.streams, rendered, values);
+      wiring.exit(rendered.code);
+    });
+}
+
+/** validate and permissions: a settings file alone, with no token and no API call. */
+function addFileCommands(program: Command, wiring: Wiring): void {
+  program
+    .command("validate")
+    .description(DESCRIPTION.validate)
+    .argument("<file>", "the settings file to validate")
+    .action(function (this: Command, file: string) {
+      const globals = this.optsWithGlobals<Globals>();
+      const { io } = wiring.openIo(globals);
+      const rendered = validateFile(file, io);
+      present(wiring.streams, rendered, globals);
+      wiring.exit(rendered.code);
+    });
+
+  program
+    .command("permissions")
+    .description(DESCRIPTION.permissions)
+    .argument("<file>", "the settings file whose sections decide the grant")
+    .action(function (this: Command, file: string) {
+      const globals = this.optsWithGlobals<Globals>();
+      const { io } = wiring.openIo(globals);
+      const rendered = permissionsFor(file, io, wiring.bold);
+      present(wiring.streams, rendered, globals);
+      wiring.exit(rendered.code);
+    });
+}
 
 /**
  * The whole command tree, wired to `options`; the exit code lands in the
@@ -130,128 +274,54 @@ export function buildProgram(options: ProgramOptions): {
   if (envToken !== undefined && envToken !== "") {
     streams.mask(envToken);
   }
+
   let exitCode = 0;
-  const program = new Command()
-    .name("github-settings-as-code")
-    .description(
-      "Apply, check, render, and validate declarative GitHub repository settings (also installed as gsac)",
-    )
-    .addOption(
-      new Option(
-        "--token <value>",
-        `${INPUT_DECLS.token.description} Falls back to GITHUB_TOKEN.`,
-      ).argParser(once("token")),
-    )
-    .option("--json", "Print the outputs as one JSON object on stdout; log lines move to stderr")
-    .addOption(
-      new Option(
-        "--summary <file>",
-        "Append the run's markdown summary to this file (under GitHub Actions, the step summary when absent)",
-      ).argParser(once("summary")),
-    )
-    .option("--verbose", "Show the debug trace on stderr")
-    .exitOverride()
-    .configureOutput({
-      writeOut: (text) => streams.stdout.write(text),
-      writeErr: (text) => streams.stderr.write(text),
-    });
-
-  const openIo = (globals: Globals) =>
-    cliIo({
-      streams,
-      json: globals.json === true,
-      verbose: globals.verbose === true,
-      summaryFile: globals.summary,
-      colors,
-    });
-
-  /** Print a file-only command's result the way `--json` asks. */
-  const present = (rendered: Rendered, globals: Globals): void => {
-    if (globals.json === true) {
-      streams.stdout.write(`${JSON.stringify(rendered.json)}\n`);
-      return;
-    }
-    for (const line of rendered.lines) {
-      streams.stdout.write(`${line}\n`);
-    }
+  const program = rootProgram(streams);
+  const wiring: Wiring = {
+    host,
+    streams,
+    bold: paint.bold,
+    execute,
+    executeInit,
+    openIo: (globals) =>
+      cliIo({
+        streams,
+        json: globals.json === true,
+        verbose: globals.verbose === true,
+        summaryFile: globals.summary,
+        colors,
+      }),
+    exit: (code) => {
+      exitCode = code;
+    },
   };
+  addModeCommands(program, wiring);
+  addInitCommand(program, wiring);
+  addFileCommands(program, wiring);
+  return { program, exitCode: () => exitCode };
+}
 
-  for (const [name, mode] of Object.entries(MODE_COMMANDS) as [CliCommand, Mode][]) {
-    const command = program.command(name).description(DESCRIPTION[name]);
-    const subcommand = modeSubcommand(mode);
-    for (const input of subcommand.flags) {
-      command.addOption(inputOption(input, subcommand));
-    }
-    command.action(async function (this: Command) {
-      const values = this.optsWithGlobals<Globals & Record<string, unknown>>();
-      const { io, flush } = openIo(values);
-      const read = argvReader(mode, values);
-      // The envelope carries the fatal problem's text beside the outputs; the line itself is already on stderr.
-      let fatal: string | undefined;
-      exitCode = await parseConfig(read, host.env, CLI_CAPABILITIES).match(
-        async (cfg) => {
-          const end = await execute(cfg, io);
-          fatal = end.fatal === undefined ? undefined : describeProblem(end.fatal);
-          return end.exitCode;
-        },
-        async (problem) => {
-          fatal = describeProblem(problem);
-          return failRun(io, problem);
-        },
-      );
-      flush(fatal);
-    });
-  }
-
-  const init = program.command("init").description(DESCRIPTION.init);
-  for (const input of INIT_INPUTS) {
-    init.addOption(
-      input === "settings-file"
-        ? inputOption(input, INIT_SUBCOMMAND, INIT_SETTINGS_FILE_DESCRIPTION)
-        : inputOption(input, INIT_SUBCOMMAND),
+/** The parser's own exit: commander already wrote its line (or the usage) to stderr, and --help exits 0, no failure. */
+function parserExit(error: CommanderError, failedJson: (message: string) => void): number {
+  // A missing subcommand is the usage shown as an error, whose message is commander's "(outputHelp)" sentinel.
+  if (error.exitCode !== 0) {
+    failedJson(
+      error.code === "commander.help"
+        ? "no subcommand was given; the usage above lists them"
+        : error.message.replace(/^error: /, ""),
     );
   }
-  init
-    .option("--force", "Replace the settings file when it already exists; without it, init refuses")
-    .action(async function (this: Command) {
-      const values = this.optsWithGlobals<
-        Globals & { force?: boolean } & Record<string, unknown>
-      >();
-      const { io } = openIo(values);
-      const read = argvReader("snapshot", values);
-      const rendered = await parseInitConfig(read, values.force === true, host.env).match(
-        (cfg) => executeInit(cfg, io),
-        async (problem) => failInit(io, problem, snapshotFileDestination(read)),
-      );
-      present(rendered, values);
-      exitCode = rendered.code;
-    });
 
-  program
-    .command("validate")
-    .description(DESCRIPTION.validate)
-    .argument("<file>", "the settings file to validate")
-    .action(function (this: Command, file: string) {
-      const globals = this.optsWithGlobals<Globals>();
-      const { io } = openIo(globals);
-      const rendered = validateFile(file, io);
-      present(rendered, globals);
-      exitCode = rendered.code;
-    });
+  return error.exitCode;
+}
 
-  program
-    .command("permissions")
-    .description(DESCRIPTION.permissions)
-    .argument("<file>", "the settings file whose sections decide the grant")
-    .action(function (this: Command, file: string) {
-      const globals = this.optsWithGlobals<Globals>();
-      const { io } = openIo(globals);
-      const rendered = permissionsFor(file, io, paint.bold);
-      present(rendered, globals);
-      exitCode = rendered.code;
-    });
-
-  return { program, exitCode: () => exitCode };
+/** The crash line; under --verbose the stack is already printed, so asking for it again would loop. */
+function crashMessage(error: unknown, verbose: boolean): string {
+  const detail = verbose && error instanceof Error && error.stack ? error.stack : String(error);
+  const remedy = verbose
+    ? "The stack above is the report: if it recurs, file a bug with it attached"
+    : "Re-run with --verbose for the stack; if it recurs, file a bug with that output attached";
+  return `github-settings-as-code stopped unexpectedly: ${detail}. ${remedy}`;
 }
 
 /**
@@ -282,25 +352,12 @@ export async function main(
     await program.parseAsync(argv);
   } catch (error) {
     if (error instanceof CommanderError) {
-      // Commander already wrote its line (or the usage) to stderr; --help exits 0 and is no failure. A missing
-      // subcommand is the usage shown as an error, whose message is commander's "(outputHelp)" sentinel.
-      if (error.exitCode !== 0) {
-        failedJson(
-          error.code === "commander.help"
-            ? "no subcommand was given; the usage above lists them"
-            : error.message.replace(/^error: /, ""),
-        );
-      }
-      return error.exitCode;
+      return parserExit(error, failedJson);
     }
+
     const globals = program.opts<Globals>();
     const verbose = globals.verbose === true;
-    const detail = verbose && error instanceof Error && error.stack ? error.stack : String(error);
-    // Under --verbose the stack is already printed, so asking for it again would loop.
-    const remedy = verbose
-      ? "The stack above is the report: if it recurs, file a bug with it attached"
-      : "Re-run with --verbose for the stack; if it recurs, file a bug with that output attached";
-    const message = `github-settings-as-code stopped unexpectedly: ${detail}. ${remedy}`;
+    const message = crashMessage(error, verbose);
     // The crash line goes through the same renderer as every other error line, so its label and color match.
     cliIo({
       streams,

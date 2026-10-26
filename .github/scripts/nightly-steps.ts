@@ -25,10 +25,16 @@ import { configureBotIdentity, leasePush } from "./lib/pr-branch.js";
 import { parseDiagnostics } from "./lib/tsc-diagnostics.js";
 import { capture, requireEnv, run, status } from "./lib/workflow-step.js";
 
+/** The packages describing GitHub's API that the lockstep tests read. */
 const SCHEMA_PACKAGES = ["@octokit/openapi", "@octokit/graphql-schema"] as const;
+
+/** The packages the typecheck reads. */
 const TYPES_PACKAGES = ["@octokit/types", "@octokit/openapi-types"] as const;
+
 /** Both named in every typecheck verdict: a diagnostic from either release reads the same in the log. */
 const TYPES_LATEST = TYPES_PACKAGES.map((pkg) => `${pkg}@latest`).join(" and ");
+
+/** The tests that hold the sections in lockstep with the descriptor and the GraphQL schema. */
 const LOCKSTEP_TESTS = [
   "test/e2e/openapi/validate.test.ts",
   "test/e2e/openapi/vocabulary-lockstep.test.ts",
@@ -160,21 +166,15 @@ function bumpBody(from: string, to: string, changed: string): string {
   ].join("\n");
 }
 
-function refreshOpenapi(): number | undefined {
-  const pinned = pinnedVersion(OPENAPI);
-  const latest = capture(["bun", "info", OPENAPI, "version"]);
+/** The line to print instead of bumping: the pin is already the latest, the registry rolled back behind it, or the bump PR is open. */
+function noBumpReason(pinned: string, latest: string, branch: string): string | undefined {
   if (pinned === latest) {
-    console.log(`${OPENAPI}@${pinned} is the latest; nothing to bump`);
-    return;
+    return `${OPENAPI}@${pinned} is the latest; nothing to bump`;
   }
   // A registry tag rolled back behind the pin would otherwise read as a release and open a downgrade PR.
   if (Bun.semver.order(latest, pinned) < 0) {
-    console.log(
-      `::notice::${OPENAPI}@${pinned} is ahead of the registry's latest ${latest}; nothing to bump`,
-    );
-    return;
+    return `::notice::${OPENAPI}@${pinned} is ahead of the registry's latest ${latest}; nothing to bump`;
   }
-  const branch = `nightly/openapi-${latest}`;
   // The PR is the postcondition, not the branch: a night whose push landed but whose gh call failed leaves the
   // branch alone, and the next night must not read that as done. --head matches a fork's branch of the same name
   // too, so only this repository's PRs count.
@@ -192,9 +192,13 @@ function refreshOpenapi(): number | undefined {
     "[.[] | select(.isCrossRepository | not)] | length",
   ]);
   if (open !== "0") {
-    console.log(`::notice::the bump PR for ${OPENAPI}@${latest} is already open from ${branch}`);
-    return;
+    return `::notice::the bump PR for ${OPENAPI}@${latest} is already open from ${branch}`;
   }
+  return undefined;
+}
+
+/** The bump as one bot commit: the pin moved, the descriptor-derived files and the schema regenerated, all staged; `changed` is git's stat of it. */
+function commitBump(latest: string): { subject: string; changed: string } {
   // --ignore-scripts: the install under the write token runs no lifecycle script; the checkout is the default
   // branch's, so the manifest it reads is main's own.
   run(["bun", "add", "-d", "--exact", "--ignore-scripts", `${OPENAPI}@${latest}`]);
@@ -206,16 +210,16 @@ function refreshOpenapi(): number | undefined {
   configureBotIdentity();
   const subject = `build(deps): bump ${OPENAPI} to ${latest}`;
   run(["git", "commit", "--no-verify", "-m", subject]);
-  // The whole gate, on the committed bump (build:check compares the generated files against the index): bump nights
-  // are rare and the minutes free, so the PR arrives green and a red night names the command in the log above.
-  if (status(["bun", "run", "check"]) !== 0) {
-    console.log(
-      `::error::bun run check fails against ${OPENAPI}@${latest}; the log above names the failing script, and nothing was pushed`,
-    );
-    return 1;
-  }
-  const token = requireEnv("TOKEN");
-  const canRetrigger = requireEnv("CAN_RETRIGGER");
+  return { subject, changed };
+}
+
+/** The push under an empty lease, then the draft PR from the branch; 1 with the refusal on the log when the push is refused. */
+function openBumpPr(
+  branch: string,
+  subject: string,
+  body: string,
+  token: string,
+): number | undefined {
   // An empty lease: the branch must not exist, so two runs racing for one night cannot push over each other, and
   // a branch a failed gh call stranded is never rewritten. Which of the two refused is read afresh: ls-remote
   // answers 0 for a present ref and 2 for an absent one.
@@ -230,18 +234,33 @@ function refreshOpenapi(): number | undefined {
     );
     return 1;
   }
-  run([
-    "gh",
-    "pr",
-    "create",
-    "--draft",
-    "--head",
-    branch,
-    "--title",
-    subject,
-    "--body",
-    bumpBody(pinned, latest, changed),
-  ]);
+  run(["gh", "pr", "create", "--draft", "--head", branch, "--title", subject, "--body", body]);
+}
+
+function refreshOpenapi(): number | undefined {
+  const pinned = pinnedVersion(OPENAPI);
+  const latest = capture(["bun", "info", OPENAPI, "version"]);
+  const branch = `nightly/openapi-${latest}`;
+  const reason = noBumpReason(pinned, latest, branch);
+  if (reason !== undefined) {
+    console.log(reason);
+    return;
+  }
+  const { subject, changed } = commitBump(latest);
+  // The whole gate, on the committed bump (build:check compares the generated files against the index): bump nights
+  // are rare and the minutes free, so the PR arrives green and a red night names the command in the log above.
+  if (status(["bun", "run", "check"]) !== 0) {
+    console.log(
+      `::error::bun run check fails against ${OPENAPI}@${latest}; the log above names the failing script, and nothing was pushed`,
+    );
+    return 1;
+  }
+  const token = requireEnv("TOKEN");
+  const canRetrigger = requireEnv("CAN_RETRIGGER");
+  const refused = openBumpPr(branch, subject, bumpBody(pinned, latest, changed), token);
+  if (refused !== undefined) {
+    return refused;
+  }
   if (canRetrigger === "true") {
     return;
   }

@@ -8,17 +8,15 @@ import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { devNull } from "node:os";
 import { join } from "node:path";
 
+/** What one step run produced; `outputs` is the GITHUB_OUTPUT file's lines. */
 export interface StepResult {
   stdout: string;
   stderr: string;
   status: number;
-  /** The GITHUB_OUTPUT file's lines. */
   outputs: string[];
 }
 
-/** The step runs git as a runner would: no exported identity (GIT_AUTHOR_* and GIT_COMMITTER_* outrank the config
- * configureBotIdentity writes, so a developer shell that exports them signs the bot's commits as the developer) and
- * no global or system git config. The step's own cwd config is the one git reads. */
+/** Git as a runner sees it: GIT_AUTHOR_* and GIT_COMMITTER_* outrank the config configureBotIdentity writes (a developer shell exporting them would sign the bot's commits as the developer), and no global or system config is read. */
 const AMBIENT_GIT_CLEARED: Record<string, string | undefined> = {
   GIT_AUTHOR_NAME: undefined,
   GIT_AUTHOR_EMAIL: undefined,

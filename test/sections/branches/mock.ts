@@ -37,6 +37,65 @@ import {
 } from "../../e2e/mock/support.js";
 
 /**
+ * The members of the bracket class whose body starts at `start`, as regex-class text, with the index of
+ * the closing bracket (-1 when none closes it). Members walk one at a time: a backslash escapes the next
+ * character (so an escaped "]" does not close the class), an unescaped "-" keeps its range meaning,
+ * everything else is literal.
+ */
+function classMembers(pattern: string, start: number): { members: string; close: number } {
+  let members = "";
+  for (let j = start; j < pattern.length; j++) {
+    const member = pattern[j] as string;
+    if (member === "]") {
+      return { members, close: j };
+    }
+    const escaped = member === "\\" && j + 1 < pattern.length;
+    const literal = escaped ? (pattern[++j] as string) : member;
+    members += !escaped && literal === "-" ? "-" : literal.replace(/[\]\\^[-]/g, "\\$&");
+  }
+  return { members, close: -1 };
+}
+
+/** The regex of the bracket class opening at `open` and the index of its closing bracket, or null when none closes it, so the bracket is literal. */
+function bracketClass(pattern: string, open: number): { regex: string; close: number } | null {
+  // Ruby negates on "!" or "^"; a leading "]" closes the class at once (an empty class matches nothing).
+  const negated = pattern[open + 1] === "!" || pattern[open + 1] === "^";
+  const { members, close } = classMembers(pattern, open + (negated ? 2 : 1));
+  if (close < 0) {
+    return null;
+  }
+  // No class consumes a slash (fnmatch's FNM_PATHNAME), a positive one listing it included.
+  return { regex: negated ? `[^/${members}]` : `(?!/)[${members}]`, close };
+}
+
+/** The regex of the pattern token at `at` and the index of its last character. */
+function tokenAt(pattern: string, at: number): { regex: string; last: number } {
+  const ch = pattern[at] as string;
+  if (ch === "*" && pattern[at + 1] === "*" && pattern[at + 2] === "/") {
+    return { regex: "(?:[^/]*/)*", last: at + 2 };
+  }
+  if (ch === "*") {
+    return { regex: "[^/]*", last: pattern[at + 1] === "*" ? at + 1 : at };
+  }
+  if (ch === "?") {
+    return { regex: "[^/]", last: at };
+  }
+  if (ch === "\\") {
+    // A backslash escapes the next character (Ruby has no FNM_NOESCAPE here); a trailing one is dropped.
+    const next = pattern[at + 1];
+    if (next === undefined) {
+      return { regex: "", last: at };
+    }
+    return { regex: next.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&"), last: at + 1 };
+  }
+  if (ch === "[") {
+    const cls = bracketClass(pattern, at);
+    return cls === null ? { regex: "\\[", last: at } : { regex: cls.regex, last: cls.close };
+  }
+  return { regex: ch.replace(/[.+^${}()|\\]/g, "\\$&"), last: at };
+}
+
+/**
  * GitHub's fnmatch (Ruby's, FNM_PATHNAME) for classic rule patterns: `*` and `?` stop at a slash,
  * only a double star followed by a slash crosses one (a bare double star is `*`), a bracket class
  * follows Ruby (`!` or `^` negates, a leading `]` closes it), a backslash escapes the next
@@ -45,52 +104,9 @@ import {
 export function wildcardMatches(pattern: string, branch: string): boolean {
   let regex = "";
   for (let i = 0; i < pattern.length; i++) {
-    const ch = pattern[i] as string;
-    if (ch === "*" && pattern[i + 1] === "*" && pattern[i + 2] === "/") {
-      regex += "(?:[^/]*/)*";
-      i += 2;
-    } else if (ch === "*") {
-      regex += "[^/]*";
-      if (pattern[i + 1] === "*") {
-        i++;
-      }
-    } else if (ch === "?") {
-      regex += "[^/]";
-    } else if (ch === "\\") {
-      // A backslash escapes the next character (Ruby has no FNM_NOESCAPE here); a trailing one is dropped.
-      const next = pattern[i + 1];
-      if (next !== undefined) {
-        regex += next.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
-        i++;
-      }
-    } else if (ch === "[") {
-      // Ruby negates on "!" or "^"; a leading "]" closes the class at once (an empty class matches nothing).
-      const negated = pattern[i + 1] === "!" || pattern[i + 1] === "^";
-      const start = i + (negated ? 2 : 1);
-      // Members walk one at a time: a backslash escapes the next character (so an escaped "]" does
-      // not close the class), an unescaped "-" keeps its range meaning, everything else is literal.
-      let members = "";
-      let close = -1;
-      for (let j = start; j < pattern.length; j++) {
-        const member = pattern[j] as string;
-        if (member === "]") {
-          close = j;
-          break;
-        }
-        const escaped = member === "\\" && j + 1 < pattern.length;
-        const literal = escaped ? (pattern[++j] as string) : member;
-        members += !escaped && literal === "-" ? "-" : literal.replace(/[\]\\^[-]/g, "\\$&");
-      }
-      if (close < 0) {
-        regex += "\\[";
-      } else {
-        // No class consumes a slash (fnmatch's FNM_PATHNAME), a positive one listing it included.
-        regex += negated ? `[^/${members}]` : `(?!/)[${members}]`;
-        i = close;
-      }
-    } else {
-      regex += ch.replace(/[.+^${}()|\\]/g, "\\$&");
-    }
+    const token = tokenAt(pattern, i);
+    regex += token.regex;
+    i = token.last;
   }
   return new RegExp(`^${regex}$`).test(branch);
 }
@@ -185,11 +201,7 @@ function actorsAsGitHubReadsBack(payload: Json): Json {
   return out;
 }
 
-/**
- * The boolean controls the protection PUT takes: the GET-wrapped ones minus required_signatures,
- * which is its own sub-resource. GitHub 422s a non-boolean there, the {url, enabled} wrapper a
- * copied GET response carries included; null passes only under the NULLABLE_CONTROLS.
- */
+/** The boolean controls the protection PUT takes (the GET-wrapped ones minus required_signatures, its own sub-resource): GitHub 422s a non-boolean there, a copied GET's {url, enabled} wrapper included, and null passes only under NULLABLE_CONTROLS. */
 const PUT_BOOLEAN_CONTROLS = [...BOOLEAN_CONTROL_SET].filter(
   (key) => key !== "required_signatures",
 );
@@ -240,6 +252,21 @@ function missingRestrictionListResponse(payload: Json): MockResponse | null {
   return missing === undefined ? null : validationFailed(`"${missing}" wasn't supplied.`);
 }
 
+/** The branches a `protected` query filter keeps: the protected ones, the unprotected ones, or all when it is absent. */
+function filteredByProtection(
+  all: string[],
+  protectedNames: string[],
+  filter: string | undefined,
+): string[] {
+  if (filter === "true") {
+    return all.filter((name) => protectedNames.includes(name));
+  }
+  if (filter === "false") {
+    return all.filter((name) => !protectedNames.includes(name));
+  }
+  return all;
+}
+
 export const branchesMockHandlers: SectionRestHandlers<"branches"> = {
   "branches.listProtected": ({ state, param, query }) => {
     // A branch a wildcard rule matches is protected too, as on GitHub, where the REST view serves
@@ -249,12 +276,7 @@ export const branchesMockHandlers: SectionRestHandlers<"branches"> = {
     ].filter((name) => effectiveProtection(state, name) !== null);
     // A protected branch exists even when the branches family does not list it.
     const all = [...new Set([...state.branches, ...protectedNames])];
-    const names =
-      query.protected === "true"
-        ? all.filter((name) => protectedNames.includes(name))
-        : query.protected === "false"
-          ? all.filter((name) => !protectedNames.includes(name))
-          : all;
+    const names = filteredByProtection(all, protectedNames, query.protected);
     const slug = `${param("owner")}/${param("repo")}`;
     return paged(
       names.map((name) => ({

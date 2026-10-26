@@ -12,7 +12,7 @@ The [module map](#the-module-map) at the end is generated from [architecture.yml
 
 A Biome linter plugin, `lint/never-throw.grit`, enforces the never-throw rule: a function that can fail returns a neverthrow `Result` carrying a typed `Problem`, so an error is a value the caller handles. A section's `plan()`, `snapshot()`, and operation hooks carry a `SectionFailure` instead, which the engine loops match on by kind.
 
-A `throw` is allowed as a `BUG:` invariant, as a bare rethrow inside its own `catch`, or where a third party's contract demands it, in a file the plugin's entry in `biome.json` exempts and the plugin's header names with its reason.
+A `throw` is allowed as a `BUG:` invariant, as a bare rethrow inside its own `catch`, or where a third party's contract demands it, in a file the plugin's entry in `biome.local.jsonc` exempts and the plugin's header names with its reason.
 
 ## The journey of one settings file
 

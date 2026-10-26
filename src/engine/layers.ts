@@ -264,6 +264,79 @@ type Placement =
     }
   | { readonly item: unknown; readonly index: number; readonly slot: undefined };
 
+/** A higher entry that claims a lower one. */
+type Placed = Extract<Placement, { readonly slot: number }>;
+
+/** What every lower entry of one keyed union is placed under. */
+interface Union {
+  readonly keyed: KeyedListLayering;
+  readonly directive: Uniting;
+  readonly path: string;
+  readonly step: Step;
+  readonly lowerKeys: readonly (readonly string[])[];
+  readonly placed: readonly Placed[];
+}
+
+function intersect(a: readonly string[], b: readonly string[]): boolean {
+  return a.some((key) => b.includes(key));
+}
+
+/** How many of `among` share a key with `keys`. */
+function claims(keys: readonly string[], among: readonly (readonly string[])[]): number {
+  return among.filter((other) => intersect(keys, other)).length;
+}
+
+/** Each higher entry with the lower entry it claims (`slot`), read off the lower list as it stood before this layer. */
+function placementsOf(
+  lowerKeys: readonly (readonly string[])[],
+  higher: readonly unknown[],
+  keyed: KeyedListLayering,
+): Placement[] {
+  return higher.map((item, index): Placement => {
+    const keys = isPlainObject(item) ? keyed.keys(item) : null;
+    const slot = keys === null ? -1 : lowerKeys.findIndex((claims) => intersect(claims, keys));
+    return isPlainObject(item) && keys !== null && slot !== -1
+      ? { item, index, keys, slot }
+      : { item, index, slot: undefined };
+  });
+}
+
+/**
+ * A lower entry under the higher entries placed on it: kept when none claims it; else, per claimant, dropped by a
+ * removal (noticed), merged field by field as a one-to-one pair under deep, or the claimant as written.
+ */
+function placeOver(union: Union, below: unknown, index: number): unknown[] {
+  const keys = union.lowerKeys[index] ?? [];
+  if (!union.placed.some((p) => intersect(keys, p.keys))) {
+    return [below];
+  }
+
+  const out: unknown[] = [];
+  for (const placement of union.placed) {
+    if (placement.slot !== index) {
+      continue;
+    }
+
+    const site = `${union.path}[${placement.index}]`;
+    if (isRemoval(placement.item)) {
+      union.step.notices.push({ layer: union.step.layer, path: site });
+      continue;
+    }
+
+    const paired =
+      claims(
+        keys,
+        union.placed.map((p) => p.keys),
+      ) === 1 && claims(placement.keys, union.lowerKeys) === 1;
+    out.push(
+      union.directive === "deep" && paired
+        ? mergeValue(below, placement.item, site, union.step, entryScope(union.keyed))
+        : copiedAsWritten(placement.item, union.keyed, site, "swapped", union.step),
+    );
+  }
+  return out;
+}
+
 /**
  * Matching reads the lower list as it stood before this layer, so which entries result does not depend on the higher
  * entries' order. Only a one-to-one pair merges field by field under deep: an entry that claims, or is claimed by, more
@@ -281,47 +354,15 @@ function unionKeyed(
   path: string,
   step: Step,
 ): unknown[] {
-  const intersect = (a: readonly string[], b: readonly string[]): boolean =>
-    a.some((key) => b.includes(key));
   const lowerKeys = lower.map((item) => (isPlainObject(item) ? keyed.keys(item) : null) ?? []);
-  const placements = higher.map((item, index): Placement => {
-    const keys = isPlainObject(item) ? keyed.keys(item) : null;
-    const slot = keys === null ? -1 : lowerKeys.findIndex((claims) => intersect(claims, keys));
-    return isPlainObject(item) && keys !== null && slot !== -1
-      ? { item, index, keys, slot }
-      : { item, index, slot: undefined };
-  });
+  const placements = placementsOf(lowerKeys, higher, keyed);
   const placed = placements.flatMap((p) => (p.slot === undefined ? [] : [p]));
-  const claims = (keys: readonly string[], among: readonly (readonly string[])[]): number =>
-    among.filter((other) => intersect(keys, other)).length;
+  const union: Union = { keyed, directive, path, step, lowerKeys, placed };
   const out: unknown[] = [];
-  lower.forEach((below, index) => {
-    const keys = lowerKeys[index] ?? [];
-    if (!placed.some((p) => intersect(keys, p.keys))) {
-      out.push(below);
-      return;
-    }
-    for (const placement of placed) {
-      if (placement.slot !== index) {
-        continue;
-      }
-      const site = `${path}[${placement.index}]`;
-      if (isRemoval(placement.item)) {
-        step.notices.push({ layer: step.layer, path: site });
-        continue;
-      }
-      const paired =
-        claims(
-          keys,
-          placed.map((p) => p.keys),
-        ) === 1 && claims(placement.keys, lowerKeys) === 1;
-      out.push(
-        directive === "deep" && paired
-          ? mergeValue(below, placement.item, site, step, entryScope(keyed))
-          : copiedAsWritten(placement.item, keyed, site, "swapped", step),
-      );
-    }
-  });
+  for (const [index, below] of lower.entries()) {
+    out.push(...placeOver(union, below, index));
+  }
+
   for (const { item, index, slot } of placements) {
     if (slot !== undefined) {
       continue;
@@ -383,10 +424,9 @@ function mergeStep(acc: unknown, layer: AdmittedLayer, step: Step): unknown {
   return out;
 }
 
-/** The layer as its own validation sees it, and the way back from what that validation says to the layer as written. */
+/** The layer as its own validation sees it, and `asWritten`, the way back from what that validation says to the layer as written (`SeparatedRemovals.asWritten`: the view dropped the removal entries, and validation counts what it sees). */
 export interface StandaloneView {
   readonly doc: unknown;
-  /** `SeparatedRemovals.asWritten` for the layer: the view dropped its removal entries, and validation counts what it sees. */
   readonly asWritten: (issue: string) => string;
 }
 

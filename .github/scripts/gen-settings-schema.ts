@@ -85,9 +85,10 @@ function encodeRefs(node: unknown): void {
 }
 encodeRefs(generated);
 
-// No layout assumption is guarded here: a future zod's shape change or a broken emission fails the
-// published-schema tests (ajv compile plus fixture round-trips), which load the file this script writes.
+// No layout assumption is guarded here: a future zod's shape change or a broken emission fails the published-schema tests (ajv compile plus fixture round-trips), which load the file this script writes.
 const { definitions, ...rest } = generated;
+
+// Sorted so the built file is deterministic.
 const sortedDefinitions = Object.fromEntries(
   Object.entries(definitions ?? {}).sort(([a], [b]) => (a < b ? -1 : 1)),
 );

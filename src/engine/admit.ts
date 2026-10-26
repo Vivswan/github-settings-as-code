@@ -61,19 +61,19 @@ function refuse(layer: string, site: string, refusal: Refusal): Result<never, La
   return err({ layer, site, ...refusal });
 }
 
+/** A list section past the boundary; `knobs` holds the wrapper's keys besides `entries` and `_layering`: `_undeclared`, or a typo kept for validation to name. */
 export interface AdmittedSection {
-  /** The wrapper's keys besides `entries` and `_layering`: `_undeclared`, or a typo kept for validation to name. */
   readonly knobs: Readonly<Record<string, unknown>>;
   readonly entries: readonly Readonly<Record<string, unknown>>[];
   readonly layering: Layering;
   readonly keyed: KeyedListLayering;
 }
 
+/** A layer past the boundary; `undeclared` is its file-wide `_undeclared`, when it sets one. */
 export interface AdmittedLayer {
   readonly name: string;
   readonly doc: Readonly<Record<string, unknown>>;
   readonly sections: ReadonlyMap<string, AdmittedSection>;
-  /** The layer's file-wide `_undeclared`, when it sets one. */
   readonly undeclared: UndeclaredPolicy | undefined;
 }
 
@@ -177,6 +177,47 @@ function checkRemoval(
   return ok();
 }
 
+/** The refusal for an entry without its key, naming the composite's other paths when the module declares one. */
+function refuseNoKey(
+  layer: string,
+  site: string,
+  keyed: KeyedListLayering,
+): Result<never, LayerProblem> {
+  const alongside = removalPaths(keyed).filter((path) => path !== keyed.keyField);
+  return refuse(layer, site, {
+    code: "layer-no-key",
+    keyField: keyed.keyField,
+    ...(keyed.keyKind === undefined ? {} : { keyKind: keyed.keyKind }),
+    ...(alongside.length === 0 ? {} : { alongside }),
+  });
+}
+
+/** An entry's nested keyed lists, each admitted and checked under the entry's site with no directive: the parent pair decides their fate. */
+function checkNestedLists(
+  layer: string,
+  entry: Readonly<Record<string, unknown>>,
+  keyed: KeyedListLayering,
+  site: string,
+): Result<void, LayerProblem> {
+  for (const [field, nested] of Object.entries(keyed.nested ?? {})) {
+    const form = nestedForm(entry[field]);
+    if (form === null) {
+      continue;
+    }
+
+    // The wrapper is transparent to the path, as in the rendered order: `environments[0].variables[1]` under both forms.
+    const nestedPath = `${site}.${field}`;
+    const checked = admitEntries(layer, nestedPath, form.entries).andThen((mappings) =>
+      checkKeyed(layer, mappings, nested, nestedPath, undefined),
+    );
+    if (checked.isErr()) {
+      return checked;
+    }
+  }
+
+  return ok();
+}
+
 /**
  * Two entries of one layer claiming a key (a label renaming into a sibling's name) are refused here, so unionKeyed
  * never meets them; a removal entry is checked for its shape here and for something to remove at the fold. `directive`
@@ -196,16 +237,12 @@ function checkKeyed(
     if (removal.isErr()) {
       return removal;
     }
+
     const keys = keyed.keys(entry);
     if (keys === null) {
-      const alongside = removalPaths(keyed).filter((path) => path !== keyed.keyField);
-      return refuse(layer, site, {
-        code: "layer-no-key",
-        keyField: keyed.keyField,
-        ...(keyed.keyKind === undefined ? {} : { keyKind: keyed.keyKind }),
-        ...(alongside.length === 0 ? {} : { alongside }),
-      });
+      return refuseNoKey(layer, site, keyed);
     }
+
     for (const key of keys) {
       const first = seen.get(key);
       if (first !== undefined) {
@@ -218,21 +255,13 @@ function checkKeyed(
       }
       seen.set(key, index);
     }
-    for (const [field, nested] of Object.entries(keyed.nested ?? {})) {
-      const form = nestedForm(entry[field]);
-      if (form === null) {
-        continue;
-      }
-      // The wrapper is transparent to the path, as in the rendered order: `environments[0].variables[1]` under both forms.
-      const nestedPath = `${site}.${field}`;
-      const checked = admitEntries(layer, nestedPath, form.entries).andThen((mappings) =>
-        checkKeyed(layer, mappings, nested, nestedPath, undefined),
-      );
-      if (checked.isErr()) {
-        return checked;
-      }
+
+    const nested = checkNestedLists(layer, entry, keyed, site);
+    if (nested.isErr()) {
+      return nested;
     }
   }
+
   return ok();
 }
 

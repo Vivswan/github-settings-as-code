@@ -10,6 +10,7 @@ import { exactName, type ListComparable, type ListWrite } from "../shared/list/d
 import { listSection } from "../shared/list/section.js";
 import { MilestoneConfig } from "./schema.js";
 
+declare const milestoneDueDay: unique symbol;
 /**
  * GitHub keeps only the day of a due_on, read off the sent instant in US Pacific, and echoes it as that
  * day's Pacific midnight (07:00Z or 08:00Z): a UTC midnight lands on the previous day, and only a
@@ -17,7 +18,6 @@ import { MilestoneConfig } from "./schema.js";
  * file declares and the snapshot writes; the wire hook sends it as noon UTC, which GitHub stores on the
  * same day in either DST state, so the write converges on the compared day.
  */
-declare const milestoneDueDay: unique symbol;
 type DueDay = string & { readonly [milestoneDueDay]: true };
 
 declare const milestoneDueOn: unique symbol;
@@ -63,7 +63,6 @@ const ENDPOINTS = {
   },
 } as const satisfies Record<string, EndpointDecl>;
 
-/** Deleting a milestone detaches it from its issues; every undeclared-delete line says so. */
 const DETACH_ACTION = "DELETE it, detaching it from every issue that carries it";
 
 export const milestonesSection = listSection({

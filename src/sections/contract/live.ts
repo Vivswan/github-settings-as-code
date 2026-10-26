@@ -21,14 +21,16 @@ export function plural(noun: string): string {
   return /(s|x|ch|sh)$/.test(noun) ? `${noun}es` : `${noun}s`;
 }
 
+declare const LIVE_IDENTITY: unique symbol;
+
+/** The brand liveIdentity() alone mints, so every producer of a duplicate-identity message renders alike. */
+export type LiveIdentity = string & { readonly [LIVE_IDENTITY]: true };
+
 /**
  * The ONE rendering of a live item in a duplicate-identity message: the human key, then the server-side
  * addressing values that tell two apart (`v1 (milestone number 1)`; a value equal to the key adds nothing,
- * so a label's address IS its name). The brand is minted here alone, so every producer renders alike.
+ * so a label's address IS its name).
  */
-declare const LIVE_IDENTITY: unique symbol;
-export type LiveIdentity = string & { readonly [LIVE_IDENTITY]: true };
-
 export function liveIdentity(
   name: string,
   address: Readonly<Record<string, string | number | undefined>> = {},

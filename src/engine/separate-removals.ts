@@ -25,8 +25,38 @@ type SourceIndices = Map<string, readonly number[]>;
 interface Partition {
   /** The entries minus the removals, each entry's declared nested lists partitioned in turn. */
   readonly kept: unknown[];
+
   /** Each removal by its marker's site (`labels[0]._remove`); a removal's own nested lists are not entered. */
   readonly sites: string[];
+}
+
+/** A kept entry with each declared nested list partitioned in turn, and the sites of the removals below it. */
+function partitionNestedLists(
+  entry: Readonly<Record<string, unknown>>,
+  keyed: KeyedListLayering,
+  site: string,
+  viewSite: string,
+  sources: SourceIndices,
+): { entry: Record<string, unknown>; sites: string[] } {
+  const out: Record<string, unknown> = { ...entry };
+  const sites: string[] = [];
+  for (const [field, nested] of Object.entries(keyed.nested ?? {})) {
+    const form = nestedForm(entry[field]);
+    if (form === null) {
+      continue;
+    }
+
+    const below = partitionRemovals(
+      form.entries,
+      nested,
+      `${site}.${field}`,
+      form.knobs === null ? `${viewSite}.${field}` : `${viewSite}.${field}.entries`,
+      sources,
+    );
+    sites.push(...below.sites);
+    out[field] = form.knobs === null ? below.kept : { ...form.knobs, entries: below.kept };
+  }
+  return { entry: out, sites };
 }
 
 /**
@@ -52,31 +82,20 @@ function partitionRemovals(
       kept.push(entry);
       continue;
     }
+
     const site = `${path}[${index}]`;
     if (carriesRemoval(entry)) {
       sites.push(`${site}.${REMOVE_KEY}`);
       continue;
     }
+
     const viewSite = `${viewPath}[${kept.length}]`;
     origins.push(index);
-    const out: Record<string, unknown> = { ...entry };
-    for (const [field, nested] of Object.entries(keyed.nested ?? {})) {
-      const form = nestedForm(entry[field]);
-      if (form === null) {
-        continue;
-      }
-      const below = partitionRemovals(
-        form.entries,
-        nested,
-        `${site}.${field}`,
-        form.knobs === null ? `${viewSite}.${field}` : `${viewSite}.${field}.entries`,
-        sources,
-      );
-      sites.push(...below.sites);
-      out[field] = form.knobs === null ? below.kept : { ...form.knobs, entries: below.kept };
-    }
-    kept.push(out);
+    const below = partitionNestedLists(entry, keyed, site, viewSite, sources);
+    sites.push(...below.sites);
+    kept.push(below.entry);
   }
+
   if (origins.some((source, index) => source !== index)) {
     sources.set(viewPath, origins);
   }
@@ -118,12 +137,11 @@ function renumbering(sources: SourceIndices): (issue: string) => string {
 export interface SeparatedRemovals {
   /** The document minus every entry carrying `_remove`, in either list form and at any depth; the wrappers' knobs stay. */
   readonly rest: unknown;
+
   /** Each removal's site (`labels[0]._remove`): list sections in LIST_SECTIONS order, each list as written, nested lists under their entry. */
   readonly sites: readonly string[];
-  /**
-   * A validation issue over `rest`, its leading path renumbered to the document as written: a removal dropped from
-   * the list shifts every entry after it, so `labels[0].color` in `rest` is the reader's `labels[1].color`.
-   */
+
+  /** A validation issue over `rest`, its leading path renumbered to the document as written: a removal dropped from the list shifts every entry after it, so `labels[0].color` in `rest` is the reader's `labels[1].color`. */
   readonly asWritten: (issue: string) => string;
 }
 

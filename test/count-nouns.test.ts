@@ -10,26 +10,22 @@ import { parseSync, Visitor } from "oxc-parser";
 import { ROOT } from "./root.js";
 import { withTempDir } from "./temp-dir.js";
 
+/** The directories whose authored strings the rule covers. */
 const SCANNED_DIRS = ["src", ".github/scripts"];
 
 /** GitHub's own prose, rendered verbatim from its descriptor; the rule is for the strings this repository authors. */
 const UNSCANNED_DIR = "src/generated/";
 
-/**
- * A word then "(s)", read in the source text. A lambda parameter `(s) =>` has no word before its paren, and the `n` of a `\n` escape is
- * not a word either, so neither matches.
- */
+/** A word then "(s)" in the source text; a lambda's `(s) =>` has no word before its paren and the `n` of a `\n` escape is no word either, so neither matches. */
 const COUNT_PARENTHETICAL = /(?<!\\)\w\(s\)/g;
 
-/**
- * A "BUG:" message names a programming error to the developer holding the stack: the list in brackets beside the noun carries the count,
- * and no run reports it to a user.
- */
+/** A "BUG:" message is for the developer holding the stack, its bracketed list carrying the count, and no run reports it to a user. */
 const INVARIANT_PREFIX = "BUG:";
 
 /** Stands in for the `}` that closes the hole before a template's later quasis, so `${noun}(s)` reads as a word before the paren. */
 const HOLE = "_";
 
+/** The remedy every hit line ends with. */
 const FIX =
   'spells a count as "(s)"; write countNoun(count, one, many) or agree(count, one, many) from src/text.ts';
 

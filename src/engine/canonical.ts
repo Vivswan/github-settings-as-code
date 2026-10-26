@@ -15,20 +15,20 @@
  *   unknown keys, everywhere          -> by code point after the declared ones; JavaScript enumerates an integer-like
  *                                        key ("10") ahead of every other key in numeric order, so those lead
  *   scalars                           -> as written
+ *
+ * LIST_IDENTITY names each sorted list by its path: the section key, `[]` per entry level, `.field` per nested
+ * mapping, a knob wrapper's `entries` transparent (`labels`, not `labels.entries`). A list section's identity is
+ * what its declaration keys the planner by (test/engine/canonical.test.ts pins them); a bespoke section's is the
+ * field its planner pairs live items on.
  */
 
 import { stringify as stringifyYaml } from "yaml";
 import type { z } from "zod";
 import { isPlainObject, own, put } from "../plain-data.js";
 import { SECTION_KEYS, SettingsFile } from "../schema.js";
-import { schemaNode } from "../sections/shared/schema-node.js";
+import { type SchemaNode, schemaNode } from "../sections/shared/schema-node.js";
 
-/**
- * The identity field of every mapping list the walk sorts, by list path: the section key, `[]` per entry level,
- * `.field` per nested mapping; a knob wrapper's `entries` is transparent (`labels`, not `labels.entries`). A list
- * section's entry is what its declaration keys the planner by (test/engine/canonical.test.ts pins them); a bespoke
- * section's is the field its planner pairs live items on. A dotted value is a path into the entry (`config.url`).
- */
+/** The identity field of every mapping list the walk sorts, by list path; a dotted value is a path into the entry (`config.url`). */
 export const LIST_IDENTITY: Readonly<Record<string, string>> = {
   labels: "name",
   rulesets: "name",
@@ -61,10 +61,7 @@ export const LIST_IDENTITY: Readonly<Record<string, string>> = {
   "branches[].protection.required_status_checks.checks": "context",
 };
 
-/**
- * The mapping lists kept as written, each with the reason its order is content or has no key. The completeness
- * test pins every mapping list the schema declares to LIST_IDENTITY or this table.
- */
+/** The mapping lists kept as written, each with the reason its order is content or has no key; the completeness test pins every mapping list the schema declares to LIST_IDENTITY or this table. */
 export const LISTS_AS_WRITTEN: Readonly<Record<string, string>> = {
   branches:
     "GitHub applies overlapping wildcard rules in creation order, and apply creates the entries in file order",
@@ -225,6 +222,46 @@ function mappingNode(
   return out;
 }
 
+/** A record's values under its one value schema, keys by code point. */
+function recordNode(
+  value: Readonly<Record<string, unknown>>,
+  valueSchema: z.ZodType,
+  path: string,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of orderedKeys(value, [])) {
+    put(out, key, canonicalNode(value[key], valueSchema, `${path}.*`));
+  }
+  return out;
+}
+
+/** A union: the knob wrapper's two forms by shape, else the first option that admits the value, parsed only when two do. */
+function unionNode(
+  value: unknown,
+  node: Extract<SchemaNode, { kind: "union" }>,
+  path: string,
+): unknown {
+  const { knob } = node;
+  if (knob !== null) {
+    if (Array.isArray(value)) {
+      return canonicalNode(value, knob.list, path);
+    }
+    if (!isPlainObject(value)) {
+      return unknownNode(value);
+    }
+    const { shape } = knob.wrapper;
+    // The wrapper is transparent to the list path, so `labels` names the entries under both forms.
+    return mappingNode(value, shape, Object.keys(shape), (key) =>
+      key === "entries" ? path : `${path}.${key}`,
+    );
+  }
+
+  const fits = node.options.filter((option) => admits(option, value));
+  const option =
+    fits.length > 1 ? (fits.find((o) => o.safeParse(value).success) ?? fits[0]) : fits[0];
+  return option === undefined ? unknownNode(value) : canonicalNode(value, option, path);
+}
+
 function canonicalNode(value: unknown, schema: z.ZodType | undefined, path: string): unknown {
   if (schema === undefined || value === null || value === undefined) {
     return unknownNode(value);
@@ -247,42 +284,20 @@ function canonicalNode(value: unknown, schema: z.ZodType | undefined, path: stri
         path,
         value.map((item) => canonicalNode(item, node.element, `${path}[]`)),
       );
-    case "record": {
+    case "record":
       if (!isPlainObject(value)) {
         return unknownNode(value);
       }
-      const out: Record<string, unknown> = {};
-      for (const key of orderedKeys(value, [])) {
-        put(out, key, canonicalNode(value[key], node.value, `${path}.*`));
-      }
-      return out;
-    }
-    case "union": {
-      const { knob } = node;
-      if (knob !== null) {
-        if (Array.isArray(value)) {
-          return canonicalNode(value, knob.list, path);
-        }
-        if (!isPlainObject(value)) {
-          return unknownNode(value);
-        }
-        const { shape } = knob.wrapper;
-        // The wrapper is transparent to the list path, so `labels` names the entries under both forms.
-        return mappingNode(value, shape, Object.keys(shape), (key) =>
-          key === "entries" ? path : `${path}.${key}`,
-        );
-      }
-      const fits = node.options.filter((option) => admits(option, value));
-      const option =
-        fits.length > 1 ? (fits.find((o) => o.safeParse(value).success) ?? fits[0]) : fits[0];
-      return option === undefined ? unknownNode(value) : canonicalNode(value, option, path);
-    }
+      return recordNode(value, node.value, path);
+    case "union":
+      return unionNode(value, node, path);
     case "leaf":
       // The scalar leaves; a mapping under z.unknown has no declared order.
       return unknownNode(value);
   }
 }
 
+/** The slice of each declared top-level key. */
 const TOP_LEVEL_SHAPE: Readonly<Record<string, z.ZodType>> = SettingsFile.shape;
 
 /** The sections in execution order, then the directives in the order the schema declares them. */

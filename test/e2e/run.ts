@@ -12,13 +12,21 @@
  */
 
 import { corpusUnwitnessedExemptEndpoints } from "./runner/apply-idempotence-proof.js";
-import { indentedStdout, runScenario } from "./runner/runner.js";
+import { indentedStdout, runScenario, type ScenarioReport } from "./runner/runner.js";
 import { loadScenarios, type Scenario, scenarioRoots } from "./scenario.js";
 
 interface Flags {
   sections?: string[];
   scenario?: string;
   printStdout?: boolean;
+}
+
+/** The run's result table and counts, grown one scenario at a time. */
+interface Tally {
+  table: string[];
+  artifacts: string[];
+  total: number;
+  failed: number;
 }
 
 function parseFlags(argv: string[]): Flags {
@@ -86,82 +94,100 @@ function selectScenarios(all: Scenario[], flags: Flags): Scenario[] {
   return selected;
 }
 
-async function main(): Promise<number> {
-  const flags = parseFlags(process.argv.slice(2));
-  const roots = scenarioRoots();
-  const all = loadScenarios(roots);
-  const scenarios = selectScenarios(all, flags);
-
-  if (scenarios.length === 0) {
-    if (flags.sections || flags.scenario) {
-      // A filter that matches nothing is a broken filter (a typo'd name or a
-      // section no scenario touches), not a green run.
-      const filters = [
-        flags.scenario === undefined ? [] : [`--scenario "${flags.scenario}"`],
-        flags.sections === undefined ? [] : [`--sections "${flags.sections.join(",")}"`],
-      ].flat();
-      console.error(
-        `none of the ${all.length} scenario(s) under ${roots.join(", ")} match ${filters.join(" / ")}; check the value against the scenario files' name: fields (or their settings keys for --sections)`,
-      );
-      return 1;
-    }
-    // An unreadable root already failed in loadScenarios, so an empty corpus here is genuinely empty: exit 0, the line is the signal.
-    console.log(`no scenario .yml files found under ${roots.join(", ")}`);
-    return 0;
+/**
+ * A filter that matches nothing is a broken filter (a typo'd name or a section no scenario touches), not a
+ * green run. An unreadable root already failed in loadScenarios, so an unfiltered empty corpus is genuinely
+ * empty: exit 0, the line is the signal.
+ */
+function reportEmptySelection(flags: Flags, all: Scenario[], roots: string[]): number {
+  if (flags.sections || flags.scenario) {
+    const filters = [
+      flags.scenario === undefined ? [] : [`--scenario "${flags.scenario}"`],
+      flags.sections === undefined ? [] : [`--sections "${flags.sections.join(",")}"`],
+    ].flat();
+    console.error(
+      `none of the ${all.length} scenario(s) under ${roots.join(", ")} match ${filters.join(" / ")}; check the value against the scenario files' name: fields (or their settings keys for --sections)`,
+    );
+    return 1;
   }
+  console.log(`no scenario .yml files found under ${roots.join(", ")}`);
+  return 0;
+}
 
-  const table: string[] = [];
-  const artifacts: string[] = [];
-  let failed = 0;
+/** --print-stdout: the scenario's captured stdout under its line, redacted by indentedStdout; nothing when it is empty. */
+function echoStdout(report: ScenarioReport, flags: Flags): void {
+  if (!flags.printStdout) {
+    return;
+  }
+  const stdout = indentedStdout(report.stdout);
+  if (stdout !== "") {
+    console.log(stdout);
+  }
+}
+
+async function runSelected(scenarios: Scenario[], flags: Flags): Promise<Tally> {
+  const tally: Tally = { table: [], artifacts: [], total: scenarios.length, failed: 0 };
   for (const scenario of scenarios) {
     const started = Date.now();
     const report = await runScenario(scenario);
     const ms = Date.now() - started;
     if (report.ok) {
       console.log(`  PASS  ${scenario.name} (${ms}ms)`);
-      table.push(`  PASS  ${scenario.name}`);
+      tally.table.push(`  PASS  ${scenario.name}`);
     } else {
-      failed++;
+      tally.failed++;
       console.log(`  FAIL  ${scenario.name} (${ms}ms)`);
-      table.push(`  FAIL  ${scenario.name}`);
+      tally.table.push(`  FAIL  ${scenario.name}`);
       for (const failure of report.failures) {
-        table.push(`          ${failure.replace(/\n/g, "\n          ")}`);
+        tally.table.push(`          ${failure.replace(/\n/g, "\n          ")}`);
       }
       if (report.artifactDir) {
-        artifacts.push(report.artifactDir);
+        tally.artifacts.push(report.artifactDir);
       }
     }
-    if (flags.printStdout) {
-      const stdout = indentedStdout(report.stdout);
-      if (stdout !== "") {
-        console.log(stdout);
-      }
+    echoStdout(report, flags);
+  }
+  return tally;
+}
+
+/**
+ * The corpus witness is meaningful over the FULL corpus only: a --sections/--scenario slice can
+ * legitimately starve an exempt endpoint. Its own line keeps the tally honest.
+ */
+function addCorpusWitness(tally: Tally): void {
+  tally.total++;
+  const unwitnessed = corpusUnwitnessedExemptEndpoints();
+  if (unwitnessed.length > 0) {
+    tally.failed++;
+    tally.table.push("  FAIL  apply-idempotence corpus witness");
+    for (const failure of unwitnessed) {
+      tally.table.push(`          ${failure}`);
     }
+  } else {
+    tally.table.push("  PASS  apply-idempotence corpus witness");
+  }
+}
+
+async function main(): Promise<number> {
+  const flags = parseFlags(process.argv.slice(2));
+  const roots = scenarioRoots();
+  const all = loadScenarios(roots);
+  const scenarios = selectScenarios(all, flags);
+  if (scenarios.length === 0) {
+    return reportEmptySelection(flags, all, roots);
   }
 
-  // The corpus witness is meaningful over the FULL corpus only: a --sections/--scenario slice can
-  // legitimately starve an exempt endpoint. Its own line keeps the tally honest.
-  let total = scenarios.length;
+  const tally = await runSelected(scenarios, flags);
   if (!flags.sections && !flags.scenario) {
-    total++;
-    const unwitnessed = corpusUnwitnessedExemptEndpoints();
-    if (unwitnessed.length > 0) {
-      failed++;
-      table.push("  FAIL  apply-idempotence corpus witness");
-      for (const failure of unwitnessed) {
-        table.push(`          ${failure}`);
-      }
-    } else {
-      table.push("  PASS  apply-idempotence corpus witness");
-    }
+    addCorpusWitness(tally);
   }
 
-  console.log(`\n${table.join("\n")}`);
-  console.log(`\n${total - failed}/${total} passed`);
-  if (artifacts.length > 0) {
-    console.log(`\nartifacts:\n  ${artifacts.join("\n  ")}`);
+  console.log(`\n${tally.table.join("\n")}`);
+  console.log(`\n${tally.total - tally.failed}/${tally.total} passed`);
+  if (tally.artifacts.length > 0) {
+    console.log(`\nartifacts:\n  ${tally.artifacts.join("\n  ")}`);
   }
-  return failed > 0 ? 1 : 0;
+  return tally.failed > 0 ? 1 : 0;
 }
 
 try {

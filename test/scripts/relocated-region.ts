@@ -27,7 +27,8 @@ export function relocatedRegion(
   const block = ownsLine(text, begin) && ownsLine(text, end);
   const start = block ? text.lastIndexOf("\n", begin[0] - 1) + 1 : begin[0];
   const endLine = text.indexOf("\n", end[1]);
-  const stop = block ? (endLine === -1 ? text.length : endLine + 1) : end[1];
+  const lineStop = endLine === -1 ? text.length : endLine + 1;
+  const stop = block ? lineStop : end[1];
   const region = text.slice(start, stop);
   const rest = text.slice(0, start) + text.slice(stop);
   expect(rest).toContain(anchor);

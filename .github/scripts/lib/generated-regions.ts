@@ -33,6 +33,8 @@ export function markerSyntaxFor(path: string): MarkerSyntax {
 
 // The name is spliced into a regex unescaped, so the grammar admits only regex-literal characters.
 const REGION_NAME_CLASS = "[a-z0-9-]+";
+
+// A whole name, as regionBounds() admits it.
 const REGION_NAME = new RegExp(`^${REGION_NAME_CLASS}$`);
 
 function markerText(kind: "BEGIN" | "END", name: string): string {
@@ -150,16 +152,19 @@ export type RegionPlacement =
  * usually wraps in block().
  */
 export interface RegionDeclaration<Data> {
+  /** The markers' name: lowercase letters, digits, and dashes. */
   readonly name: string;
+
+  /** Where the markers must sit, checked before any splice. */
   readonly placement: RegionPlacement;
+
   /** The data the committed file is regenerated from. */
   readonly data: () => Data;
+
   /** The body for `data`. */
   readonly render: (data: Data) => string;
-  /**
-   * A body read back into the data it renders from, or why it is not one `render` wrote; a line it
-   * names counts from the BEGIN marker's line as line 0.
-   */
+
+  /** A body read back into the data it renders from, or why it is not one `render` wrote; a line it names counts from the BEGIN marker's line as line 0. */
   readonly parse: (body: string) => Result<Data, string>;
 }
 
@@ -252,12 +257,16 @@ type MarkdownNode = MarkdownTree | MarkdownTree["children"][number];
 interface MarkdownScan {
   /** Code blocks, fenced or indented, as CommonMark closes them: an unclosed fence runs to the end of its container. */
   readonly code: readonly MarkerSpan[];
+
   /** Inline code spans, backticks included. */
   readonly codeSpans: readonly MarkerSpan[];
+
   /** HTML nodes, block or inline; a block runs to the line its kind ends on, or the end of its container. */
   readonly html: readonly MarkerSpan[];
+
   /** Blockquotes, whole. */
   readonly quoted: readonly MarkerSpan[];
+
   /** Headings outside every blockquote, each as its trimmed source. */
   readonly headings: ReadonlyArray<{ readonly offset: number; readonly text: string }>;
 }
@@ -280,16 +289,16 @@ function scanMarkdown(text: string): MarkdownScan {
   const html: MarkerSpan[] = [];
   const quoted: MarkerSpan[] = [];
   const headings: Array<{ offset: number; text: string }> = [];
+  // The span list each node type feeds; a heading is read for its text instead.
+  const spansByType: Readonly<Record<string, MarkerSpan[]>> = {
+    code,
+    inlineCode: codeSpans,
+    html,
+    blockquote: quoted,
+  };
   const walk = (node: MarkdownNode, inQuote: boolean): void => {
-    if (node.type === "code") {
-      code.push(nodeSpan(node));
-    } else if (node.type === "inlineCode") {
-      codeSpans.push(nodeSpan(node));
-    } else if (node.type === "html") {
-      html.push(nodeSpan(node));
-    } else if (node.type === "blockquote") {
-      quoted.push(nodeSpan(node));
-    } else if (node.type === "heading" && !inQuote) {
+    spansByType[node.type]?.push(nodeSpan(node));
+    if (node.type === "heading" && !inQuote) {
       const [start, end] = nodeSpan(node);
       headings.push({ offset: start, text: text.slice(start, end).trim() });
     }
@@ -307,6 +316,39 @@ function scanMarkdown(text: string): MarkdownScan {
   return { code, codeSpans, html, quoted, headings };
 }
 
+/** The span among `spans` holding offset `at`, if any. */
+function enclosing(spans: readonly MarkerSpan[], at: number): MarkerSpan | undefined {
+  return spans.find(([start, stop]) => start <= at && at < stop);
+}
+
+/** What the marker at `at` is content of, or undefined for one that is a block of its own. A marker is its own
+ * HTML node (a comment block, or inline HTML); inside any other node it is that node's content. Two markers on one
+ * line share the BEGIN marker's comment block, at `beginAt`. */
+function markerInside(
+  scan: MarkdownScan,
+  text: string,
+  at: number,
+  beginAt: number,
+): string | undefined {
+  if (enclosing(scan.code, at) !== undefined) {
+    return "a code block";
+  }
+  if (enclosing(scan.codeSpans, at) !== undefined) {
+    return "a code span";
+  }
+  /** Whether the marker at `markerAt` opens `node`, nothing but indentation before it. */
+  const opens = (node: MarkerSpan, markerAt: number): boolean =>
+    node[0] <= markerAt && text.slice(node[0], markerAt).trim() === "";
+  const html = enclosing(scan.html, at);
+  if (html !== undefined && !opens(html, at) && !opens(html, beginAt)) {
+    return "a raw HTML block";
+  }
+  if (enclosing(scan.quoted, at) !== undefined) {
+    return "a blockquote";
+  }
+  return undefined;
+}
+
 function assertMarkdownPlacement(
   text: string,
   name: string,
@@ -316,26 +358,10 @@ function assertMarkdownPlacement(
   path: string,
 ): void {
   const scan = scanMarkdown(text);
-  const enclosing = (spans: readonly MarkerSpan[], at: number): MarkerSpan | undefined =>
-    spans.find(([start, stop]) => start <= at && at < stop);
-  /** Whether the marker at `at` opens `node`, nothing but indentation before it. */
-  const opens = (node: MarkerSpan, at: number): boolean =>
-    node[0] <= at && text.slice(node[0], at).trim() === "";
   for (const at of [begin[0], end[0]]) {
-    if (enclosing(scan.code, at) !== undefined) {
-      throw new Error(`the ${name} region sits inside a code block in ${path}`);
-    }
-    if (enclosing(scan.codeSpans, at) !== undefined) {
-      throw new Error(`the ${name} region sits inside a code span in ${path}`);
-    }
-    // A marker is its own HTML node (a comment block, or inline HTML); inside any other node it is
-    // that node's content. Two markers on one line share the BEGIN marker's comment block.
-    const html = enclosing(scan.html, at);
-    if (html !== undefined && !opens(html, at) && !opens(html, begin[0])) {
-      throw new Error(`the ${name} region sits inside a raw HTML block in ${path}`);
-    }
-    if (enclosing(scan.quoted, at) !== undefined) {
-      throw new Error(`the ${name} region sits inside a blockquote in ${path}`);
+    const inside = markerInside(scan, text, at, begin[0]);
+    if (inside !== undefined) {
+      throw new Error(`the ${name} region sits inside ${inside} in ${path}`);
     }
   }
   if (placement.kind === "tail") {

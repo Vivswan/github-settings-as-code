@@ -7,13 +7,22 @@
 import { type Io, maskRegistry, type OutputName } from "../../src/io.js";
 
 export interface CapturedIo {
+  /** The fake, every channel of it landing in the lists beside it. */
   io: Io;
+
   /** `<level>: <message>` per annotate call. */
   annotations: string[];
+
+  /** Every log line, in order. */
   logs: string[];
+
+  /** The last value set per output name. */
   outputs: Partial<Record<OutputName, string>>;
+
   /** Every value registered through mask, in call order; io.masked() is the live set. */
   masks: string[];
+
+  /** Every call across the channels, in order, spelled as the header says. */
   events: string[];
 }
 

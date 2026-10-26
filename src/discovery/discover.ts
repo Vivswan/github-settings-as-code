@@ -45,17 +45,12 @@ function normalizeVisibility(repo: DiscoveredRepo): DiscoveredRepoRef["visibilit
   return visibility === "unknown" ? "private" : visibility;
 }
 
-/** Allowed values per discovery-filter input; the single source the input validation and types derive from. */
+// Allowed values per discovery-filter input; the single source the input validation and types derive from.
+
 export const VISIBILITY_FILTERS = ["all", "public", "private", "internal"] as const;
 export const ARCHIVED_FILTERS = ["skip", "include", "only"] as const;
 export const FORKS_FILTERS = ["include", "exclude", "only"] as const;
 export const AFFILIATIONS = ["owner", "collaborator", "organization_member"] as const;
-
-/**
- * Shared by the rule that emits it and formatSkipNotice, which special-cases it for the unarchive-to-manage prose; a
- * literal in one place and not the other would silently drop that guidance.
- */
-const ARCHIVED_REASON = "archived";
 
 /** Filters applied to repos: "*" discovery only, never to explicit targets. */
 export interface DiscoveryFilters {
@@ -80,6 +75,9 @@ export interface DiscoveryResult {
   repos: DiscoveredRepoRef[];
   filtered: Array<{ reason: string; repos: FilteredRepoRef[] }>;
 }
+
+/** Shared by the rule that emits it and formatSkipNotice, which special-cases it for the unarchive-to-manage prose; a literal in one place and not the other would silently drop that guidance. */
+const ARCHIVED_REASON = "archived";
 
 export type DiscoveryProblem = ProblemOf<
   "discovery-request-failed" | "discovery-transport-failed" | "discovery-response-not-a-list"

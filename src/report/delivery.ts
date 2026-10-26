@@ -29,6 +29,9 @@ import {
   MARKER_LABEL,
 } from "./issue-report.js";
 
+/** The channels, in the words of the `private-report` input; the type below says what each delivers. */
+export const PRIVATE_REPORT_CHANNELS = ["none", "issue", "issue-on-failure", "artifact"] as const;
+
 /**
  * A report reaches only a redacted target proven private or internal (flows/deliver.ts decides).
  *
@@ -37,8 +40,6 @@ import {
  * `issue-on-failure`  -> the same issue, created only when the run needs attention; recovery closes it with the healthy report
  * `artifact`          -> the delivered reports as one age-encrypted artifact, for readers with the key but no GitHub access
  */
-export const PRIVATE_REPORT_CHANNELS = ["none", "issue", "issue-on-failure", "artifact"] as const;
-
 export type PrivateReportChannel = (typeof PRIVATE_REPORT_CHANNELS)[number];
 
 export type IssueChannel = Extract<PrivateReportChannel, "issue" | "issue-on-failure">;
@@ -77,9 +78,13 @@ export interface RedactedDetail extends TargetDetail {
 export interface ReportRunMeta {
   /** The admin repository the workflow ran in (GITHUB_REPOSITORY / selfSlug). */
   adminRepo: string;
+
   /** Link to the workflow run (may be empty on local runs). */
   runUrl: string;
+
+  /** The run's mode, as the report's header states it. */
   mode: string;
+
   /** ISO timestamp captured once at the run's start, passed in (never Date.now here). */
   timestamp: string;
 }
@@ -147,10 +152,14 @@ export interface RunConclusion {
 interface ReportTarget {
   /** The owner/name pair the issue channel posts into; null when the slug did not parse. */
   repo: RepoRef | null;
+
   /** The public placeholder, the only name a delivery warning may carry. */
   display: string;
+
   /** The target's own conclusion; an exit of 1 opens the report issue, 0 closes it. */
   conclusion: RunConclusion;
+
+  /** The sealed end state the report opens in full. */
   detail: Private<RedactedDetail>;
 }
 

@@ -36,12 +36,11 @@ interface VariableCreate {
   readonly payload: PlainPayload;
   readonly drift: readonly [string];
   readonly change: string;
-  /** What the write is doing, in settings-file terms, for its error prose. */
   readonly describe: string;
 }
 
+/** `liveName` addresses the request path: it names what exists, whatever casing the file uses. */
 interface VariableUpdate {
-  /** The LIVE name addresses the request path: it names what exists, whatever casing the file uses. */
   readonly liveName: string;
   readonly payload: PlainPayload;
   readonly drift: readonly [string, ...string[]];
@@ -57,6 +56,8 @@ export interface VariablesPlanScope<
 > extends NamedScope<LiveVariable, Remove> {
   /** The planned POST; the builders are function-valued so one demanding an unsupplied facet fails. */
   readonly create: (write: VariableCreate) => Create;
+
+  /** The planned PATCH, addressed by the live name. */
   readonly update: (write: VariableUpdate) => Update;
 }
 
@@ -111,18 +112,18 @@ export function planVariables<
 
       // GitHub stores the name uppercased whatever casing the file uses, so the live name never drifts;
       // only the value and passthrough fields can.
-      const [first, ...rest] = [
-        ...(existing.value !== variable.value
-          ? [
-              valueDrift(
-                `${label}.value`,
-                JSON.stringify(variable.value),
-                JSON.stringify(existing.value),
-              ),
-            ]
-          : []),
-        ...subsetDiff(extraKeys, existing, label),
-      ];
+      const lines: string[] = [];
+      if (existing.value !== variable.value) {
+        lines.push(
+          valueDrift(
+            `${label}.value`,
+            JSON.stringify(variable.value),
+            JSON.stringify(existing.value),
+          ),
+        );
+      }
+      lines.push(...subsetDiff(extraKeys, existing, label));
+      const [first, ...rest] = lines;
       if (first === undefined) {
         continue;
       }

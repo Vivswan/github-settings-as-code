@@ -12,6 +12,8 @@ const ENV_KEYS = [
   "GITHUB_SERVER_URL",
   "GITHUB_RUN_ID",
 ];
+
+/** The environment as the file found it, restored after each test. */
 const saved = new Map(ENV_KEYS.map((key) => [key, process.env[key]]));
 
 afterEach(() => {

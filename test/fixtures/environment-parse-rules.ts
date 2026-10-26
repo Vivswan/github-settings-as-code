@@ -8,18 +8,26 @@ export type EnvironmentParseFixture =
   | {
       /** What the fixture demonstrates, used in test failure messages. */
       name: string;
+
       /** One environments[] entry, wrapped by each consumer as its input needs. */
       entry: Record<string, unknown>;
+
       /** BOTH validators must accept the entry. */
       valid: true;
     }
   | {
+      /** What the fixture demonstrates, used in test failure messages. */
       name: string;
+
+      /** One environments[] entry, wrapped by each consumer as its input needs. */
       entry: Record<string, unknown>;
+
       /** BOTH validators must refuse the entry. */
       valid: false;
+
       /** The dotted issue path the runtime reports below the entry, naming the key at fault. */
       path: string;
+
       /** A fragment of the runtime message, the part that names the fix. */
       refusal: string;
     };
@@ -27,8 +35,10 @@ export type EnvironmentParseFixture =
 /** The one environment name every fixture carries; the refinement wording embeds it. */
 const FIXTURE_ENV_NAME = "prod";
 
+/** The flag object that declares custom branch policies, which a patterns list needs beside it. */
 const customPolicies = { protected_branches: false, custom_branch_policies: true };
 
+/** Every fixture both validators are held to, the accepted and the refused alike. */
 export const ENVIRONMENT_PARSE_FIXTURES: readonly EnvironmentParseFixture[] = [
   {
     name: "patterns without the sibling flag object",

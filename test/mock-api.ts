@@ -78,14 +78,24 @@ export function withListing<T extends GitHubClient>(client: Omit<T, "tryList">):
  */
 export class MockApi implements GitHubClient {
   calls: Array<{
+    /** The HTTP method, or `GRAPHQL` for an operation. */
     method: string;
+
+    /** The request path, or the operation's name. */
     path: string;
+
+    /** The request body, or the operation's variables. */
     payload?: unknown;
+
     /** Present exactly when the request arrived marked as carrying a resolved secret. */
     carriesSecret?: true;
+
+    /** The operation's declared kind; absent on a REST call. */
     graphqlKind?: "read" | "write";
   }> = [];
+
   private routes: Record<string, Route>;
+
   private unroutedMutations: "throw" | "succeed";
 
   constructor(routes: Record<string, Route>, opts?: MockApiOptions) {

@@ -12,6 +12,7 @@ import type { AnnotationLevel, OutputName } from "../index.js";
 export interface ActionsRunner {
   /** GITHUB_OUTPUT; the runner always sets it, so an unset one only drops the record, as the action's Io does. */
   readonly outputFile: string | undefined;
+
   /** GITHUB_STEP_SUMMARY; `--summary <file>` takes precedence over it. */
   readonly summaryFile: string | undefined;
 }

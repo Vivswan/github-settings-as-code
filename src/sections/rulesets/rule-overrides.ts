@@ -33,7 +33,6 @@ export type RuleOverrides = {
     : Rule["shape"]["type"]["value"]]?: FieldChecks<ParametersOf<Rule>>;
 };
 
-/** The spec: "At least one option must be enabled"; omitting the key allows all three. */
 const atLeastOneMergeMethod = new z.core.$ZodCheckMinLength({
   check: "min_length",
   minimum: 1,

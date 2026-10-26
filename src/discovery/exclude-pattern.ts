@@ -1,6 +1,15 @@
 /**
  * The `exclude` input's glob grammar: one pattern compiled once at the input boundary, every flaw named beside its
  * fix, and the match of a compiled pattern against a discovered repository's slug or name.
+ *
+ * The grammar is owned here, not left to picomatch, because picomatch accepts far more than a repository name can
+ * hold ("(a)+" a quantifier, "\d" a digit class, "{az..bz}" a range, "./" silently dropped, "***" losing the
+ * escape of a later dot) and compiles several such inputs to a wrong or never-matching regex with no option to
+ * refuse them. The pattern is the user's input, so a flaw is refused naming its fix, never repaired, and every
+ * flaw of one pattern is named at once, so N flaws cost one run to discover, not N: each step names one fix and
+ * hands the next step the view with it applied, in the order the sentences take. What is left for the user to
+ * write is named last with no fix applied: the length cap, an empty body, the sides around a "/", a side that is
+ * only dots, and a regex the engine itself refuses.
  */
 
 import { err, ok, type Result } from "neverthrow";
@@ -15,38 +24,29 @@ import { quote } from "../text.js";
 export interface ExcludePattern {
   /** The operator's text, for the skip notice. */
   readonly pattern: string;
+
   /** "slug" when the pattern has a "/" and is compared against owner/name, "name" when against the name alone. */
   readonly scope: "slug" | "name";
+
+  /** picomatch's matcher for the pattern, run against the text the scope picks. */
   readonly regex: RegExp;
 }
 
-/**
- * picomatch is built for file paths and a slug is a GitHub identifier, so each option is set for a name, none left to its default:
- *   nocase          -> GitHub compares repository names case-insensitively
- *   dot             -> a leading "." is an ordinary name character (".github"), not the hidden-file marker
- *   posix           -> "[!ab]" is a negated class, as in a shell, not a class holding "!"
- *   fastpaths       -> the star-led shortcut regexes demand a character after a literal dot, so "*.*" would miss "archive."
- *   debug           -> an invalid class like "[z-a]" throws instead of compiling to a never-matching regex
- *   windows         -> pinned: only picomatch's main callable reads the host OS; makeRe never does
- *   literalBrackets -> no alternation with the class's literal text (no name holds it); thousands compile in milliseconds, under the engine's limit
- */
+/** picomatch is built for file paths and a slug is a GitHub identifier, so each option is set for a name, none left to its default. */
 const EXCLUDE_GLOB_OPTIONS = {
-  nocase: true,
-  dot: true,
-  posix: true,
-  fastpaths: false,
-  debug: true,
-  windows: false,
-  literalBrackets: false,
+  nocase: true, // GitHub compares repository names case-insensitively
+  dot: true, // a leading "." is an ordinary name character (".github"), not the hidden-file marker
+  posix: true, // "[!ab]" is a negated class, as in a shell, not a class holding "!"
+  fastpaths: false, // the star-led shortcut regexes demand a character after a literal dot, so "*.*" would miss "archive."
+  debug: true, // an invalid class like "[z-a]" throws instead of compiling to a never-matching regex
+  windows: false, // pinned: only picomatch's main callable reads the host OS; makeRe never does
+  literalBrackets: false, // no alternation with the class's literal text (no name holds it); thousands compile in milliseconds, under the engine's limit
 } as const;
 
 /** Every character no owner or repository name holds and no glob operator here uses. */
 const EXCLUDE_STRAYS = /[^\w.\-/*?[\]!^]/g;
 
-/**
- * A class: "!" or "^" may open it, its members are name characters, and a "-" is a range between two of them or
- * a literal first or last. Nothing else, so turning a backwards range around can never pair a new one.
- */
+/** A class: "!" or "^" may open it, its members are name characters, and a "-" is a range between two of them or a literal first or last, nothing else, so turning a backwards range around can never pair a new one. */
 const EXCLUDE_CLASS = /^\[[!^]?(?:-?(?:[\w.](?:-[\w.])?)+-?|-)\]$/;
 
 /** One side of the "/": name characters, "*", "?", and classes. */
@@ -61,33 +61,37 @@ function unpairedBrackets(view: string): number[] {
   let open = -1;
   for (let i = 0; i < view.length; i++) {
     const char = view[i];
+    if (char === "[" && open < 0) {
+      open = i;
+      continue;
+    }
+
     if (char === "[") {
-      if (open >= 0) {
-        unpaired[i] = true;
-      } else {
-        open = i;
-      }
-    } else if (char === "]") {
-      if (open >= 0) {
-        open = -1;
-      } else {
-        unpaired[i] = true;
-      }
-    } else if (char === "/" && open >= 0) {
+      unpaired[i] = true;
+      continue;
+    }
+
+    if (char === "]" && open < 0) {
+      unpaired[i] = true;
+      continue;
+    }
+
+    if (char === "]") {
+      open = -1;
+      continue;
+    }
+
+    if (char === "/" && open >= 0) {
       unpaired[open] = true;
       open = -1;
     }
   }
+
   if (open >= 0) {
     unpaired[open] = true;
   }
-  const where: number[] = [];
-  for (let i = 0; i < view.length; i++) {
-    if (unpaired[i]) {
-      where.push(i);
-    }
-  }
-  return where;
+
+  return Array.from({ length: view.length }, (_, i) => i).filter((i) => unpaired[i] === true);
 }
 
 /** `where` of every "!" or "^" that neither negates (a "!" first) nor opens a class (right after "["). */
@@ -149,9 +153,15 @@ const listed = <T>(items: readonly T[], render: (item: T) => string): string =>
 
 /** A step's result: the view with its fix applied and the sentence naming it; `done` ends the pass. */
 interface Pass {
+  /** The pattern with this step's fix applied. */
   readonly view: string;
+
+  /** The sentence naming the fix, none when the view was already right. */
   readonly flaws: readonly string[];
+
+  /** Ends the pass: no later step can judge the view. */
   readonly done?: boolean;
+
   /** The view compiled, from the step that probes the engine, so the clean path compiles once. */
   readonly regex?: RegExp;
 }
@@ -167,7 +177,7 @@ const applied = (view: string, fixed: string, flaw: string): Pass =>
 const named = (view: string, flaw: string): Pass => ({ view, flaws: [flaw] });
 
 /** The classes are rewritten in one walk, so a pattern of many flawed classes costs one pass, not one per class. */
-const rewriteClasses: Step = (view) => {
+function rewriteClasses(view: string): Pass {
   const flaws: string[] = [];
   let rebuilt = "";
   let cursor = 0;
@@ -210,21 +220,9 @@ const rewriteClasses: Step = (view) => {
     rebuilt += cls;
   }
   return { view: rebuilt + view.slice(cursor), flaws };
-};
+}
 
-const ENGINE_REFUSAL =
-  "it compiles to a regular expression the runtime refuses, so shorten it or split it across several patterns";
-
-/**
- * The grammar is owned here, not left to picomatch, because picomatch accepts far more than a repository name can
- * hold ("(a)+" a quantifier, "\d" a digit class, "{az..bz}" a range, "./" silently dropped, "***" losing the
- * escape of a later dot) and compiles several such inputs to a wrong or never-matching regex with no option to
- * refuse them. The pattern is the user's input, so a flaw is refused naming its fix, never repaired, and every
- * flaw of one pattern is named at once, so N flaws cost one run to discover, not N: each step names one fix and
- * hands the next step the view with it applied, in the order the sentences take. What is left for the user to
- * write is named last with no fix applied: the length cap, an empty body, the sides around a "/", a side that is
- * only dots, and a regex the engine itself refuses.
- */
+/** Each step names one fix and hands the next the view with it applied; the header says why the grammar is owned here. */
 const EXCLUDE_STEPS: readonly Step[] = [
   (view) => applied(view, view.trim(), "it is wrapped in whitespace, so trim it"),
   (view) => {
@@ -316,7 +314,10 @@ const EXCLUDE_STEPS: readonly Step[] = [
       regex.test("");
       return { view, flaws: [], regex };
     } catch {
-      return named(view, ENGINE_REFUSAL);
+      return named(
+        view,
+        "it compiles to a regular expression the runtime refuses, so shorten it or split it across several patterns",
+      );
     }
   },
 ];

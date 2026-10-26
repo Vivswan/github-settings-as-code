@@ -5,10 +5,7 @@ import { parseSync } from "oxc-parser";
 import { isPrivate, markPrivate } from "../src/private.js";
 import { revealPrivate } from "../src/private-open.js";
 
-/**
- * A new export name on an opener importer is an explicit review; leaking the opener through an EXISTING export's value is the accepted residual of
- * reviewed trusted code.
- */
+/** A new export name on an opener importer is an explicit review; leaking the opener through an EXISTING export's value is the accepted residual of reviewed trusted code. */
 const OPENER_IMPORTERS: Record<string, string[]> = {
   "src/flows/redact.ts": [
     "PRIVATE_REPOS_POLICIES",
@@ -45,14 +42,18 @@ const OPENER_IMPORTERS: Record<string, string[]> = {
   ],
   "test/private.test.ts": [],
 };
+
+/** The opener module as its importers' specifiers resolve to it. */
 const OPENER_MODULE = resolve("src/private-open");
 
+/** Reads a file's runtime import and export edges; type-only ones never appear. */
 const TRANSPILER = new Bun.Transpiler({ loader: "ts" });
 
 /** One file's runtime edges to the opener module and its exports, as the graph sees them. */
 interface OpenerSurface {
   /** True when a runtime import edge points at the opener module. */
   imports: boolean;
+
   /** Every runtime export name, sorted; `export *` from the opener counts as "*". */
   exports: string[];
 }

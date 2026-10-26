@@ -13,8 +13,6 @@ import { allEndpoints, allGraphqlOps } from "../../src/sections/registry.js";
 import { loadSpec } from "../../test/e2e/openapi/validate.js";
 
 const DOCS_URL = z.string().url().startsWith("https://docs.github.com/en/");
-
-/** A route as a declaration spells it ("METHOD /path/{param}") and a GraphQL operation's wire name. */
 const ROUTE = /^(?:GET|POST|PUT|PATCH|DELETE) \/\S+$/;
 const OPERATION = /^[A-Z][A-Za-z0-9]*$/;
 
@@ -53,6 +51,12 @@ export type SpecOperations = Readonly<
   Record<string, Readonly<Record<string, { readonly externalDocs?: { readonly url: string } }>>>
 >;
 
+/** One kind's pages by call, and every problem met resolving them. */
+interface Resolved {
+  readonly pages: Record<string, string>;
+  readonly problems: string[];
+}
+
 /** The descriptor's link in the spelling docs.github.com serves: the locale added, the Pages placeholder rendered. */
 export function renderedDocsUrl(url: string): string {
   return url
@@ -60,14 +64,14 @@ export function renderedDocsUrl(url: string): string {
     .replace("apiname", "github");
 }
 
-export function resolveAnchors(
+/** Each declared route's page: the descriptor's, else the hand entry; both or neither is a problem, as is a hand entry no section declares. */
+function resolveRest(
   spec: SpecOperations,
   hand: EndpointDocs,
   routes: readonly string[],
-  operations: readonly string[],
-): EndpointAnchors {
+): Resolved {
+  const pages: Record<string, string> = {};
   const problems: string[] = [];
-  const rest: Record<string, string> = {};
   for (const route of routes) {
     const space = route.indexOf(" ");
     const documented =
@@ -77,15 +81,19 @@ export function resolveAnchors(
       problems.push(
         `"${route}" has a page in both the descriptor and ${ENDPOINT_DOCS_PATH}; delete the hand entry`,
       );
-    } else if (documented !== undefined) {
-      rest[route] = renderedDocsUrl(documented);
-    } else if (byHand !== undefined) {
-      rest[route] = byHand;
-    } else {
-      problems.push(
-        `"${route}" has no page: the descriptor does not document it, so add one under rest: in ${ENDPOINT_DOCS_PATH}`,
-      );
+      continue;
     }
+    if (documented !== undefined) {
+      pages[route] = renderedDocsUrl(documented);
+      continue;
+    }
+    if (byHand !== undefined) {
+      pages[route] = byHand;
+      continue;
+    }
+    problems.push(
+      `"${route}" has no page: the descriptor does not document it, so add one under rest: in ${ENDPOINT_DOCS_PATH}`,
+    );
   }
   for (const route of Object.keys(hand.rest)) {
     if (!routes.includes(route)) {
@@ -94,16 +102,22 @@ export function resolveAnchors(
       );
     }
   }
-  const graphql: Record<string, string> = {};
+  return { pages, problems };
+}
+
+/** Each declared operation's page, which only the hand file holds; a missing one and a hand entry no section declares are problems. */
+function resolveGraphql(hand: EndpointDocs, operations: readonly string[]): Resolved {
+  const pages: Record<string, string> = {};
+  const problems: string[] = [];
   for (const name of operations) {
     const byHand = hand.graphql[name];
     if (byHand === undefined) {
       problems.push(
         `the GraphQL operation "${name}" has no page; add one under graphql: in ${ENDPOINT_DOCS_PATH}`,
       );
-    } else {
-      graphql[name] = byHand;
+      continue;
     }
+    pages[name] = byHand;
   }
   for (const name of Object.keys(hand.graphql)) {
     if (!operations.includes(name)) {
@@ -112,10 +126,22 @@ export function resolveAnchors(
       );
     }
   }
+  return { pages, problems };
+}
+
+export function resolveAnchors(
+  spec: SpecOperations,
+  hand: EndpointDocs,
+  routes: readonly string[],
+  operations: readonly string[],
+): EndpointAnchors {
+  const rest = resolveRest(spec, hand, routes);
+  const graphql = resolveGraphql(hand, operations);
+  const problems = [...rest.problems, ...graphql.problems];
   if (problems.length > 0) {
     throw new Error(`endpoint-docs:\n  ${problems.join("\n  ")}`);
   }
-  return { rest, graphql };
+  return { rest: rest.pages, graphql: graphql.pages };
 }
 
 /** The distinct routes and operation names the sections declare, in registry order. */

@@ -52,9 +52,13 @@ export function renderInputsTable(inputs: Inputs): string {
   return renderTable(INPUTS_TABLE_HEADER, cells);
 }
 
+/** The name cell: an input name in a code span. */
 const NAME_SPAN = /^`([a-z][a-z0-9-]*)`$/;
-// The dotAll flag is for the two Unicode line separators cellFault() admits inside a cell.
+
+/** The dotAll flag is for the two Unicode line separators cellFault() admits inside a cell. */
 const DESCRIPTION_CELL = /^<p>(.*)<\/p>$/s;
+
+/** The default cell, a code span; dotAll as above. */
 const DEFAULT_SPAN = /^`(.*)`$/s;
 
 /** A row read back to the declaration it renders from; every input is optional, so the required cell is fixed. */

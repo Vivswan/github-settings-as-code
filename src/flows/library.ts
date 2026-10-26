@@ -46,12 +46,16 @@ function sink(io: Io | undefined): { io: Io; log: () => CollectedLine[] } {
 export interface ValidateOptions {
   /** How the document is named in problems and warnings; a file path, usually. */
   source?: string;
+
   /** The `sections` allowlist: an unknown top-level key outside a non-empty one is a warning, not an error. */
   sections?: SectionSelection;
+
   /** Where the warnings print; without one they come back as the report's `log`. */
   io?: Io;
+
   /** The action's `undeclared` input: the fallback policy below a list's wrapper and the file's own; unset by default. */
   undeclared?: UndeclaredPolicy;
+
   /** Who authored the document: "operator" (the default) honors `$NAME` secret references, "target" refuses them. */
   secretSource?: SettingsSource;
 }
@@ -79,10 +83,14 @@ export function validateSettings(
 export interface MergeOptions {
   /** How the merged document is named in problems and warnings. */
   source?: string;
+
   /** How the list sections fold across layers; the action's `layering` input, "deep" unless set. */
   layering?: FoldOptions["layering"];
+
   /** The action's `undeclared` input: the fallback policy below a list's wrapper and the file's own; unset by default. */
   undeclared?: UndeclaredPolicy;
+
+  /** Where the warnings and notices print; without one they come back as the report's `log`. */
   io?: Io;
 }
 

@@ -1,3 +1,4 @@
+import type { ReadPhase } from "./endpoints.js";
 import type { SectionPermission } from "./permissions.js";
 
 /** GitHub's errors[] entry `type` values, as far as this system models them; the e2e validator's known-type check reads the array. */
@@ -9,10 +10,7 @@ export const GRAPHQL_ERROR_TYPES = [
   "UNPROCESSABLE",
 ] as const;
 
-/**
- * RATE_LIMITED is absent on purpose (throttling is a transport concern every operation handles alike),
- * as is INSUFFICIENT_SCOPES (a wrong token; the transport folds it into the 403 class).
- */
+/** RATE_LIMITED is absent on purpose (throttling is a transport concern every operation handles alike), as is INSUFFICIENT_SCOPES (a wrong token; the transport folds it into the 403 class). */
 const GRAPHQL_TOLERABLE_ERRORS = ["FORBIDDEN", "NOT_FOUND", "UNPROCESSABLE"] as const;
 
 export type GraphqlTolerableError = (typeof GRAPHQL_TOLERABLE_ERRORS)[number];
@@ -31,29 +29,24 @@ interface GraphqlConnectionDecl {
  * erases to the metadata consumers' default) and lets the request helpers type-check call-site variables.
  */
 interface GraphqlOpCommon<V extends Record<string, unknown>> {
-  /**
-   * The wire dispatch key (operationName on every call), globally unique across sections
-   * (allGraphqlOps asserts it): the mock and the coverage tripwire address the operation by it without parsing the query.
-   */
+  /** The operationName of every call, unique across sections (allGraphqlOps asserts it), so the mock and the coverage tripwire address the operation without parsing the query. */
   readonly name: string;
-  /**
-   * As EndpointDecl.statuses: "ok" documents the success meaning, and each
-   * declared error type is a TOLERATED outcome (tryCallGraphql returns it as
-   * { error } instead of throwing).
-   */
+
+  /** As EndpointDecl.statuses: "ok" documents the success meaning, and each declared error type is a TOLERATED outcome (tryCallGraphql returns it as { error } instead of throwing). */
   readonly outcomes: Readonly<{ ok: string } & Partial<Record<GraphqlTolerableError, string>>>;
+
   /** As EndpointDecl.permission: "none" means public, omitted means the section's own. */
   readonly permission?: SectionPermission | "none";
+
   /** Read only by the e2e mock, which exempts advisory reads from its denial barrier; the GraphQL helpers tolerate by declared outcomes alone. */
   readonly advisory?: boolean;
-  /**
-   * Appended to the permission-denied failure's message for an operation whose
-   * FORBIDDEN/NOT_FOUND can mean something other than a missing token grant.
-   * One sentence, no trailing period.
-   */
+
+  /** Appended to a denial's message when the operation's FORBIDDEN/NOT_FOUND can mean more than a missing token grant; no trailing period. */
   readonly denialHint?: string;
+
   /** GraphQL rejections carry no HTTP status for a hint to key on; the `never` makes declaring one a compile error (see FailingOp). */
   readonly hints?: never;
+
   /** Type-only marker for `V`; never set at runtime. */
   readonly _variables?: V;
 }
@@ -69,14 +62,12 @@ export type GraphqlOpDecl<V extends Record<string, unknown> = Record<string, unk
       readonly kind: "read";
       readonly query: `query ${string}`;
       readonly connection?: undefined;
-      /** As EndpointDecl.phase: a read only a thunk may issue, at execution. */
-      readonly phase?: "execution";
+      readonly phase?: ReadPhase;
     })
   | GraphqlPaginatedReadDecl<V>
   | (GraphqlOpCommon<V> & {
       readonly kind: "write";
       readonly query: `mutation ${string}`;
-      /** Pagination is a read concern. */
       readonly connection?: never;
       readonly phase?: never;
     });
@@ -91,7 +82,7 @@ export type GraphqlPaginatedReadDecl<V extends Record<string, unknown> = Record<
     readonly kind: "read";
     readonly query: `query ${string}$cursor${string}`;
     readonly connection: GraphqlConnectionDecl;
-    readonly phase?: "execution";
+    readonly phase?: ReadPhase;
   };
 
 /**

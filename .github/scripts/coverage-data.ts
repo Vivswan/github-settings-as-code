@@ -26,10 +26,10 @@ const GapRow = z
     why: z.string().min(1),
   })
   .readonly();
+
 export type GapRow = z.infer<typeof GapRow>;
 
-// The Repo-scoped gaps table: either no known gap, with the paragraph shown in place of rows,
-// or the rows. One arm at a time, so a note cannot go stale behind rows that hide it.
+/** One arm at a time, the empty-table paragraph or the rows, so a note cannot go stale behind rows that hide it. */
 const CoverageGaps = z.union([
   z.strictObject({ emptyNote: z.string().min(1), rows: z.undefined().optional() }).readonly(),
   z
@@ -40,8 +40,10 @@ const CoverageGaps = z.union([
     .readonly(),
 ]);
 
+/** The page's paragraph runs and bullet lists, one line per item, never empty. */
 const Items = z.tuple([z.string().min(1)], z.string().min(1)).readonly();
 
+/** The authored half of the page, as coverage-data.yml declares it. */
 export const CoverageData = z
   .strictObject({
     /** The paragraphs under the page title, one line each. */
@@ -59,6 +61,7 @@ export const CoverageData = z
     outOfScope: z.strictObject({ items: Items }).readonly(),
   })
   .readonly();
+
 export type CoverageData = z.infer<typeof CoverageData>;
 
 export const COVERAGE_DATA = readDocsYaml(

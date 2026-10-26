@@ -34,17 +34,19 @@ import type { MockState } from "./state.js";
 export type Json = Record<string, unknown>;
 
 export interface MockResponse {
+  /** The HTTP status; the pipeline's response guard holds it to the endpoint's declared set or a >= 400 error. */
   status: number;
+
+  /** The JSON body; null or undefined sends an empty one. */
   body: unknown;
+
+  /** Extra response headers, sent beside the content type. */
   headers?: Record<string, string>;
+
   /** The page after this one, when one exists; server.ts renders it as the `Link` header the client walks. */
   nextPage?: number;
-  /**
-   * Marks a reply that REJECTS a deliberately off-spec request body: settings pass through to the API
-   * verbatim, so scenarios send user typos the schema forbids and the handler answers GitHub's real 4xx.
-   * The OpenAPI validator skips only the request-body SCHEMA check for these; body-presence checks and
-   * response validation still apply.
-   */
+
+  /** Marks a reply REJECTING a deliberately off-spec request body (settings pass through verbatim, so scenarios send user typos the schema forbids); the OpenAPI validator then skips only the request-body SCHEMA check. */
   requestOffSpec?: boolean;
 }
 
@@ -53,8 +55,12 @@ export interface MockResponse {
  * AFTER the handler returns, so it is not passed here.
  */
 interface HandlerContext {
+  /** The target repository's state, resolved by the pipeline from the request path. */
   state: MockState;
+
+  /** The matched declaration, for the route and the declared statuses. */
   endpoint: TaggedEndpoint;
+
   /**
    * Extraction and routing share one template walk, so a handler cannot disagree with its own ENDPOINTS
    * declaration about a param's position; the raw path is deliberately NOT exposed.
@@ -62,14 +68,16 @@ interface HandlerContext {
    *   token missing from the route   -> throws a mock BUG naming the handler, the route, and the declared tokens
    */
   param(name: string): string;
+
+  /** The query string flattened to one value per key, the last repeat winning. */
   query: Record<string, string>;
+
+  /** The body after the pipeline's allowlist: only the fields GitHub keeps of it (request-body.ts). */
   body: unknown;
-  /**
-   * The request headers, lower-cased names, frozen (requestHeaders in dispatch.ts is the one minter). For the
-   * endpoints whose reply GitHub shapes by media type (the teams probe's 200 body vs bare 204), so a client that
-   * drops its Accept header meets GitHub's real answer here instead of passing.
-   */
+
+  /** Lower-cased and frozen (requestHeaders in dispatch.ts is the one minter), read by the endpoints GitHub shapes by media type (the teams probe's 200 body vs bare 204), so a client that drops its Accept header meets GitHub's real answer. */
   headers: Readonly<Record<string, string>>;
+
   /**
    * For a field GitHub reveals only above the endpoint's own grade (a ruleset's bypass_actors,
    * admin-only), so the mock omits it like GitHub does.
@@ -169,11 +177,7 @@ export function branchPoliciesEnabled(state: MockState, env: string): boolean {
   return flags?.custom_branch_policies === true;
 }
 
-/**
- * ONE handler registered under both teams.org and custom_properties.org, so the two cannot drift.
- * matchEndpoint resolves the shared route to the FIRST declaring section (teams); the custom_properties
- * registration exists for the completeness assertion.
- */
+/** Registered under both teams.org and custom_properties.org so the two cannot drift; matchEndpoint resolves the shared route to the FIRST declaring section (teams), and the custom_properties registration exists for the completeness assertion. */
 export const orgProbeHandler: Handler = ({ state }) => {
   if (state.org === null) {
     return { status: 404, body: { message: "Not Found" } };
@@ -408,11 +412,13 @@ export const INTERACTION_ORG_LIMIT = {
   expires_at: "2027-07-01T00:00:00Z",
 } as const;
 
+/** The 409 the repo-level PUT and DELETE answer while an org- or user-level limit is in effect (interaction_limits_org_override). */
 export const INTERACTION_ORG_CONFLICT = {
   status: 409,
   body: { message: "Conflict: an organization or user interaction limit is in effect" },
 } as const;
 
+/** GitHub's documented 405 from both creation-cap endpoints while the cap is unavailable (pull_creation_cap_unavailable). */
 export const CAP_UNAVAILABLE_405 = {
   status: 405,
   body: { message: "Method Not Allowed: the pull request creation cap is not available" },
@@ -484,6 +490,7 @@ export const SECRET_SCANNING_UPDATABLE_KEYS = [
   "must_not_match",
 ] as const;
 
+/** GitHub's 412 for a PATCH whose custom_pattern_version is not the stored one: the pattern changed under the client. */
 export const SECRET_SCANNING_STALE_VERSION = {
   status: 412,
   body: { message: "Precondition Failed: the custom pattern was modified" },
@@ -558,10 +565,7 @@ export function maskHookSecret(hook: Json): Json {
   return config.secret === undefined ? hook : { ...hook, config: maskedConfig(config) };
 }
 
-/**
- * GitHub's reply to a grant PUT whose `permission` the owner's repository does not take (state.ts, grantablePermission).
- * The schema types the field as a free string, so the body is off the documented contract, not the schema.
- */
+/** GitHub's reply to a grant PUT whose `permission` the owner's repository does not take (state.ts, grantablePermission); the schema types the field as a free string, so the body is off the documented contract, not the schema. */
 export const PERMISSION_NOT_GRANTABLE: MockResponse = {
   status: 422,
   body: { message: "Validation Failed", errors: [{ field: "permission", code: "invalid" }] },
@@ -584,11 +588,7 @@ export function storedKeyMaterial(key: string): string {
   return match ? `${match[1]} ${match[2]}` : key.trim();
 }
 
-/**
- * Mock-only realism: the runtime never refuses a rules[].type (an unknown one passes through verbatim); this set
- * exists so a typo'd type answers GitHub's real 422 shape instead of being stored silently. The schema's list is
- * generated from the descriptor, so the mock knows exactly the types the descriptor does.
- */
+/** Mock-only realism: the runtime never refuses a rules[].type (an unknown one passes through verbatim), so this set answers GitHub's real 422 for a typo'd type instead of storing it silently; KNOWN_RULE_TYPES is generated from the descriptor. */
 const RULESET_RULE_TYPES: ReadonlySet<string> = new Set(KNOWN_RULE_TYPES);
 
 /** GitHub's 422 for an unrecognized rules[].type, or null when all types are real. */

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { endpointMethod, endpointPath } from "../../../src/sections/contract/endpoints.js";
-import { allEndpoints } from "../../../src/sections/registry.js";
+import { allEndpoints, type TaggedEndpoint } from "../../../src/sections/registry.js";
 import type { LoggedRequest } from "../mock/contract.js";
 import { excludeUndocumented } from "./paths.js";
 import {
@@ -13,6 +13,41 @@ import {
   trimDescriptor,
   validateExchange,
 } from "./validate.js";
+
+/** The descriptor slice as the pageSize test reads it: operation and path-item parameters, inline (loadSpec() rejects any surviving $ref). */
+type DescriptorParameters = {
+  paths?: Record<
+    string,
+    Record<string, { parameters?: DescriptorParameter[] }> & { parameters?: DescriptorParameter[] }
+  >;
+};
+
+type DescriptorParameter = { name?: string; description?: string };
+
+/**
+ * The per_page cap an operation documents, or undefined when the descriptor omits the operation (the LFS routes) or
+ * the operation is not paginated. The cap is not machine-readable: it lives in the description prose, and an
+ * operation paginated without a stated cap takes the standard 100.
+ */
+function documentedPerPageCap(
+  spec: DescriptorParameters,
+  endpoint: TaggedEndpoint,
+): number | undefined {
+  const path = endpointPath(endpoint.route);
+  const method = endpointMethod(endpoint.route).toLowerCase();
+  const pathItem = spec.paths?.[path];
+  const operation = pathItem?.[method];
+  if (!operation) {
+    return undefined;
+  }
+  const parameters = [...(operation.parameters ?? []), ...(pathItem?.parameters ?? [])];
+  const perPage = parameters.find((p) => p.name === "per_page");
+  if (perPage === undefined) {
+    return undefined;
+  }
+  const capMatch = (perPage.description ?? "").match(/max(?:imum)?(?: of)? (\d+)/i);
+  return capMatch ? Number(capMatch[1]) : 100;
+}
 
 function req(overrides: Partial<LoggedRequest>): LoggedRequest {
   return { method: "GET", pathname: "/", query: "", status: 200, ...overrides };
@@ -340,35 +375,15 @@ describe("OpenApiValidator against the fetched spec", () => {
   });
 
   test("every declared endpoint's pageSize matches the spec's documented per_page cap", () => {
-    // The per_page cap is not machine-readable: it lives in the description prose. GitHub CLAMPS an
-    // oversized per_page and the page loop stops on a short page, so an undeclared sub-100 cap
-    // silently truncates after page one (the variables family is capped at 30).
-    const spec = loadSpec() as {
-      paths?: Record<
-        string,
-        Record<string, { parameters?: unknown[] }> & { parameters?: unknown[] }
-      >;
-    };
-    // loadSpec() rejects any surviving $ref, so parameters are inline objects.
-    const asParam = (param: unknown): { name?: string; description?: string } =>
-      param as { name?: string; description?: string };
+    // GitHub CLAMPS an oversized per_page and the page loop stops on a short page, so an undeclared
+    // sub-100 cap silently truncates after page one (the variables family is capped at 30).
+    const spec = loadSpec() as DescriptorParameters;
     let cappedEndpoints = 0;
     for (const [key, endpoint] of Object.entries(allEndpoints())) {
-      const path = endpointPath(endpoint.route);
-      const method = endpointMethod(endpoint.route).toLowerCase();
-      const pathItem = spec.paths?.[path];
-      const operation = pathItem?.[method];
-      if (!operation) {
-        // Only the routes the descriptor omits (LFS) miss here.
+      const cap = documentedPerPageCap(spec, endpoint);
+      if (cap === undefined) {
         continue;
       }
-      const parameters = [...(operation.parameters ?? []), ...(pathItem?.parameters ?? [])];
-      const perPage = parameters.map(asParam).find((p) => p.name === "per_page");
-      if (perPage === undefined) {
-        continue; // not a paginated endpoint
-      }
-      const capMatch = (perPage.description ?? "").match(/max(?:imum)?(?: of)? (\d+)/i);
-      const cap = capMatch ? Number(capMatch[1]) : 100;
       const expected = Math.min(cap, 100);
       if (expected < 100) {
         cappedEndpoints++;

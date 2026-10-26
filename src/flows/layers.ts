@@ -27,16 +27,16 @@ export function readLayerFiles(
   );
 }
 
-/**
- * A merge has no `sections` allowlist: the merged document is applied later by a step whose allowlist this run cannot
- * know, so an unknown top-level section is an error naming the layer, as in an apply.
- */
+/** A merge has no `sections` allowlist: the merged document is applied later by a step whose allowlist this run cannot know, so an unknown top-level section is an error naming the layer, as in an apply. */
 const EVERY_SECTION = SectionSelection.ALL;
 
 export interface FoldedLayers {
   /** The fold as validation parsed it: the branded document every other verb takes. */
   settings: ValidatedSettings;
+
+  /** Each lower entry a higher layer's `_remove` dropped, for the run's notices. */
   notices: RemovalNotice[];
+
   /** The fold rendered in the canonical order (src/engine/canonical.ts), exactly as mode: render writes it to rendered-file. */
   yaml: string;
 }

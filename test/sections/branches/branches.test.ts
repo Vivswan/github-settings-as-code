@@ -36,7 +36,7 @@ import { buildState, completeRule, type LiveState, ruleWireNode } from "../../e2
 import type { Json } from "../../e2e/mock/support.js";
 import { captureIo } from "../../io/capture.js";
 import { MockApi, withListing } from "../../mock-api.js";
-import { registryFake } from "../fragment-fake.js";
+import { graphqlErrorStatus, registryFake } from "../fragment-fake.js";
 import { provePlanIdempotent } from "../plan-idempotence.js";
 import { failureOf, REPO, unwrap } from "../section-run.js";
 import { proveSnapshotRoundTrip } from "../snapshot-roundtrip.js";
@@ -46,6 +46,7 @@ import { branchesMockGraphqlHandlers, branchesMockHandlers, wildcardMatches } fr
 /** The bare-list form of the section's value; the tests never hand plan() the `{_layering, entries}` wrapper. */
 type Desired = Extract<SectionInput<"branches">, readonly unknown[]>;
 
+/** The section's plan over the bare list, failures unwrapped. */
 const plan = async (api: GitHubClient, desired: Desired) =>
   unwrap(
     await branchesSection.plan(
@@ -134,7 +135,7 @@ function liveRepo(live: LiveState): GitHubClient & { writes: Recorded[] } {
         const types = [...new Set(result.errors.map((e) => e.type))].sort();
         return {
           error: {
-            status: types.includes("FORBIDDEN") ? 403 : types.includes("NOT_FOUND") ? 404 : 422,
+            status: graphqlErrorStatus(types),
             message: result.errors.map((e) => e.message).join("; "),
             body: JSON.stringify(result.errors),
             graphqlTypes: types,
@@ -170,9 +171,15 @@ function ruleNode(
   };
 }
 
+/** The protection GET of main. */
 const PROTECTION = "GET /repos/o/r/branches/main/protection";
+
+/** The branch probe: a 404 on the protection GET reads as "unprotected" only when the branch exists. */
 const PROBE = "GET /repos/o/r/branches/main";
+
+/** The route params of every operation on main. */
 const MAIN = { branch: "main" };
+
 /** The classic PUT body for `{enforce_admins: true}`: the omitted core keys null-filled. */
 const NULL_FILLED = {
   enforce_admins: true,
@@ -180,6 +187,7 @@ const NULL_FILLED = {
   required_pull_request_reviews: null,
   restrictions: null,
 };
+
 /** The whole failure for a user actor whose GraphQL lookup answers `user: null`. */
 const GHOST_ACTOR_ERROR =
   'branches: force_push_bypassers actor "ghost": the GraphQL lookup succeeded but returned no node id, so the allowance cannot be applied; re-run the workflow, and report this if it persists';
@@ -1420,13 +1428,13 @@ describe("branches plan contract", () => {
     // Compile-time only.
     const ctx = planContext(branchesSection, new MockApi({}), REPO);
     // @ts-expect-error a write role is not a read: the port has no `putProtection`
-    ctx.read.putProtection;
+    void ctx.read.putProtection;
     // @ts-expect-error nor a GraphQL mutation
-    ctx.read.updateRule;
+    void ctx.read.updateRule;
     // @ts-expect-error nor the raw client
-    ctx.api;
+    void ctx.api;
     // @ts-expect-error an "absent" primary read offers no must-succeed call
-    ctx.read.getProtection.call;
+    void ctx.read.getProtection.call;
   });
 
   test("a planned operation can only name a declared write role, with the facets its route demands", () => {

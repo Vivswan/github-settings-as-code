@@ -11,6 +11,7 @@ import { z } from "zod";
 
 /** Environment names are case-insensitive on GitHub; the brand marks a name already folded to the key every lookup reads. */
 declare const environmentNameKey: unique symbol;
+
 export type EnvironmentKey = string & { readonly [environmentNameKey]: true };
 
 export function environmentKey(name: string): EnvironmentKey {
@@ -42,10 +43,12 @@ const MAX_REVIEWERS = 6;
 /** GitHub's cap on pinned environments per repository. */
 export const MAX_PINNED_ENVIRONMENTS = 10;
 
+/** A branch pattern entry; an absent type is GitHub's own default, "branch". */
 export const DeploymentBranchPolicyConfig = open({
   name: z.string(),
   type: z.enum(DEPLOYMENT_BRANCH_POLICY_TYPES).optional(),
 }).meta({ id: "DeploymentBranchPolicyConfig" });
+
 export type DeploymentBranchPolicyConfig = z.infer<typeof DeploymentBranchPolicyConfig>;
 
 export const DeploymentProtectionRuleConfig = z
@@ -66,12 +69,7 @@ export const EnvironmentSecretConfig = z
   .meta({ id: "EnvironmentSecretConfig" });
 export type EnvironmentSecretConfig = z.infer<typeof EnvironmentSecretConfig>;
 
-/**
- * GitHub accepts exactly one flag on: both true is a 422, and both false is a 422 too because "any
- * branch may deploy" is spelled `deployment_branch_policy: null`. open() over the generated body, which only the
- * section can mint (shared/schema-marks.ts); the descriptor's prose sits on the generated nullable and comes back
- * through the meta.
- */
+// open() over the generated flags body, which only the section can mint (shared/schema-marks.ts); the descriptor's prose sits on the generated nullable and comes back through the meta.
 const DeploymentBranchPolicy = open(DeploymentBranchPolicyFlags.unwrap().shape)
   .check(
     rule((flags, refineCtx) => {
@@ -101,6 +99,7 @@ const DeploymentBranchPolicy = open(DeploymentBranchPolicyFlags.unwrap().shape)
     ),
   });
 
+/** One environment entry: the PUT body's keys, plus the routed scalar and the nested lists nested.ts strips before the PUT. */
 export const EnvironmentConfig = open({
   name: z.string(),
   // Routed (see EnvironmentRoutedScalars): stripped from the PUT body and applied through the
@@ -194,6 +193,7 @@ export const EnvironmentConfig = open({
       ),
     ],
   });
+
 export type EnvironmentConfig = z.infer<typeof EnvironmentConfig>;
 
 export const EnvironmentsConfig = z.array(EnvironmentConfig).check(

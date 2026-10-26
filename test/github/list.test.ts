@@ -7,12 +7,17 @@ afterEach(restoreFetch);
 const JSON_HEADERS = { "content-type": "application/json" };
 
 /** A page as GitHub serves one: the JSON body, and the `next` Link when more pages follow. */
-const page = (body: unknown, next?: string) => () =>
-  new Response(JSON.stringify(body), {
-    headers: next === undefined ? JSON_HEADERS : { ...JSON_HEADERS, link: `<${next}>; rel="next"` },
-  });
+function page(body: unknown, next?: string): () => Response {
+  return () =>
+    new Response(JSON.stringify(body), {
+      headers:
+        next === undefined ? JSON_HEADERS : { ...JSON_HEADERS, link: `<${next}>; rel="next"` },
+    });
+}
 
-const fullPage = (prefix: string) => Array.from({ length: 100 }, (_, i) => `${prefix}${i}`);
+function fullPage(prefix: string): string[] {
+  return Array.from({ length: 100 }, (_, i) => `${prefix}${i}`);
+}
 
 describe("tryList", () => {
   test("follows the Link header and hands back every page's body as GitHub sent it, in order", async () => {

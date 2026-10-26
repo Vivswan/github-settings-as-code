@@ -120,6 +120,24 @@ describe("schema $schema hints", () => {
       .map((name) => ({ label: `docs/${name}`, path: join(ROOT, "docs", name) })),
   ];
 
+  /** What one modeline says: null when it names `expectedHint`, else the problem. */
+  const modelineProblem = (
+    label: string,
+    line: string,
+    expectedHint: string,
+    major: string | undefined,
+  ): string | null => {
+    // The language server reads the modeline only as a comment opening the line (indent aside, for the README's list nesting).
+    const url = line.match(/^\s*# yaml-language-server: \$schema=(\S+)/)?.[1];
+    if (url === undefined) {
+      return `${label}: unreadable modeline "${line.trim()}"`;
+    }
+    if (url === expectedHint) {
+      return null;
+    }
+    return `${label} carries ${url}, not the schema at ${major}`;
+  };
+
   test("every yaml-language-server hint in the README and the guides names the schema at the moving major tag", () => {
     expect(id, "lib/settings.schema.json has no $id").toBeTruthy();
     // The $id is version-free (HEAD); the hints are what editors download, so they pin the moving major tag.
@@ -139,14 +157,11 @@ describe("schema $schema hints", () => {
         if (!line.includes("yaml-language-server")) {
           continue;
         }
-        // The language server reads the modeline only as a comment opening the line (indent aside, for the README's list nesting).
-        const url = line.match(/^\s*# yaml-language-server: \$schema=(\S+)/)?.[1];
-        if (url === undefined) {
-          problems.push(`${page.label}: unreadable modeline "${line.trim()}"`);
-        } else if (url !== expectedHint) {
-          problems.push(`${page.label} carries ${url}, not the schema at ${pins?.major}`);
-        } else {
+        const problem = modelineProblem(page.label, line, expectedHint, pins?.major);
+        if (problem === null) {
           hints.push(page.label);
+        } else {
+          problems.push(problem);
         }
       }
     }

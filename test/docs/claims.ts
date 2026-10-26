@@ -5,13 +5,13 @@
 
 import type { SectionKey } from "../../src/schema.js";
 
+/** The word stems that claim deletion, as a regex alternation. */
 const DELETE_STEMS = String.raw`delet\w*|remov\w*|drop\w*|clear\w*`;
+
+/** The word stems that claim keeping, as a regex alternation. */
 const KEEP_STEMS = String.raw`kept|keep\w*|retain\w*|preserv\w*`;
 
-/**
- * Prose display names of the delete-by-default sections; a new one fails the enumeration pins through deleteEnumerationProblems until it is added
- * here.
- */
+/** Prose display names of the delete-by-default sections; a new one fails the enumeration pins through deleteEnumerationProblems until it is added here. */
 const DELETE_DEFAULT_DISPLAY_NAMES: Partial<Record<SectionKey, string>> = {
   labels: "labels",
   autolinks: "autolinks",
@@ -90,6 +90,30 @@ function defaultClaimWindows(text: string): string[] {
   return [...text.matchAll(/([^.;:!?]{0,80})by default/g)].map((match) => match[1] ?? "");
 }
 
+/** What one stem match in a window claims against `policy`: the policy's own claim, or the problem it is. */
+function readClaim(
+  window: string,
+  match: RegExpMatchArray,
+  policy: UndeclaredClaim,
+): { own: true } | { problem: string } {
+  const stem = match[1] ?? "";
+  const family: UndeclaredClaim = CLAIM_FAMILY.delete.test(stem) ? "delete" : "keep";
+  const negation = stemNegation(window.slice(0, match.index));
+  if ("doubleNegation" in negation) {
+    return {
+      problem: `a double negation governs "${negation.doubleNegation} ${stem}" in "...${window.trim()} by default"; reword it - double negatives are not resolved`,
+    };
+  }
+  const flipped: UndeclaredClaim = family === "delete" ? "keep" : "delete";
+  const effective = negation.negated ? flipped : family;
+  if (effective === policy) {
+    return { own: true };
+  }
+  return {
+    problem: `"...${window.trim()} by default" claims the opposite of the "${policy}" default${negation.negated ? " (negated claim)" : ""}`,
+  };
+}
+
 /**
  * A mixed-family negated clause ("not deleted but kept by default") is REJECTED as ambiguous rather than parsed: the negator lands in both stems'
  * spans and the flipped reading contradicts the plain one, so the fix is rewording.
@@ -100,30 +124,11 @@ export function defaultClaimProblems(text: string, policy: UndeclaredClaim): str
     return [`no "by default" clause states the "${policy}" default`];
   }
   const stemRe = new RegExp(String.raw`\b(${CLAIM_STEMS})\b`, "gi");
-  const problems: string[] = [];
-  let ownClaims = 0;
-  for (const window of windows) {
-    for (const match of window.matchAll(stemRe)) {
-      const stem = match[1] ?? "";
-      const family: UndeclaredClaim = CLAIM_FAMILY.delete.test(stem) ? "delete" : "keep";
-      const negation = stemNegation(window.slice(0, match.index));
-      if ("doubleNegation" in negation) {
-        problems.push(
-          `a double negation governs "${negation.doubleNegation} ${stem}" in "...${window.trim()} by default"; reword it - double negatives are not resolved`,
-        );
-        continue;
-      }
-      const flipped: UndeclaredClaim = family === "delete" ? "keep" : "delete";
-      const effective = negation.negated ? flipped : family;
-      if (effective === policy) {
-        ownClaims++;
-      } else {
-        problems.push(
-          `"...${window.trim()} by default" claims the opposite of the "${policy}" default${negation.negated ? " (negated claim)" : ""}`,
-        );
-      }
-    }
-  }
+  const readings = windows.flatMap((window) =>
+    [...window.matchAll(stemRe)].map((match) => readClaim(window, match, policy)),
+  );
+  const problems = readings.flatMap((reading) => ("problem" in reading ? [reading.problem] : []));
+  const ownClaims = readings.length - problems.length;
   if (ownClaims === 0 && problems.length === 0) {
     problems.push(`no "by default" clause claims the "${policy}" default`);
   }

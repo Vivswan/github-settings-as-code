@@ -17,11 +17,7 @@ export function recurringEndpointKeys(rule: Exclude<Recurrence, "never">): strin
     .sort();
 }
 
-/**
- * Each alwaysRewrite endpoint's mock state family, whose updated_at moves between applies, or null
- * when nothing stored moves (Git LFS stores nothing; check suite preferences carry no timestamp).
- * The lockstep test pins the KEY SET against the flags.
- */
+/** Each alwaysRewrite endpoint's mock state family, whose updated_at moves between applies, or null when nothing stored moves (Git LFS stores nothing, check suite preferences carry no timestamp); the lockstep test pins the key set against the flags. */
 export const ALWAYS_REWRITE_ENDPOINT_FAMILIES: Readonly<Record<string, keyof MockState | null>> = {
   "actions_secrets.put": "actions_secrets",
   "dependabot_secrets.put": "dependabot_secrets",
@@ -34,6 +30,7 @@ export const ALWAYS_REWRITE_ENDPOINT_FAMILIES: Readonly<Record<string, keyof Moc
   "check_suite_preferences.update": null,
 };
 
+/** The families the idempotence proof snapshots without updated_at, since each apply rewrites it. */
 export const ALWAYS_REWRITE_STATE_FAMILIES: ReadonlySet<string> = new Set<string>(
   Object.values(ALWAYS_REWRITE_ENDPOINT_FAMILIES).filter((family) => family !== null),
 );
