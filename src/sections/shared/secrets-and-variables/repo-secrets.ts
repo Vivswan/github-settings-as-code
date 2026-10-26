@@ -51,7 +51,7 @@ export type RepoSecretsKey =
   | "codespaces_secrets"
   | "agents_secrets";
 
-/** The routes derive from THIS map, so a key paired with another family's segment (which the mock would faithfully serve) is unrepresentable; the `satisfies` pins each value to the segment its key spells. */
+/** Routes derive from THIS map, so a key under another family's segment is unrepresentable (the mock would serve the swap and hide it). */
 const SECRETS_SEGMENTS = {
   actions_secrets: "actions",
   dependabot_secrets: "dependabot",
@@ -67,6 +67,7 @@ const SECRETS_ENTRIES = {
   agents_secrets: AgentsSecretConfig,
 } as const satisfies Record<RepoSecretsKey, ReturnType<typeof sealedSecretConfig>>;
 
+/** The path segment a family's key spells; a fifth family breaking the `<segment>_secrets` naming must say so here. */
 type SegmentOfSecretsKey<K extends RepoSecretsKey> = K extends `${infer S}_secrets` ? S : never;
 
 type SecretsSegment<K extends RepoSecretsKey = RepoSecretsKey> = (typeof SECRETS_SEGMENTS)[K];

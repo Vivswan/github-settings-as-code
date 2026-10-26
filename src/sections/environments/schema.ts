@@ -73,6 +73,9 @@ export type EnvironmentSecretConfig = z.infer<typeof EnvironmentSecretConfig>;
 const DeploymentBranchPolicy = open(DeploymentBranchPolicyFlags.unwrap().shape)
   .check(
     rule((flags, refineCtx) => {
+      // GitHub accepts exactly one flag on: both true is a 422, and both false is a 422 too, since "any branch may
+      // deploy" is spelled `deployment_branch_policy: null`.
+
       // A raw flag beside its own shape issue is neither setting: two equal raw values (0 and 0, a YAML alias
       // to one mapping) are not both false, nor both true.
       if (

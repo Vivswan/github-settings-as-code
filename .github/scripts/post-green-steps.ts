@@ -14,14 +14,14 @@ import { attempt, requireEnv, setOutput } from "./lib/workflow-step.js";
 /** What each subcommand writes to GITHUB_OUTPUT; test/workflows/post-green-workflow.test.ts judges the job's wiring from it, as from the shell steps' echo lines. */
 export const STEP_OUTPUTS = { probe: ["proceed"] } as const;
 
-/** Refused for a token without write access and creates nothing, against a ref that never exists, so git cannot refuse a non-fast-forward locally whatever the token. */
+/** A dry-run push asks origin for its receive-pack advertisement over the real push's channel, so a token without write access is refused and nothing is created. */
 const DRY_RUN_PUSH = [
   "git",
   "push",
   "--dry-run",
   "--quiet",
   "origin",
-  "HEAD:refs/dry-run/token-probe",
+  "HEAD:refs/dry-run/token-probe", // a ref that never exists, so git cannot refuse a non-fast-forward locally whatever the token
 ];
 
 /** The text's lines as awk would read them: no trailing record for a final newline, none at all for empty text. */

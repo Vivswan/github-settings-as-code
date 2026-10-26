@@ -41,7 +41,8 @@ type PermissionOverride = SectionPermission | "none";
 
 /**
  * A read's phase. Omitted, the read is available to plan(), so check mode and preflight may meet it. "execution"
- * gates it behind the ExecTools token only a thunk receives (ReadPort in ./plan.ts), so check mode never issues it.
+ * gates it behind the ExecTools token only a thunk receives (ReadPort in ./plan.ts), so check mode never issues it
+ * (the Codespaces sealing key, for one).
  *
  *   e2e mock          -> treats an execution read in check mode as a violation
  *   denialPosture()   -> rejects a primaryRead on it: no denied first read can be classified from it
