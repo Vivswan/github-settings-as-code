@@ -24,22 +24,29 @@ interface Secret {
   readonly value: string;
 }
 
+/** The list read every synthetic section shares. */
 const LIST = {
   route: "GET /repos/{owner}/{repo}/actions/secrets",
   statuses: { 200: "the secrets" },
   primaryRead: { notFound: "denied" },
 } as const satisfies EndpointDecl;
 
+/** The write the postures differ on. */
 const PUT = {
   route: "PUT /repos/{owner}/{repo}/actions/secrets/{secret_name}",
   statuses: { 201: "created", 204: "updated" },
 } as const satisfies EndpointDecl;
 
-/** The dictionaries differ in ONE declaration each: whether the PUT recurs, or may carry the facet. */
+/** The PUT recurs by declaration. */
 const SEALED_ENDPOINTS = { list: LIST, put: { ...PUT, alwaysRewrite: true } } as const;
+
+/** The PUT is planned on drift alone. */
 const CONDITIONAL_ENDPOINTS = { list: LIST, put: PUT } as const;
+
+/** The PUT may carry the unverifiable facet. */
 const UNVERIFIABLE_ENDPOINTS = { list: LIST, put: { ...PUT, unverifiable: true } } as const;
 
+/** What every synthetic module shares; plan() alone differs between them. */
 const META = {
   key: "actions_secrets",
   permission: { repo: ["secrets"] },
@@ -57,10 +64,7 @@ function entriesOf(
   return declaredEntries(declared).entries;
 }
 
-/**
- * The sealed posture: the PUT recurs by declaration with no drift to report (GitHub cannot echo a secret back), and its change line names the live
- * state (created, then updated), so it may differ between passes while the write recurs.
- */
+/** The sealed posture: the PUT recurs by declaration with no drift to report (GitHub cannot echo a secret back), and its change line names the live state (created, then updated), so it may differ between passes while the write recurs. */
 const sealed = {
   ...META,
   endpoints: SEALED_ENDPOINTS,
@@ -80,10 +84,7 @@ const sealed = {
   },
 } satisfies SectionModule<"actions_secrets", typeof SEALED_ENDPOINTS>;
 
-/**
- * The non-converging posture: a conditional write whose live read never shows the result, so every pass re-plans a drift-bearing write; this is what
- * a section comparing the wrong live field looks like.
- */
+/** The non-converging posture: a conditional write whose live read never shows the result, so every pass re-plans a drift-bearing write, as a section comparing the wrong live field would. */
 const stuck = {
   ...META,
   endpoints: CONDITIONAL_ENDPOINTS,
@@ -104,7 +105,10 @@ const stuck = {
   },
 } satisfies SectionModule<"actions_secrets", typeof CONDITIONAL_ENDPOINTS>;
 
+/** The one declared secret. */
 const DESIRED = [{ name: "DEPLOY_TOKEN", value: "$DEPLOY_TOKEN" }];
+
+/** The execution tools: every reference resolves to one sealed stand-in. */
 const TOOLS: ExecTools = { resolveSecret: () => "sealed" };
 
 /** A client whose secrets list never reflects the PUTs it accepts. */

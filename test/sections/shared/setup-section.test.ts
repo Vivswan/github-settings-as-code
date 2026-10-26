@@ -30,28 +30,46 @@ function reversed<T extends readonly string[]>(names: T): T {
 
 /** The lockstep tuple on which the minted sections differ, typed by the same key throughout. */
 interface SetupFacts<K extends SetupKey> {
+  /** The minted section under test. */
   section: SetupSectionModule<K>;
+
   /** The expanded endpoint path ("/repos/o/r/code-quality/setup"). */
   path: string;
+
   /** A live GET body; must carry a `languages` list for the set compare, and lack the key `knownAbsent` declares. */
   live: Record<string, unknown> & { languages: Languages<K> };
-  /** A declared document that drifts from `live`, and the exact drift line. */
+
+  /** A declared document that drifts from `live`. */
   driftDeclared: Declared<K>;
+
+  /** The exact drift line that document earns. */
   driftLine: string;
+
   /** A slice key `live` lacks: drift the PATCH resolves, never a phantom. */
   knownAbsent: Declared<K>;
+
   /** A language only the GET reports, and the exact refusal it earns in a settings file. */
   getOnlyLanguage: [string, string];
-  /** The mock's seeded setup whose `languages` carry the GET's spellings, and what they read back as. */
+
+  /** The mock's seeded setup, its `languages` in the GET's spellings. */
   seeded: LiveState;
+
+  /** What the seeded languages read back as. */
   languagesRead: Languages<K>;
+
   /** The GET-only names with no declarable form, left out of the compare and the snapshot with a note. */
   undeclarable: string[];
+
   /** A declared document for the verbatim-PATCH case. */
   applyPayload: Declared<K>;
+
+  /** The change line that PATCH reports. */
   changeLine: string;
-  /** The whole failure messages a 409 and a 403 on the PATCH produce. */
+
+  /** The whole failure message a 409 on the PATCH produces. */
   conflict409: string;
+
+  /** The whole failure message a 403 on the PATCH produces. */
   denied403: string;
 }
 
@@ -131,12 +149,12 @@ type _DeniedReadHasNoProbe = MustBeNever<
 >;
 
 type DeclaredOf<K extends SetupKey> = SectionInput<K>;
-({ query_suite: "extended" }) satisfies DeclaredOf<"code_scanning_default_setup">;
+void ({ query_suite: "extended" } satisfies DeclaredOf<"code_scanning_default_setup">);
 // @ts-expect-error ai_findings_option belongs to code_quality_setup alone
-({ ai_findings_option: "disabled" }) satisfies DeclaredOf<"code_scanning_default_setup">;
-({ ai_findings_option: "disabled" }) satisfies DeclaredOf<"code_quality_setup">;
+void ({ ai_findings_option: "disabled" } satisfies DeclaredOf<"code_scanning_default_setup">);
+void ({ ai_findings_option: "disabled" } satisfies DeclaredOf<"code_quality_setup">);
 // @ts-expect-error query_suite belongs to code_scanning_default_setup alone
-({ query_suite: "extended" }) satisfies DeclaredOf<"code_quality_setup">;
+void ({ query_suite: "extended" } satisfies DeclaredOf<"code_quality_setup">);
 
 /**
  * A stateful fake: the GET serves what the PATCH last merged over the seeded body, and the PATCH answers the spec's plain 200, an EMPTY object, so

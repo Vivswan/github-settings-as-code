@@ -19,9 +19,12 @@ export type SnapshotSection = SectionModule & Required<Pick<SectionModule, "snap
 
 /** One section's enrolment in the proof: a FAMILY_ROWS entry in snapshot-row-families.ts, or test/sections/<key>/snapshot-row.ts exporting `row`. */
 export interface Row {
+  /** The section under proof. */
   readonly section: SnapshotSection;
+
   /** The live state seeded into the mock; must hold at least one resource of the section's. */
   readonly live: LiveState;
+
   /** The whole snapshot the seeded state reads back as. */
   readonly expected: { value: unknown; notes: string[] };
 }

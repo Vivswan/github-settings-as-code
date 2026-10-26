@@ -9,7 +9,6 @@ import { REPO, unwrap } from "../section-run.js";
 import { validatedInput } from "../validated-input.js";
 import { autolinksMockHandlers } from "./mock.js";
 
-/** The list is unpaginated: one bare GET, no page params. */
 const LIST = "GET /repos/o/r/autolinks";
 const liveAutolinks = [
   { id: 1, key_prefix: "JIRA-", url_template: "https://x.test/<num>", is_alphanumeric: true },
@@ -79,6 +78,7 @@ describe("autolinks", () => {
       notes: [],
       drift: [],
     });
+    // One bare GET: the list is unpaginated, so no page params.
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([LIST]);
   });
 

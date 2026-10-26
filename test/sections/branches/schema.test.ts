@@ -15,14 +15,16 @@ const WILDCARD_KEYS =
   "required_signatures, required_status_checks, required_pull_request_reviews, " +
   "force_push_bypassers, required_deployments";
 
-const cases: Array<{
+/** One refusal, pinned by the message of every issue in full (one per path when they differ): the path never stands in for it. */
+interface Case {
   refused: string;
   protection: Record<string, unknown>;
   name?: string;
   paths: string[];
-  /** The message of every issue in full (one per path when they differ): the path never stands in for it. */
   fix: string | string[];
-}> = [
+}
+
+const cases: Case[] = [
   {
     refused: "a status-check requirement without strict (the PUT 422s on it)",
     protection: { required_status_checks: { contexts: ["ci"] } },

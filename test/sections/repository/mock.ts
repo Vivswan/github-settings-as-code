@@ -16,8 +16,7 @@ import {
   type SectionRestHandlers,
 } from "../../e2e/mock/support.js";
 
-// Every repo body a REST handler serves, and the PATCH body it accepts, goes through
-// restRepoSurface, which strips the GraphQL-only fields, so the REST paths stay as blind to them as GitHub's.
+// Every repo body a REST handler serves, and the PATCH body it accepts, goes through restRepoSurface, which strips the GraphQL-only fields, so the REST paths stay as blind to them as GitHub's.
 export const repositoryMockHandlers: SectionRestHandlers<"repository"> = {
   "repository.get": ({ state }) => ok(restRepoSurface(state.repo)),
   "repository.update": ({ state, body }) => {

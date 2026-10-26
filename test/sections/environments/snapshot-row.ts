@@ -2,9 +2,7 @@ import { environmentsSection } from "../../../src/sections/environments/index.js
 import type { Row } from "../snapshot-roundtrip.js";
 import { STAMPS } from "../snapshot-row-families.js";
 
-// staging is the one pinned environment, so it LEADS the snapshot with pinned: true (the planner
-// reads declaration order as pin order) and production follows without the key. staging has no
-// protection rules, which the snapshot writes out as the three disabled values.
+/** staging is the one pinned environment, so it LEADS the snapshot with pinned: true (declaration order is pin order) and production follows without the key; staging's empty protection rules write out as the three disabled values. */
 export const row: Row = {
   section: environmentsSection,
   live: {

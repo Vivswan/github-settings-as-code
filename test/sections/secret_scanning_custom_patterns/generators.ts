@@ -11,10 +11,10 @@ import {
 } from "../../e2e/generators/gen-support.js";
 import type { Rng } from "../../e2e/generators/prng.js";
 
+/** The name pool; an index suffix inside the pool keeps the exact-name natural key unique. */
 const NAMES = ["internal-api-token", "staging-key", "vendor-secret", "license-key"] as const;
-// Every pool value passes the syntax check (generatorFromSlice validates each draw against the slice), and
-// three spell Hyperscan-only forms the check translates; the refused draw lives in the invalid-settings
-// catalog (test/e2e/generators/invalid-settings.ts), predicted by the same check.
+
+/** Every pool value passes the syntax check (generatorFromSlice validates each draw against the slice), three in Hyperscan-only forms the check translates; the refused draw lives in test/e2e/generators/invalid-settings.ts, predicted by the same check. */
 const PATTERNS = [
   "int_[a-z0-9]{8}",
   "key-[0-9]{6}",

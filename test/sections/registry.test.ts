@@ -175,26 +175,14 @@ describe("section permissions", () => {
   test("sections declaring the same route agree on its contract", () => {
     // The mock resolves a request to the FIRST matching declaration, so a sibling that diverged (GET /orgs/{org} is declared by two sections, teams
     // and custom_properties) would be validated against another section's contract unnoticed.
-    const byRoute = new Map<string, Array<{ key: string; contract: string }>>();
+    const byRoute = new Map<string, Array<{ key: string; contract: unknown }>>();
     const sectionPermission = new Map(SECTIONS.map((section) => [section.key, section.permission]));
-    // A JSON.stringify replacer ARRAY would filter nested keys (statuses' "200"), so canonicalize recursively.
-    const canonical = (value: unknown): unknown =>
-      Array.isArray(value)
-        ? value.map(canonical)
-        : value !== null && typeof value === "object"
-          ? Object.fromEntries(
-              Object.entries(value)
-                .sort(([a], [b]) => a.localeCompare(b))
-                .map(([k, v]) => [k, canonical(v)]),
-            )
-          : value;
     for (const [key, endpoint] of Object.entries(allEndpoints())) {
       // The WHOLE wire declaration is compared, so a later EndpointDecl field cannot diverge uncovered; only the
       // 404 posture stays out, since it is the SECTION's (denialPosture reads it per section, never per route).
       // The effective permission rides along: two declarations can both omit an override while inheriting different section permissions.
       const { route: _route, section, role: _role, primaryRead: _posture, ...rest } = endpoint;
-      const projected = { ...rest, effective: rest.permission ?? sectionPermission.get(section) };
-      const contract = JSON.stringify(canonical(projected));
+      const contract = { ...rest, effective: rest.permission ?? sectionPermission.get(section) };
       const group = byRoute.get(endpoint.route) ?? [];
       group.push({ key, contract });
       byRoute.set(endpoint.route, group);
@@ -208,7 +196,7 @@ describe("section permissions", () => {
         expect(
           sibling.contract,
           `${sibling.key} and ${first?.key} both declare "${route}" but disagree on its contract; the mock resolves the first match, so they must stay identical`,
-        ).toBe(first?.contract ?? "");
+        ).toEqual(first?.contract);
       }
     }
   });
@@ -241,6 +229,25 @@ describe("grantFor", () => {
   });
 });
 
+/** What is malformed about an endpoint's statuses record, each line tagged, so one sweep reports every problem at once. */
+function statusProblems(tag: string, statuses: EndpointDecl["statuses"]): string[] {
+  const problems: string[] = [];
+  const statusEntries = Object.entries(statuses);
+  if (statusEntries.length === 0) {
+    problems.push(`${tag}: declares no statuses`);
+  }
+  for (const [statusKey, meaning] of statusEntries) {
+    const status = Number(statusKey);
+    if (!Number.isInteger(status) || status < 100 || status >= 600) {
+      problems.push(`${tag}: status "${statusKey}" is not an integer in 100-599`);
+    }
+    if (typeof meaning !== "string" || meaning.length === 0) {
+      problems.push(`${tag}: status ${statusKey} carries no prose meaning`);
+    }
+  }
+  return problems;
+}
+
 describe("section endpoints", () => {
   test("every declared endpoint names at least one status, each an HTTP status with a prose meaning", () => {
     // The route itself is compile-checked against the OpenAPI-derived Route union; the statuses are a plain record, so only this sweep sees them.
@@ -248,30 +255,102 @@ describe("section endpoints", () => {
     for (const module of SECTIONS) {
       for (const [role, endpoint] of Object.entries(module.endpoints)) {
         const tag = `${module.key}.${role} ("${endpoint.route}")`;
-        const statusEntries = Object.entries(endpoint.statuses);
-        if (statusEntries.length === 0) {
-          problems.push(`${tag}: declares no statuses`);
-        }
-        for (const [statusKey, meaning] of statusEntries) {
-          const status = Number(statusKey);
-          if (!Number.isInteger(status) || status < 100 || status >= 600) {
-            problems.push(`${tag}: status "${statusKey}" is not an integer in 100-599`);
-          }
-          if (typeof meaning !== "string" || meaning.length === 0) {
-            problems.push(`${tag}: status ${statusKey} carries no prose meaning`);
-          }
-        }
+        problems.push(...statusProblems(tag, endpoint.statuses));
       }
     }
     expect(problems, `malformed endpoint declaration(s):\n  ${problems.join("\n  ")}`).toEqual([]);
   });
 });
 
+/** One assignment a frozen declaration must refuse: what it would change, and the mutation. */
+type Attempt = [what: string, mutate: () => void];
+
+/** The assignments that would corrupt one endpoint declaration: its slot in the dictionary, its route, a status, and, where declared, a hint, a permission list, and a rejection. */
+function endpointAttempts(
+  section: SectionModule,
+  role: string,
+  endpoint: SectionModule["endpoints"][string],
+): Attempt[] {
+  const tag = `${section.key}.${role}`;
+  const attempts: Attempt[] = [
+    [
+      `${tag} replace`,
+      () => {
+        (section.endpoints as Record<string, unknown>)[role] = {};
+      },
+    ],
+    [
+      `${tag} route`,
+      () => {
+        (endpoint as { route: string }).route = "DELETE /repos/{owner}/{repo}";
+      },
+    ],
+    [
+      `${tag} statuses`,
+      () => {
+        (endpoint.statuses as Record<number, string>)[299] = "hacked";
+      },
+    ],
+  ];
+  if (endpoint.hints !== undefined) {
+    attempts.push([
+      `${tag} hints`,
+      () => {
+        (endpoint.hints as Record<number, string>)[422] = "hacked";
+      },
+    ]);
+  }
+  if (typeof endpoint.permission === "object") {
+    attempts.push([
+      `${tag} permission`,
+      () => {
+        (endpoint.permission as unknown as { repo: string[] }).repo.push("hacked");
+      },
+    ]);
+  }
+  if (endpoint.rejections !== undefined) {
+    attempts.push([
+      `${tag} rejections`,
+      () => {
+        (endpoint.rejections as unknown as object[]).push({});
+      },
+    ]);
+  }
+  return attempts;
+}
+
+/** The assignments that would corrupt one GraphQL operation declaration: an outcome, its kind, and, where declared, its connection path. */
+function graphqlAttempts(tag: string, op: GraphqlDict[string]): Attempt[] {
+  const attempts: Attempt[] = [
+    [
+      `${tag} outcomes`,
+      () => {
+        (op.outcomes as Record<string, string>).ok = "hacked";
+      },
+    ],
+    [
+      `${tag} kind`,
+      () => {
+        (op as { kind: string }).kind = "write";
+      },
+    ],
+  ];
+  if (op.connection !== undefined) {
+    attempts.push([
+      `${tag} connection`,
+      () => {
+        (op.connection as unknown as { path: string[] }).path.push("hacked");
+      },
+    ]);
+  }
+  return attempts;
+}
+
 describe("declarations are frozen at registration", () => {
   test("mutating any registered section's declaration throws, with no view called first", () => {
     // The module, endpoint, and op objects themselves are frozen by no view (the views freeze only the tagged copies they build), so a
     // frozen source here is freezeDeclarations' work alone. ES module test files are strict, so an assignment on a frozen object throws.
-    const attempts: [string, () => void][] = [];
+    const attempts: Attempt[] = [];
     let endpointCount = 0;
     for (const section of SECTIONS) {
       expect(Object.isFrozen(section), `${section.key} module`).toBe(true);
@@ -283,52 +362,8 @@ describe("declarations are frozen at registration", () => {
       ]);
       for (const [role, endpoint] of Object.entries(section.endpoints)) {
         endpointCount++;
-        const tag = `${section.key}.${role}`;
-        expect(Object.isFrozen(endpoint), tag).toBe(true);
-        attempts.push(
-          [
-            `${tag} replace`,
-            () => {
-              (section.endpoints as Record<string, unknown>)[role] = {};
-            },
-          ],
-          [
-            `${tag} route`,
-            () => {
-              (endpoint as { route: string }).route = "DELETE /repos/{owner}/{repo}";
-            },
-          ],
-          [
-            `${tag} statuses`,
-            () => {
-              (endpoint.statuses as Record<number, string>)[299] = "hacked";
-            },
-          ],
-        );
-        if (endpoint.hints !== undefined) {
-          attempts.push([
-            `${tag} hints`,
-            () => {
-              (endpoint.hints as Record<number, string>)[422] = "hacked";
-            },
-          ]);
-        }
-        if (typeof endpoint.permission === "object") {
-          attempts.push([
-            `${tag} permission`,
-            () => {
-              (endpoint.permission as unknown as { repo: string[] }).repo.push("hacked");
-            },
-          ]);
-        }
-        if (endpoint.rejections !== undefined) {
-          attempts.push([
-            `${tag} rejections`,
-            () => {
-              (endpoint.rejections as unknown as object[]).push({});
-            },
-          ]);
-        }
+        expect(Object.isFrozen(endpoint), `${section.key}.${role}`).toBe(true);
+        attempts.push(...endpointAttempts(section, role, endpoint));
       }
       if (section.closedSurface !== undefined) {
         attempts.push([
@@ -341,28 +376,7 @@ describe("declarations are frozen at registration", () => {
       for (const [role, op] of Object.entries(section.graphql ?? {})) {
         const tag = `${section.key}.${role}`;
         expect(Object.isFrozen(op), tag).toBe(true);
-        attempts.push(
-          [
-            `${tag} outcomes`,
-            () => {
-              (op.outcomes as Record<string, string>).ok = "hacked";
-            },
-          ],
-          [
-            `${tag} kind`,
-            () => {
-              (op as { kind: string }).kind = "write";
-            },
-          ],
-        );
-        if (op.connection !== undefined) {
-          attempts.push([
-            `${tag} connection`,
-            () => {
-              (op.connection as unknown as { path: string[] }).path.push("hacked");
-            },
-          ]);
-        }
+        attempts.push(...graphqlAttempts(tag, op));
       }
     }
     expect(attempts.length).toBeGreaterThanOrEqual(SECTIONS.length + endpointCount * 3);

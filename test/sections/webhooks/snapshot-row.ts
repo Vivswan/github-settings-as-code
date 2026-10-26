@@ -1,8 +1,7 @@
 import { webhooksSection } from "../../../src/sections/webhooks/index.js";
 import type { Row } from "../snapshot-roundtrip.js";
 
-// The service hook is outside the section and noted; the set secret reads back as a reference keyed
-// by the hook's id, so a reordering never rebinds it.
+/** The service hook is outside the section and noted; the set secret reads back as a reference keyed by the hook's id, so a reordering never rebinds it. */
 export const row: Row = {
   section: webhooksSection,
   live: {

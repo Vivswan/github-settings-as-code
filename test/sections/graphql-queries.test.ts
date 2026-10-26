@@ -10,6 +10,7 @@ import { schema as published } from "@octokit/graphql-schema";
 import {
   buildSchema,
   extendSchema,
+  type FieldNode,
   GraphQLSchema,
   type OperationDefinitionNode,
   parse,
@@ -61,6 +62,22 @@ function operationOf(key: string, query: string): OperationDefinitionNode {
   );
   expect(operations, `${key}: a query must be a single operation`).toHaveLength(1);
   return operations[0] as OperationDefinitionNode;
+}
+
+/** The fields selected directly on the rule nodes of a `branchProtectionRules` field: where the engine reads node[twin]. */
+function ruleNodeFields(connection: FieldNode): FieldNode[] {
+  const fields: FieldNode[] = [];
+  for (const selection of connection.selectionSet?.selections ?? []) {
+    if (selection.kind !== "Field" || selection.name.value !== "nodes") {
+      continue;
+    }
+    for (const field of selection.selectionSet?.selections ?? []) {
+      if (field.kind === "Field") {
+        fields.push(field);
+      }
+    }
+  }
+  return fields;
 }
 
 describe("declared GraphQL queries", () => {
@@ -122,19 +139,12 @@ describe("declared GraphQL queries", () => {
           if (node.name.value !== "branchProtectionRules") {
             return;
           }
-          for (const selection of node.selectionSet?.selections ?? []) {
-            if (selection.kind !== "Field" || selection.name.value !== "nodes") {
-              continue;
-            }
-            for (const field of selection.selectionSet?.selections ?? []) {
-              if (field.kind === "Field") {
-                expect(
-                  field.alias,
-                  `${key} must not alias "${field.name.value}": the engine reads rule fields by their twin name`,
-                ).toBeUndefined();
-                selected.add(field.name.value);
-              }
-            }
+          for (const field of ruleNodeFields(node)) {
+            expect(
+              field.alias,
+              `${key} must not alias "${field.name.value}": the engine reads rule fields by their twin name`,
+            ).toBeUndefined();
+            selected.add(field.name.value);
           }
         },
       });

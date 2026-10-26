@@ -42,6 +42,7 @@ const FAMILIES: Array<{
   },
 ];
 
+/** The families a variable value's size rule applies to. */
 const VARIABLE_FAMILIES = FAMILIES.filter((family) => family.noun === "variable");
 
 function issuesOf(doc: Record<string, unknown>): readonly string[] | "accepted" {

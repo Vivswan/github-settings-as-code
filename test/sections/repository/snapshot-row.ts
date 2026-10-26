@@ -1,8 +1,7 @@
 import { repositorySection } from "../../../src/sections/repository/index.js";
 import type { Row } from "../snapshot-roundtrip.js";
 
-// Over the repo fixture (ids, urls, counts, owner, license, has_downloads: none PATCHable); the
-// overlay adds a null homepage, a passthrough field, two toggles, and the GraphQL fields.
+/** Over the repo fixture (ids, urls, counts, owner, license, has_downloads: none PATCHable), the overlay adds a null homepage, a passthrough field, two toggles, and the GraphQL fields. */
 export const row: Row = {
   section: repositorySection,
   live: {

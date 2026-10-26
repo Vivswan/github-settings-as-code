@@ -17,11 +17,7 @@ import {
   storedHookConfig,
 } from "../../e2e/mock/support.js";
 
-/**
- * The seed completion buildState applies (test/e2e/mock/state.ts LIST_MOCKS). A hook's server
- * fields are minted by completeHook, which buildState runs over every seed and the create handler
- * below runs over every body, so this spec adds only the id it is handed.
- */
+/** The seed completion buildState applies (test/e2e/mock/state.ts LIST_MOCKS): completeHook mints a hook's server fields over every seed and every created body, so this spec adds only the id it is handed. */
 export const WEBHOOKS_MOCK: ListMockSpec = {
   collection: (state) => state.hooks,
   defaults: {},
@@ -29,6 +25,7 @@ export const WEBHOOKS_MOCK: ListMockSpec = {
   unique: "identity",
 };
 
+/** The hand-written handlers: every echo masks config.secret while the stored hook keeps the real one. */
 export const webhooksMockHandlers: SectionRestHandlers<"webhooks"> = {
   "webhooks.list": ({ state, query }) => paged(state.hooks.map(maskHookSecret), query),
   "webhooks.create": ({ state, body }) => {

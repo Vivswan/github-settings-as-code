@@ -37,6 +37,7 @@ function isDocsFile(path: string): boolean {
 
 // Bun's own scanner, so no import form slips past a regex; type-only imports are erased and carry no prose.
 const transpiler = new Bun.Transpiler({ loader: "ts" });
+
 function importSpecifiers(source: string): string[] {
   return transpiler.scanImports(source).map((entry) => entry.path);
 }
@@ -193,6 +194,23 @@ describe("section docs completeness", () => {
     }));
 });
 
+/** The policy a Notes-cell claim asserts once its negation is resolved, and whether a negation flipped it; a double negation is refused, since it is not resolved. */
+function claimedPolicy(
+  key: SectionKey,
+  notes: string,
+  claim: RegExpMatchArray,
+): { effective: "delete" | "keep"; negated: boolean } {
+  const family = CLAIM_FAMILY.delete.test(claim[1] ?? "") ? "delete" : "keep";
+  const negation = stemNegation(notes.slice(0, claim.index));
+  if ("doubleNegation" in negation) {
+    throw new Error(
+      `the ${key} Notes cell: a double negation governs "${negation.doubleNegation} ${claim[1]}"; reword it - double negatives are not resolved`,
+    );
+  }
+  const flipped = family === "delete" ? "keep" : "delete";
+  return { effective: negation.negated ? flipped : family, negated: negation.negated };
+}
+
 describe("Notes cells vs undeclaredDefault", () => {
   test("a knobbed section's Notes cell never claims the opposite of its undeclaredDefault", () => {
     // A claim is a claim-family word joined to "default"; a cell that mentions a default without a parseable claim fails loudly rather than leaving
@@ -216,18 +234,10 @@ describe("Notes cells vs undeclaredDefault", () => {
         ).toBeGreaterThan(0);
       }
       for (const claim of claims) {
-        const family = CLAIM_FAMILY.delete.test(claim[1] ?? "") ? "delete" : "keep";
-        const negation = stemNegation(notes.slice(0, claim.index));
-        if ("doubleNegation" in negation) {
-          throw new Error(
-            `the ${section.key} Notes cell: a double negation governs "${negation.doubleNegation} ${claim[1]}"; reword it - double negatives are not resolved`,
-          );
-        }
-        const flipped = family === "delete" ? "keep" : "delete";
-        const effective = negation.negated ? flipped : family;
+        const { effective, negated } = claimedPolicy(section.key, notes, claim);
         expect(
           effective,
-          `the ${section.key} Notes cell claims "${claim[0]}"${negation.negated ? " (negated)" : ""}, contradicting its "${section.undeclaredDefault}" undeclaredDefault`,
+          `the ${section.key} Notes cell claims "${claim[0]}"${negated ? " (negated)" : ""}, contradicting its "${section.undeclaredDefault}" undeclaredDefault`,
         ).toBe(section.undeclaredDefault);
       }
     }

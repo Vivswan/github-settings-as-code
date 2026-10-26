@@ -56,6 +56,7 @@ interface Fragment {
 /** Prose: long enough to be a clause and holding a space. A shorter whole literal is a terse message, pinned whole. */
 const MIN_PROSE_LENGTH = 16;
 
+/** The opening of a thrown invariant's message, which no user reads, so it is never pinned. */
 const INVARIANT_PREFIX = "BUG:";
 
 /** Every position exclusion() names has one planted literal in plantedSlice below, so a new exclusion plants its own. */
@@ -74,6 +75,7 @@ const VOCABULARY_CALLS: ReadonlySet<string> = new Set([
   "endsWith",
 ]);
 
+/** The methods and constructors whose string receiver or argument is data (a separator, a pattern, a lookup key), the Error constructor's thrown text included. */
 const VALUE_METHODS: ReadonlySet<string> = new Set([
   "split",
   "join",
@@ -126,13 +128,7 @@ const SCHEMA_TWIN_CALLS: ReadonlySet<string> = new Set(["meta", "conditional"]);
 /** The functions of compilable-form.ts that assemble regex source: every literal in them is a pattern piece. */
 const DATA_FUNCTIONS: ReadonlySet<string> = new Set(["render", "codePointEscape"]);
 
-/**
- * The local factories and helpers whose string arguments are data (a key name, a rule type, a wrapper kind, a
- * failure code, a size measure, a definition id, a noun), by argument index, and those whose string arguments are
- * pieces a longer message is composed from (pinned by containment). A key or a noun that renders inside a message
- * is data too: its pin by containment would hold wherever a test spells the key. Auditable by name; a control below
- * fails naming an entry no source declares or imports.
- */
+/** Helpers whose string arguments at these indexes are data (a key name, a rule type, a wrapper kind, a noun); a key that renders inside a message is data too, since a containment pin would hold wherever a test spells it. */
 const DATA_ARGUMENTS: Readonly<Record<string, readonly number[]>> = {
   actorList: [0, 1],
   reviewActorHolder: [0],
@@ -147,6 +143,7 @@ const DATA_ARGUMENTS: Readonly<Record<string, readonly number[]>> = {
   githubName: [0],
 };
 
+/** The helpers whose string arguments at these indexes are pieces a longer message is composed from, pinned by containment; a control below fails naming an entry here or above that no source declares or imports. */
 const PIECE_ARGUMENTS: Readonly<Record<string, readonly number[]>> = {
   closedKeyError: [0],
   identifiedBy: [2],
@@ -157,11 +154,7 @@ const PIECE_ARGUMENTS: Readonly<Record<string, readonly number[]>> = {
   renamedKeyError: [0, 1, 2, 3],
 };
 
-/**
- * The named constants of the literal-first sources whose string literals are data, not messages: key names,
- * vocabularies, and pattern pieces. A prose-length literal inside one is still a message. Auditable: every entry is
- * a name a reader can open, and a control below fails naming one no source declares.
- */
+/** The named constants of the literal-first sources whose string literals are data (key names, vocabularies, pattern pieces), a prose-length literal inside one still a message; a control below fails naming one no source declares. */
 const DATA_CONSTANTS: ReadonlySet<string> = new Set([
   // shared/schema-helpers.ts
   "UNDECLARED_POLICIES",
@@ -212,6 +205,7 @@ const MESSAGE_KEYS: ReadonlySet<string> = new Set(["message", "error", "conseque
 /** The issue builders of src/problem.ts, by name; their bodies are message positions. */
 const ISSUE_BUILDER = /Issue$/;
 
+/** The node types that open a function, so a top-level `noun:` is told from a nested one. */
 const FUNCTION_TYPES: ReadonlySet<string> = new Set([
   "FunctionDeclaration",
   "FunctionExpression",
@@ -221,6 +215,7 @@ const FUNCTION_TYPES: ReadonlySet<string> = new Set([
 /** The test functions whose first argument is a title, not a string a user reads. */
 const TEST_FUNCTIONS: ReadonlySet<string> = new Set(["test", "describe", "it"]);
 
+/** The shared modules read like a slice: every literal in them is a message. */
 const SHARED_REFUSAL_HELPERS = [
   "schema-helpers",
   "setup-schema",
@@ -306,17 +301,8 @@ function declaredName(declarator: Node): string | undefined {
   return id.type === "Identifier" ? field<string>(id, "name") : undefined;
 }
 
-/**
- * Why a literal at this step is not a message, or undefined when it is one. `ancestors` is the chain from the root
- * down to the literal's parent.
- */
-function exclusion(step: Step, ancestors: readonly Step[]): string | undefined {
-  const { parent, key } = step;
-  if (parent === null) {
-    return undefined;
-  }
-  let twin = false;
-  let constVocabulary = false;
+/** Why the literal's syntactic position under its parent makes it data, or undefined: a property key, a module specifier, a regex source, a case label. */
+function syntaxExclusion(parent: Node, key: string | undefined): string | undefined {
   if (parent.type === "Property" && key === "key") {
     return "property key";
   }
@@ -329,6 +315,11 @@ function exclusion(step: Step, ancestors: readonly Step[]): string | undefined {
   if (parent.type === "SwitchCase") {
     return "case label";
   }
+  return undefined;
+}
+
+/** Why what the literal is compared with, called on, or assigned to makes it data, or undefined: a value method's receiver, a comparison operand, a data field's value. */
+function receiverExclusion(parent: Node, key: string | undefined): string | undefined {
   // The receiver of a value method (`"(|^$".includes(x)`, `["a", "b"].join(", ")`) is data, whatever the argument.
   if (parent.type === "MemberExpression" && key === "object") {
     const method = field<Node>(parent, "property");
@@ -346,34 +337,42 @@ function exclusion(step: Step, ancestors: readonly Step[]): string | undefined {
   if (parent.type === "Property" && key === "value" && DATA_FIELDS.has(keyName(parent) ?? "")) {
     return `data field ${keyName(parent)}`;
   }
-  ancestors.forEach(({ node }, index) => {
+  return undefined;
+}
+
+/** Whether the literal is an argument, at any depth, of a schema twin call, whose object argument carries keys and enum values. */
+function isSchemaTwinArgument(step: Step, ancestors: readonly Step[]): boolean {
+  return ancestors.some(({ node }, index) => {
     // The step below this ancestor: the literal's own step when the ancestor is the parent.
     const below = ancestors[index + 1] ?? step;
-    if (
+    return (
       (node.type === "CallExpression" || node.type === "NewExpression") &&
       SCHEMA_TWIN_CALLS.has(calledName(node) ?? "") &&
       below.key === "arguments"
-    ) {
-      twin = true;
-    }
+    );
   });
-  if (twin) {
+}
+
+/** Whether the literal sits under an `as const` through arrays, objects, and properties alone and holds no prose: a vocabulary, not a message. */
+function isConstVocabulary(step: Step, ancestors: readonly Step[]): boolean {
+  return ancestors.some(({ node }, index) => {
+    if (node.type !== "TSAsExpression" || !isConstAssertion(node)) {
+      return false;
+    }
+    const between = ancestors.slice(index + 1).map(({ node: inner }) => inner.type);
+    return (
+      between.every((type) => ["ArrayExpression", "ObjectExpression", "Property"].includes(type)) &&
+      !holdsProse(step.node)
+    );
+  });
+}
+
+/** Why an ancestor of the literal makes it data, or undefined: a schema twin call, an `as const` vocabulary, a type position, a data constant, a data function. */
+function ancestorExclusion(step: Step, ancestors: readonly Step[]): string | undefined {
+  if (isSchemaTwinArgument(step, ancestors)) {
     return "schema twin";
   }
-  ancestors.forEach(({ node }, index) => {
-    if (node.type === "TSAsExpression" && isConstAssertion(node)) {
-      const between = ancestors.slice(index + 1).map(({ node: inner }) => inner.type);
-      if (
-        between.every((type) =>
-          ["ArrayExpression", "ObjectExpression", "Property"].includes(type),
-        ) &&
-        !holdsProse(step.node)
-      ) {
-        constVocabulary = true;
-      }
-    }
-  });
-  if (constVocabulary) {
+  if (isConstVocabulary(step, ancestors)) {
     return "as const vocabulary";
   }
   for (const { node } of ancestors) {
@@ -399,8 +398,30 @@ function exclusion(step: Step, ancestors: readonly Step[]): string | undefined {
       return `data function ${functionName(node)}`;
     }
   }
-  // The literal's holder past any array nesting: a data field, or the call it is an argument of (directly, or as
-  // the receiver of a value method such as `["a", "b"].join(" ")`).
+  return undefined;
+}
+
+/** Why being this call's argument makes the literal data, or undefined: the first argument of a vocabulary call, any argument of a value method, a registered data argument. */
+function argumentExclusion(call: Node, argument: Node): string | undefined {
+  const name = calledName(call) ?? "";
+  const index = field<readonly Node[]>(call, "arguments").indexOf(argument);
+  if (VOCABULARY_CALLS.has(name) && index === 0) {
+    return `vocabulary call ${name}`;
+  }
+  if (VALUE_METHODS.has(name)) {
+    return `value method ${name}`;
+  }
+  if (DATA_ARGUMENTS[name]?.includes(index)) {
+    return `data argument ${name}[${index}]`;
+  }
+  return undefined;
+}
+
+/**
+ * Why the literal's holder past any array nesting makes it data, or undefined: a data field, or the call it is an
+ * argument of (directly, or as the receiver of a value method such as `["a", "b"].join(" ")`).
+ */
+function holderExclusion(step: Step, ancestors: readonly Step[]): string | undefined {
   let depth = ancestors.length - 1;
   while (depth >= 0 && ancestors[depth]?.node.type === "ArrayExpression") {
     depth -= 1;
@@ -419,19 +440,24 @@ function exclusion(step: Step, ancestors: readonly Step[]): string | undefined {
   if (call === undefined || (call.type !== "CallExpression" && call.type !== "NewExpression")) {
     return undefined;
   }
-  const name = calledName(call) ?? "";
-  const argument = ancestors[depth + 1]?.node ?? step.node;
-  const index = field<readonly Node[]>(call, "arguments").indexOf(argument);
-  if (VOCABULARY_CALLS.has(name) && index === 0) {
-    return `vocabulary call ${name}`;
+  return argumentExclusion(call, ancestors[depth + 1]?.node ?? step.node);
+}
+
+/**
+ * Why a literal at this step is not a message, or undefined when it is one. `ancestors` is the chain from the root
+ * down to the literal's parent.
+ */
+function exclusion(step: Step, ancestors: readonly Step[]): string | undefined {
+  const { parent, key } = step;
+  if (parent === null) {
+    return undefined;
   }
-  if (VALUE_METHODS.has(name)) {
-    return `value method ${name}`;
-  }
-  if (DATA_ARGUMENTS[name]?.includes(index)) {
-    return `data argument ${name}[${index}]`;
-  }
-  return undefined;
+  return (
+    syntaxExclusion(parent, key) ??
+    receiverExclusion(parent, key) ??
+    ancestorExclusion(step, ancestors) ??
+    holderExclusion(step, ancestors)
+  );
 }
 
 /** Whether a literal (or any piece of a template) is prose: a vocabulary word never is, so prose in a table is a message. */
@@ -498,6 +524,41 @@ function textsOf(node: Node): { start: number; text: string; whole: boolean }[] 
     .map((quasi) => ({ start: quasi.start, text: cooked(quasi), whole: false }));
 }
 
+/** Whether the literal at this step is a piece of a longer message, pinned by containment: an operand of a `+` chain, a literal inside a template hole, an arm of a conditional, a helper's return, a registered piece argument. */
+function isPiece(step: Step, ancestors: readonly Step[]): boolean {
+  return (
+    ancestors.some(
+      ({ node: ancestor }) => isConcatenation(ancestor) || ancestor.type === "TemplateLiteral",
+    ) ||
+    step.parent?.type === "ConditionalExpression" ||
+    step.parent?.type === "ReturnStatement" ||
+    isPieceArgument(step)
+  );
+}
+
+/** Records the literal's message texts into `into` by offset, the first sighting of an offset winning; a piece that is punctuation alone is skipped. */
+function recordTexts(
+  node: Node,
+  piece: boolean,
+  path: string,
+  text: string,
+  into: Map<number, Fragment>,
+): void {
+  for (const { start, text: value, whole } of textsOf(node)) {
+    if (piece && !/[^\s()[\]{}.,;:]/.test(value)) {
+      continue;
+    }
+    if (!into.has(start)) {
+      into.set(start, {
+        path,
+        line: lineOf(text, start),
+        text: value,
+        whole: whole && !piece,
+      });
+    }
+  }
+}
+
 /** Every message literal under `root`, the exclusions applied at each. */
 function literalsUnder(
   root: Node,
@@ -510,44 +571,20 @@ function literalsUnder(
   walk(
     root,
     (step) => {
-      const { node, parent } = step;
-      if (isStringLiteral(node) || node.type === "TemplateLiteral") {
-        const why = exclusion(step, ancestors);
-        if (why === undefined) {
-          // A piece of a longer message, pinned by containment: an operand of a `+` chain, a literal inside a
-          // template hole, an arm of a conditional, a helper's return, a registered piece argument.
-          const piece =
-            asPiece ||
-            ancestors.some(
-              ({ node: ancestor }) =>
-                isConcatenation(ancestor) || ancestor.type === "TemplateLiteral",
-            ) ||
-            parent?.type === "ConditionalExpression" ||
-            parent?.type === "ReturnStatement" ||
-            isPieceArgument(step);
-          for (const { start, text: value, whole } of textsOf(node)) {
-            if (piece && !/[^\s()[\]{}.,;:]/.test(value)) {
-              continue;
-            }
-            if (!into.has(start)) {
-              into.set(start, {
-                path,
-                line: lineOf(text, start),
-                text: value,
-                whole: whole && !piece,
-              });
-            }
-          }
-        }
-        if (node.type === "TemplateLiteral") {
-          // The holes are read too: a literal inside one is a piece of this message.
-          ancestors.push(step);
-          return undefined;
-        }
-        return false;
+      const { node } = step;
+      if (!(isStringLiteral(node) || node.type === "TemplateLiteral")) {
+        ancestors.push(step);
+        return undefined;
       }
-      ancestors.push(step);
-      return undefined;
+      if (exclusion(step, ancestors) === undefined) {
+        recordTexts(node, asPiece || isPiece(step, ancestors), path, text, into);
+      }
+      if (node.type === "TemplateLiteral") {
+        // The holes are read too: a literal inside one is a piece of this message.
+        ancestors.push(step);
+        return undefined;
+      }
+      return false;
     },
     (node) => {
       if (ancestors[ancestors.length - 1]?.node === node) {
@@ -557,6 +594,76 @@ function literalsUnder(
   );
 }
 
+/** A module statement's declaration: the statement itself, or the one its `export` wraps. */
+function declarationOf(statement: Node): Node | null {
+  return statement.type === "ExportNamedDeclaration"
+    ? field<Node | null>(statement, "declaration")
+    : statement;
+}
+
+/** Every identifier name under the node, in walk order. */
+function identifiersUnder(root: Node): string[] {
+  const names: string[] = [];
+  walk(root, ({ node }) => {
+    if (node.type === "Identifier") {
+      names.push(field<string>(node, "name"));
+    }
+    return undefined;
+  });
+  return names;
+}
+
+/** Whether the node is a `.transform` call inside a live shape, which reports a response outside the documented API shape, never a settings-file refusal. */
+function isLiveTransform(node: Node, liveSpans: readonly Node[]): boolean {
+  return (
+    node.type === "CallExpression" &&
+    calledName(node) === "transform" &&
+    liveSpans.some((span) => span.start <= node.start && node.end <= span.end)
+  );
+}
+
+/** A registered helper's piece arguments (`identifiedBy(key, field, "workflow")`), in index order; none for any other call. */
+function pieceArgumentsOf(call: Node): Node[] {
+  const indexes = PIECE_ARGUMENTS[calledName(call) ?? ""] ?? [];
+  const args = field<readonly Node[]>(call, "arguments");
+  return indexes.flatMap((index) => {
+    const argument = args[index];
+    return argument === undefined ? [] : [argument];
+  });
+}
+
+/** What the message walk gathers: the positions, the pieces, the names messages reach, every declarator, and the function depth of the node under visit. */
+interface Census {
+  positions: Node[];
+  pieces: Node[];
+  named: Set<string>;
+  locals: Node[];
+  functionDepth: number;
+}
+
+/** One node's contribution to the census on entry: a registered helper's piece arguments, a top-level `noun:`, a function opening, a declarator, a message property's value and the names it reaches. */
+function censusEnter(node: Node, census: Census): void {
+  if (node.type === "CallExpression") {
+    census.pieces.push(...pieceArgumentsOf(node));
+  }
+  if (node.type === "Property" && keyName(node) === MODULE_NOUN_KEY && census.functionDepth === 0) {
+    census.pieces.push(field<Node>(node, "value"));
+  }
+  if (FUNCTION_TYPES.has(node.type)) {
+    census.functionDepth += 1;
+  }
+  if (node.type === "VariableDeclarator") {
+    census.locals.push(node);
+  }
+  if (node.type === "Property" && MESSAGE_KEYS.has(keyName(node) ?? "")) {
+    const value = field<Node>(node, "value");
+    census.positions.push(value);
+    for (const name of identifiersUnder(value)) {
+      census.named.add(name);
+    }
+  }
+}
+
 /**
  * A module's message positions: an object literal carrying a `message` property (an issue), an `error` or
  * `consequence` property's value, and the value of a top-level constant an `error`/`message` property names (a
@@ -564,11 +671,13 @@ function literalsUnder(
  * census by the owner's ruling (parse refusals only).
  */
 function messagePositions(program: Node): { positions: Node[]; pieces: Node[] } {
-  const positions: Node[] = [];
-  const pieces: Node[] = [];
-  const named = new Set<string>();
-  const locals: Node[] = [];
-  let functionDepth = 0;
+  const census: Census = {
+    positions: [],
+    pieces: [],
+    named: new Set<string>(),
+    locals: [],
+    functionDepth: 0,
+  };
   // A live shape (`LiveDeployKey`, the repository's naming for a GET body) reports a response outside the documented
   // API shape, never a settings-file refusal; a transform anywhere else (the routed list shape) is a parse position.
   const liveSpans: Node[] = [];
@@ -581,62 +690,27 @@ function messagePositions(program: Node): { positions: Node[]; pieces: Node[] } 
   walk(
     program,
     ({ node }) => {
-      if (
-        node.type === "CallExpression" &&
-        calledName(node) === "transform" &&
-        liveSpans.some((span) => span.start <= node.start && node.end <= span.end)
-      ) {
+      if (isLiveTransform(node, liveSpans)) {
         return false;
       }
-      // A registered helper's piece argument (`identifiedBy(key, field, "workflow")`), and a top-level `noun:`.
-      if (node.type === "CallExpression") {
-        const indexes = PIECE_ARGUMENTS[calledName(node) ?? ""] ?? [];
-        const args = field<readonly Node[]>(node, "arguments");
-        for (const index of indexes) {
-          const argument = args[index];
-          if (argument !== undefined) {
-            pieces.push(argument);
-          }
-        }
-      }
-      if (node.type === "Property" && keyName(node) === MODULE_NOUN_KEY && functionDepth === 0) {
-        pieces.push(field<Node>(node, "value"));
-      }
-      if (FUNCTION_TYPES.has(node.type)) {
-        functionDepth += 1;
-      }
-      if (node.type === "VariableDeclarator") {
-        locals.push(node);
-      }
-      if (node.type === "Property" && MESSAGE_KEYS.has(keyName(node) ?? "")) {
-        const value = field<Node>(node, "value");
-        positions.push(value);
-        walk(value, ({ node: inner }) => {
-          if (inner.type === "Identifier") {
-            named.add(field<string>(inner, "name"));
-          }
-          return undefined;
-        });
-      }
+      censusEnter(node, census);
       return undefined;
     },
     (node) => {
       if (FUNCTION_TYPES.has(node.type)) {
-        functionDepth -= 1;
+        census.functionDepth -= 1;
       }
     },
   );
   // The constants a message names, at the top level or local to the enclosing function (`beside`), one hop.
-  for (const declarator of locals) {
+  const { positions, pieces, named } = census;
+  for (const declarator of census.locals) {
     if (named.has(declaredName(declarator) ?? "")) {
       positions.push(declarator);
     }
   }
   for (const statement of field<readonly Node[]>(program, "body")) {
-    const declaration =
-      statement.type === "ExportNamedDeclaration"
-        ? field<Node | null>(statement, "declaration")
-        : statement;
+    const declaration = declarationOf(statement);
     if (declaration?.type === "FunctionDeclaration") {
       const name = field<string>(field<Node>(declaration, "id"), "name");
       if (ISSUE_BUILDER.test(name) || named.has(name)) {
@@ -647,39 +721,39 @@ function messagePositions(program: Node): { positions: Node[]; pieces: Node[] } 
   return { positions, pieces };
 }
 
+/** The declarations of one module statement that a builder names, the builders themselves aside: each such declarator of a variable statement, or the function. */
+function namedDeclarations(
+  statement: Node,
+  named: ReadonlySet<string>,
+  builders: readonly Node[],
+): Node[] {
+  const declaration = declarationOf(statement);
+  if (declaration?.type === "VariableDeclaration") {
+    return field<readonly Node[]>(declaration, "declarations").filter(
+      (declarator) => named.has(declaredName(declarator) ?? "") && !builders.includes(declarator),
+    );
+  }
+  if (
+    declaration?.type === "FunctionDeclaration" &&
+    named.has(functionName(declaration) ?? "") &&
+    !builders.includes(declaration)
+  ) {
+    return [declaration];
+  }
+  return [];
+}
+
 /** A message position reaches the top-level constants and functions it names, one hop and no further. */
 function builderConstants(program: Node, builders: readonly Node[]): Node[] {
   const named = new Set<string>();
   for (const builder of builders) {
-    walk(builder, ({ node }) => {
-      if (node.type === "Identifier") {
-        named.add(field<string>(node, "name"));
-      }
-      return undefined;
-    });
-  }
-  const constants: Node[] = [];
-  for (const statement of field<readonly Node[]>(program, "body")) {
-    const declaration =
-      statement.type === "ExportNamedDeclaration"
-        ? field<Node | null>(statement, "declaration")
-        : statement;
-    if (declaration?.type === "VariableDeclaration") {
-      for (const declarator of field<readonly Node[]>(declaration, "declarations")) {
-        if (named.has(declaredName(declarator) ?? "") && !builders.includes(declarator)) {
-          constants.push(declarator);
-        }
-      }
-    }
-    if (
-      declaration?.type === "FunctionDeclaration" &&
-      named.has(functionName(declaration) ?? "") &&
-      !builders.includes(declaration)
-    ) {
-      constants.push(declaration);
+    for (const name of identifiersUnder(builder)) {
+      named.add(name);
     }
   }
-  return constants;
+  return field<readonly Node[]>(program, "body").flatMap((statement) =>
+    namedDeclarations(statement, named, builders),
+  );
 }
 
 function parse(path: string, text: string): Node {

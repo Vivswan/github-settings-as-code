@@ -31,10 +31,11 @@ interface WebhooksDescriptor {
 interface WebhookVocabulary {
   /** Sorted wire event names, without the "*" wildcard (the schema adds it). */
   readonly events: readonly string[];
+
   /** The reference pages the entries' externalDocs point at, minus their anchors; GitHub keeps them on one page. */
   readonly references: readonly string[];
-  /** Entries lacking a field the derivation reads, as `hook.path`. A missing field is reported, not skipped: a
-   * skipped entry would drop an event GitHub still delivers and the parser would start refusing a valid file. */
+
+  /** Entries lacking a field the derivation reads, as `hook.path`; reported, never skipped, since a skipped entry would drop an event GitHub still delivers and the parser would start refusing a valid file. */
   readonly missing: readonly string[];
 }
 

@@ -13,11 +13,7 @@ import {
   type SectionRestHandlers,
 } from "../../e2e/mock/support.js";
 
-/**
- * The seed completion buildState applies (test/e2e/mock/state.ts LIST_MOCKS), and the create handler below spreads
- * the same defaults, so a seed is served as a created ruleset would be. GitHub documents "branch" as the target a
- * create without one gets; enforcement has no default there (the create requires it), so none is minted.
- */
+/** The seed completion buildState applies (test/e2e/mock/state.ts LIST_MOCKS) and the create handler spreads too; GitHub defaults a create's target to "branch" and requires enforcement, so no enforcement is minted. */
 export const RULESETS_MOCK: ListMockSpec = {
   collection: (state) => state.rulesets,
   defaults: { source_type: "Repository", target: "branch" },

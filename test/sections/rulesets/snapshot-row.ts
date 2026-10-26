@@ -1,9 +1,7 @@
 import { rulesetsSection } from "../../../src/sections/rulesets/index.js";
 import type { Row } from "../snapshot-roundtrip.js";
 
-// The all-grades token sees bypass_actors; the server fields fall away; the organization's ruleset
-// is noted, not declared. A field GitHub adds to a rule's parameters or a bypass actor (the two
-// `future_*` keys) survives the projection, or the next full-payload update would clear it.
+/** The all-grades token sees bypass_actors, the server fields fall away, the organization's ruleset is noted, not declared, and the two `future_*` keys GitHub may add survive the projection, or the next full-payload update would clear them. */
 export const row: Row = {
   section: rulesetsSection,
   live: {

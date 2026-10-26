@@ -13,8 +13,10 @@ import { MockApi } from "../../mock-api.js";
 import { failureOf, REPO, unwrap } from "../section-run.js";
 import { validatedInput } from "../validated-input.js";
 
+/** The sections the owner gate guards. */
 const gated = SECTIONS.filter((section) => section.ownerSensitivity === "org");
 
+/** The owner probe the gate issues. */
 const ORG = "GET /orgs/o";
 
 /** Each gated section's primary read over o/r, empty, so a plan of nothing converges after the probe. */
@@ -23,8 +25,10 @@ const LISTS = {
   "GET /repos/o/r/properties/values": { data: [] },
 };
 
+/** The requests a client saw, as "METHOD path". */
 const requests = (api: MockApi) => api.calls.map((c) => `${c.method} ${c.path}`);
 
+/** Every gated section's plan of nothing over `repo`, as the notes they return. */
 const planAll = async (api: GitHubClient, repo: RepoRef = REPO): Promise<string[]> => {
   const notes: string[] = [];
   for (const section of gated) {

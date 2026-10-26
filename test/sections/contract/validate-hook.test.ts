@@ -21,9 +21,11 @@ import { repositorySection } from "../../../src/sections/repository/index.js";
 type EntryBearing = {
   [K in SectionKey]: [EntryOf<NonNullable<SettingsFile[K]>>] extends [never] ? never : K;
 }[SectionKey];
-// Each direction fails naming the section: an entry-bearing section outside the list has nowhere to go in
-// `Record<never, never>`, and a listed section without entries leaves its table slot `never`.
+
+// Each direction fails naming the section: an entry-bearing section outside the list has nowhere to go in `Record<never, never>`, and a listed section without entries leaves its table slot `never`.
 const _everyEntryBearingSectionIsListed: Record<Exclude<EntryBearing, ListSection>, never> = {};
+
+/** One valid entry per list section; doubled, it is the duplicate every validate hook must refuse. */
 const ONE_ENTRY: {
   readonly [K in ListSection]: [EntryOf<NonNullable<SettingsFile[K]>>] extends [never]
     ? never
@@ -72,15 +74,18 @@ describe("every list section's validate hook reaches the engine", () => {
   );
 });
 
-// The contract makes validate mandatory on a list section and optional on a mapping section; the census above pins
-// the runtime half, these declarations the compile-time half. The erased roster keeps it optional, so every module
-// erases into it.
+// The contract makes validate mandatory on a list section and optional on a mapping section; the census above pins the runtime half, these declarations the compile-time half.
 const { validate: _dropped, ...withoutValidate } = labelsSection;
+
 // @ts-expect-error labels is a list section, so registering it without validate is flagged by name
 const _list: SectionModule<"labels", typeof labelsSection.endpoints> = withoutValidate;
+
+/** A mapping section registers without validate. */
 const _mapping: SectionModule<
   "repository",
   typeof repositorySection.endpoints,
   typeof repositorySection.graphql
 > = repositorySection;
+
+/** The erased roster keeps validate optional, so every module erases into it. */
 const _erased: SectionModule = labelsSection;

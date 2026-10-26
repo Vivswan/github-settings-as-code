@@ -27,11 +27,16 @@ import { provePlanIdempotent } from "../plan-idempotence.js";
 import { failureOf, REPO, unwrap } from "../section-run.js";
 import { validatedInput } from "../validated-input.js";
 
+/** The labels declaration every variant module here is built from. */
 const base = labelsSection.decl;
+
+/** The labels list, one page. */
 const LIST = "GET /repos/o/r/labels?per_page=100&page=1";
 
 /** The labels dictionary without its update role: a resource GitHub could not edit. */
 const { update: _update, ...IMMUTABLE_ENDPOINTS } = base.endpoints;
+
+/** The module over that dictionary. */
 const immutable = listSection({ ...base, endpoints: IMMUTABLE_ENDPOINTS });
 
 /** The derived mock fake over a variant module, seeded with `live`. */
@@ -497,7 +502,7 @@ describe("listSection without an update role", () => {
     const fragment = mockFragmentFor(immutable, LABELS_MOCK);
     expect(Object.keys(fragment).sort()).toEqual(["labels.create", "labels.list", "labels.remove"]);
     // @ts-expect-error no update role, no update handler key
-    fragment["labels.update"];
+    void fragment["labels.update"];
     expect(Object.keys(mockFragmentFor(labelsSection, LABELS_MOCK)).sort()).toEqual([
       "labels.create",
       "labels.list",

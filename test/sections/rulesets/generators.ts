@@ -5,10 +5,7 @@
 import { type EntriesForm, maybeWrapUndeclared } from "../../e2e/generators/gen-support.js";
 import type { Rng } from "../../e2e/generators/prng.js";
 
-/**
- * The five parameters the spec requires of a pull_request rule, so a drawn rule parses and passes the mock's
- * request-body check; the invalid catalog (test/e2e/generators/invalid-settings.ts) mis-cases one field of this set.
- */
+/** The five parameters the spec requires of a pull_request rule, so a drawn rule parses and passes the mock's request-body check; the invalid catalog (test/e2e/generators/invalid-settings.ts) mis-cases one field of this set. */
 export const PULL_REQUEST_PARAMETERS = {
   dismiss_stale_reviews_on_push: true,
   require_code_owner_review: false,

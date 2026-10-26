@@ -6,6 +6,102 @@ import { E2E_SECRET_ENV, type Json } from "../../e2e/generators/gen-support.js";
 import type { Rng } from "../../e2e/generators/prng.js";
 import { PROTECTION_RULE_APPS } from "../../e2e/mock/state.js";
 
+/** The review settings, on the main stream: a wait timer on half the draws, the self-review flag on another half. */
+function addReviewSettings(rng: Rng, env: Json): void {
+  if (rng.bool()) {
+    env.wait_timer = rng.int(30);
+  }
+  if (rng.bool()) {
+    // The flag rides the required-reviewers rule, so a true draw brings a reviewer with it; the
+    // parse rules refuse the flag on its own. No extra main-stream draw, so recorded seeds reproduce.
+    env.prevent_self_review = rng.bool();
+    if (env.prevent_self_review === true) {
+      env.reviewers = [{ type: "User", id: 101 }];
+    }
+  }
+}
+
+/**
+ * A variables list on a third of the draws. Mixed-case picks exercise the case-insensitive match; the
+ * suffix keeps names unique after it. Over the empty live baseline an explicit `_undeclared` would
+ * change no outcome, so the wrapped draw omits it (curated scenarios pin the keep-note and delete paths).
+ */
+function addVariables(variablesRng: Rng, env: Json): void {
+  if (!variablesRng.bool(0.35)) {
+    return;
+  }
+  const entries: Json[] = Array.from({ length: variablesRng.int(2) + 1 }, (_, j) => ({
+    name: `${variablesRng.pick(["DEPLOY_REGION", "log_level", "Retries"])}_${j}`,
+    value: variablesRng.pick(["eu-west-1", "debug", "3"]),
+  }));
+  env.variables = variablesRng.bool(0.25) ? { entries } : entries;
+}
+
+/**
+ * A secrets list on a third of the draws. References come from the fixed pool so scenarioSecretEnv can
+ * wire the child env. Same-named secrets across sibling environments are deliberately common:
+ * per-environment scope resolution is exactly what that exercises.
+ */
+function addSecrets(secretsRng: Rng, env: Json): void {
+  if (!secretsRng.bool(0.3)) {
+    return;
+  }
+  const names = Object.keys(E2E_SECRET_ENV);
+  const count = secretsRng.int(names.length) + 1;
+  const entries: Json[] = names.slice(0, count).map((name) => ({
+    name,
+    value: `$${name}`,
+  }));
+  env.secrets = secretsRng.bool(0.25) ? { entries } : entries;
+}
+
+/**
+ * A branch policy list on a third of the draws. The suffix keeps names unique (the natural key is the
+ * exact pattern string). The list is ALWAYS paired with custom_branch_policies: true, so the oracle never
+ * sees the validation-error path.
+ */
+function addBranchPolicies(policiesRng: Rng, env: Json): void {
+  if (!policiesRng.bool(0.3)) {
+    return;
+  }
+  const entries: Json[] = Array.from({ length: policiesRng.int(2) + 1 }, (_, j) => {
+    const entry: Json = { name: `${policiesRng.pick(["release/*", "hotfix/*", "v*"])}-${j}` };
+    if (policiesRng.bool(0.4)) {
+      entry.type = policiesRng.pick(["branch", "tag"]);
+    }
+    return entry;
+  });
+  env.deployment_branch_policies = policiesRng.bool(0.25) ? { entries } : entries;
+  env.deployment_branch_policy = { protected_branches: false, custom_branch_policies: true };
+}
+
+/**
+ * A protection rule list on a third of the draws. Slugs come ONLY from PROTECTION_RULE_APPS (the mock's
+ * available-Apps listing serves the same objects), so every declared rule resolves. The wrapped draw
+ * omits `_undeclared` for the same reason as the variables.
+ */
+function addProtectionRules(rulesRng: Rng, env: Json): void {
+  if (!rulesRng.bool(0.3)) {
+    return;
+  }
+  const slugs = PROTECTION_RULE_APPS.map((app) => String(app.slug));
+  const count = rulesRng.int(slugs.length) + 1;
+  const entries: Json[] = slugs.slice(0, count).map((slug) => ({ app: slug }));
+  env.deployment_protection_rules = rulesRng.bool(0.25) ? { entries } : entries;
+}
+
+/**
+ * The pin on a quarter of the draws, so the GraphQL pins read runs on a subset of iterations; curated
+ * scenarios pin the interleaving and cap paths.
+ *   pinned: true   -> at most 3 entries, so the count never approaches GitHub's cap
+ *   pinned: false  -> a no-op unpin over the empty baseline: the read runs, no mutation
+ */
+function addPin(pinnedRng: Rng, env: Json): void {
+  if (pinnedRng.bool(0.25)) {
+    env.pinned = pinnedRng.bool(0.7);
+  }
+}
+
 export function genEnvironments(rng: Rng): Json[] {
   // Each family's draws fork their own stream, so adding one never disturbs the main stream and
   // recorded seeds keep reproducing.
@@ -16,67 +112,12 @@ export function genEnvironments(rng: Rng): Json[] {
   const pinnedRng = rng.fork("pinned");
   return Array.from({ length: rng.int(2) + 1 }, (_, i) => {
     const env: Json = { name: `${rng.pick(["staging", "prod", "qa"])}-${i}` };
-    if (rng.bool()) {
-      env.wait_timer = rng.int(30);
-    }
-    if (rng.bool()) {
-      // The flag rides the required-reviewers rule, so a true draw brings a reviewer with it; the
-      // parse rules refuse the flag on its own. No extra main-stream draw, so recorded seeds reproduce.
-      env.prevent_self_review = rng.bool();
-      if (env.prevent_self_review === true) {
-        env.reviewers = [{ type: "User", id: 101 }];
-      }
-    }
-    if (variablesRng.bool(0.35)) {
-      // Mixed-case picks exercise the case-insensitive match; the suffix keeps names unique after it.
-      // Over the empty live baseline an explicit `_undeclared` would change no outcome, so the wrapped
-      // draw omits it (curated scenarios pin the keep-note and delete paths).
-      const entries: Json[] = Array.from({ length: variablesRng.int(2) + 1 }, (_, j) => ({
-        name: `${variablesRng.pick(["DEPLOY_REGION", "log_level", "Retries"])}_${j}`,
-        value: variablesRng.pick(["eu-west-1", "debug", "3"]),
-      }));
-      env.variables = variablesRng.bool(0.25) ? { entries } : entries;
-    }
-    if (secretsRng.bool(0.3)) {
-      // References come from the fixed pool so scenarioSecretEnv can wire the child env. Same-named
-      // secrets across sibling environments are deliberately common: per-environment scope
-      // resolution is exactly what that exercises.
-      const names = Object.keys(E2E_SECRET_ENV);
-      const count = secretsRng.int(names.length) + 1;
-      const entries: Json[] = names.slice(0, count).map((name) => ({
-        name,
-        value: `$${name}`,
-      }));
-      env.secrets = secretsRng.bool(0.25) ? { entries } : entries;
-    }
-    if (policiesRng.bool(0.3)) {
-      // The suffix keeps names unique (the natural key is the exact pattern string). The list is
-      // ALWAYS paired with custom_branch_policies: true, so the oracle never sees the validation-error path.
-      const entries: Json[] = Array.from({ length: policiesRng.int(2) + 1 }, (_, j) => {
-        const entry: Json = { name: `${policiesRng.pick(["release/*", "hotfix/*", "v*"])}-${j}` };
-        if (policiesRng.bool(0.4)) {
-          entry.type = policiesRng.pick(["branch", "tag"]);
-        }
-        return entry;
-      });
-      env.deployment_branch_policies = policiesRng.bool(0.25) ? { entries } : entries;
-      env.deployment_branch_policy = { protected_branches: false, custom_branch_policies: true };
-    }
-    if (rulesRng.bool(0.3)) {
-      // Slugs come ONLY from PROTECTION_RULE_APPS (the mock's available-Apps listing serves the same
-      // objects), so every declared rule resolves. The wrapped draw omits `_undeclared` for the same
-      // reason as the variables above.
-      const slugs = PROTECTION_RULE_APPS.map((app) => String(app.slug));
-      const count = rulesRng.int(slugs.length) + 1;
-      const entries: Json[] = slugs.slice(0, count).map((slug) => ({ app: slug }));
-      env.deployment_protection_rules = rulesRng.bool(0.25) ? { entries } : entries;
-    }
-    if (pinnedRng.bool(0.25)) {
-      // Gates the GraphQL pins read onto a subset of iterations; curated scenarios pin the interleaving and cap paths.
-      //   pinned: true   -> at most 3 entries, so the count never approaches GitHub's cap
-      //   pinned: false  -> a no-op unpin over the empty baseline: the read runs, no mutation
-      env.pinned = pinnedRng.bool(0.7);
-    }
+    addReviewSettings(rng, env);
+    addVariables(variablesRng, env);
+    addSecrets(secretsRng, env);
+    addBranchPolicies(policiesRng, env);
+    addProtectionRules(rulesRng, env);
+    addPin(pinnedRng, env);
     return env;
   });
 }
