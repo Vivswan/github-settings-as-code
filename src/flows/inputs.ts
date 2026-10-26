@@ -26,26 +26,17 @@ export const DEFAULT_LAYERING = "deep" satisfies Layering;
  * runner.
  */
 export interface InputDecl {
-  /**
-   * The action.yml description; the generator folds it to width. Plain prose: the inputs table renders it inside
-   * an HTML cell, so a "|" would split the row and a "<" would open a tag; gen-inputs-table.ts refuses both.
-   */
+  /** The action.yml description; the generator folds it to width. Plain prose: the inputs table renders it inside an HTML cell, so a "|" would split the row and a "<" would open a tag; gen-inputs-table.ts refuses both. */
   readonly description: string;
+
   /** The action.yml default, verbatim (an empty string means "unset"). */
   readonly default: string;
-  /**
-   * A comma- or newline-separated list. parseConfig reads such an input only
-   * through its list() port (repos is split by the target resolver instead),
-   * and the CLI lets the flag repeat; a single-value input has no `list`.
-   */
+
+  /** A comma- or newline-separated list: parseConfig reads such an input only through its list() port (repos is split by the target resolver instead), and the CLI lets the flag repeat; a single-value input has no `list`. */
   readonly list?: true;
 }
 
-/**
- * The single source action.yml (bun run build:action-docs) and the inputs reference page's table (bun run
- * build:inputs-table) are generated from, in its listing order. Adding an input here is the whole declaration. A
- * new mode's inputs go beside their mode's.
- */
+/** The single source action.yml (bun run build:action-docs) and the inputs reference page's table (bun run build:inputs-table) are generated from, in its listing order; adding an input here is the whole declaration, and a new mode's inputs go beside their mode's. */
 export const INPUT_DECLS = {
   token: {
     description:
@@ -223,6 +214,7 @@ export type InputReader = (name: InputName) => string;
  *   GITHUB_SERVER_URL, GITHUB_RUN_ID   -> the run URL
  */
 export type ConfigEnv = Readonly<Record<string, string | undefined>>;
+
 export const FILTER_INPUTS = [
   "visibility",
   "archived",
@@ -235,27 +227,24 @@ export const FILTER_INPUTS = [
 type FilterInput = (typeof FILTER_INPUTS)[number];
 
 type _UnlistedFilter = MustBeNever<Exclude<keyof DiscoveryFilters, FilterInput>>;
+
 export const MODES = ["apply", "check", "render", "snapshot"] as const;
 
 export type Mode = (typeof MODES)[number];
 
-/**
- * Their declared defaults are empty so "explicitly set" is detectable, as with the discovery filters; apply and check
- * reject a set one instead of silently ignoring it.
- */
+/** Their declared defaults are empty so "explicitly set" is detectable, as with the discovery filters; apply and check reject a set one instead of silently ignoring it. */
 export const RENDER_ONLY_INPUTS = [
   "rendered-file",
   "layering",
 ] as const satisfies readonly InputName[];
+
+/** Their declared defaults are empty so "explicitly set" is detectable; apply and check reject a set one instead of silently ignoring it. */
 export const SNAPSHOT_ONLY_INPUTS = [
   "snapshot-file",
   "snapshot-dir",
 ] as const satisfies readonly InputName[];
-/**
- * `token` is tolerated unread (a workflow commonly sets it on every step). Every declared input NOT listed here is an
- * apply/check control, so the merge rejects it unless it holds its declared default, which the runner supplies whether
- * or not the workflow set the input.
- */
+
+/** `token` is tolerated unread (a workflow commonly sets it on every step); every declared input NOT listed here is an apply/check control, which the merge rejects unless it holds its declared default, supplied by the runner whether or not the workflow set it. */
 export const RENDER_INPUTS = [
   "mode",
   "settings-file",
@@ -265,17 +254,12 @@ export const RENDER_INPUTS = [
   "token",
 ] as const satisfies readonly InputName[];
 
-/**
- * Derived from the declarations, so a future input is rejected by the merge until listed in RENDER_INPUTS; exported so
- * the layering guide's table is pinned to the whole set.
- */
+/** Derived from the declarations, so a future input is rejected by the merge until listed in RENDER_INPUTS; exported so the layering guide's table is pinned to the whole set. */
 export const RENDER_REJECTED_INPUTS: readonly InputName[] = (
   Object.keys(INPUT_DECLS) as InputName[]
 ).filter((name) => !(RENDER_INPUTS as readonly string[]).includes(name));
-/**
- * Every declared input NOT listed here is an apply, check, or merge control, so the snapshot rejects it unless it
- * holds its declared default, which the runner supplies whether or not the workflow set the input.
- */
+
+/** Every declared input NOT listed here is an apply, check, or merge control, which the snapshot rejects unless it holds its declared default, supplied by the runner whether or not the workflow set it. */
 export const SNAPSHOT_INPUTS = [
   "token",
   "repository",
@@ -291,10 +275,7 @@ export const SNAPSHOT_INPUTS = [
   ...FILTER_INPUTS,
 ] as const satisfies readonly InputName[];
 
-/**
- * Derived from the declarations, so a future input is rejected by the snapshot until listed in SNAPSHOT_INPUTS;
- * exported so the snapshot guide's table is pinned to the whole set.
- */
+/** Derived from the declarations, so a future input is rejected by the snapshot until listed in SNAPSHOT_INPUTS; exported so the snapshot guide's table is pinned to the whole set. */
 export const SNAPSHOT_REJECTED_INPUTS: readonly InputName[] = (
   Object.keys(INPUT_DECLS) as InputName[]
 ).filter((name) => !(SNAPSHOT_INPUTS as readonly string[]).includes(name));

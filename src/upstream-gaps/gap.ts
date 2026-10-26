@@ -5,15 +5,13 @@ import type { Endpoints } from "@octokit/types";
 /**
  * Routes the pinned @octokit/types does not carry yet. The gap file carries a MustBeNever tripwire that
  * fails typecheck when octokit ships a route; the graduate script then deletes the file
- * (documentedInSpec: true) or rewrites it spec-only (documentedInSpec: false).
+ * (documentedInSpec: true) or rewrites it spec-only (documentedInSpec: false). `documentedInSpec` is false
+ * only for features GitHub's OpenAPI descriptor ALSO lags; those are excluded from the descriptor slice the
+ * e2e validator loads and exempted from its unknown-route check via UNDOCUMENTED_ROUTES.
  */
 export interface OctokitGap<R extends string = string> {
   readonly kind: "octokit";
   readonly routes: readonly [R, ...R[]];
-  /**
-   * False only for features GitHub's OpenAPI descriptor ALSO lags; those are excluded from the descriptor
-   * slice the e2e validator loads and exempted from its unknown-route check via UNDOCUMENTED_ROUTES.
-   */
   readonly documentedInSpec: boolean;
 }
 

@@ -34,11 +34,9 @@ export interface InitConfig {
   readonly token: string;
   readonly apiVersion: string;
   readonly repo: RepoRef;
-  /** Where the document is written: the file apply and check read. */
   readonly settingsFile: string;
   readonly sections: SectionSelection;
   readonly onMissingPermission: "fail" | "warn";
-  /** Replace an existing settings file instead of refusing. */
   readonly force: boolean;
 }
 
@@ -60,7 +58,6 @@ export type InitProblem =
       readonly code: "init-empty-document";
       readonly repository: string;
       readonly settingsFile: string;
-      /** Why each selected section declares nothing, keyed by the outcome's status. */
       readonly reasons: ReadonlyArray<readonly [label: string, keys: readonly string[]]>;
     };
 

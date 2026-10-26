@@ -9,8 +9,7 @@ import { SLUG_SEGMENT, type SlugKey, slugKey } from "./slug.js";
 
 export type TraceIo = Pick<Io, "debug" | "masked">;
 
-// The segment charset stops at the segment boundary so an octokit line's trailing " - 204 with id ..." is never
-// folded into the name; the `i` flag keeps a mixed-case path from slipping the redaction.
+// The segment charset stops at the segment boundary so an octokit line's trailing " - 204 with id ..." is never folded into the name, and the `i` flag keeps a mixed-case path from slipping the redaction.
 const REPO_SLUG = new RegExp(`/repos/(${SLUG_SEGMENT}/${SLUG_SEGMENT})`, "i");
 
 export function repoSlugOf(path: string): string | undefined {

@@ -33,8 +33,12 @@ import {
 import { PRIVATE_REPOS_POLICIES, type PrivateReposPolicy } from "./redact.js";
 
 export interface Inputs {
+  /** An input trimmed, empty when unset. */
   readonly value: InputReader;
+
+  /** An input trimmed, its declared default when unset. */
   readonly orDefault: (name: InputName) => string;
+
   /** A declared list input, split; the default when unset. */
   readonly list: (name: ListInput) => string[];
 }

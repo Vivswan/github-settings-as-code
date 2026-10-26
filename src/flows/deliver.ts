@@ -43,13 +43,15 @@ import {
 } from "./redact.js";
 import { writeMultiSummary, writeRenderSummary, writeSummary } from "./summary.js";
 
-/** One target's end state as its flow hands it over: the result word plus everything the channel seals. */
+/**
+ * One target's end state as its flow hands it over: the result word plus everything the channel seals. `note` is a
+ * human line for skips and failures that produced no section outcomes, or where a snapshot's file went; `file` is the
+ * snapshot file the target wrote, absent when nothing was written.
+ */
 export interface TargetResult {
   result: RunOutcome;
   outcomes: ClosedOutcome[];
-  /** Human line for skips/failures that produced no section outcomes, or where a snapshot's file went. */
   note?: string;
-  /** The snapshot file the target wrote; absent when nothing was written. */
   file?: string;
 }
 
@@ -94,21 +96,32 @@ export function runOutcome(
 }
 
 export interface DeliveryConfig {
+  /** The mode the reports and the exit code are decided under. */
   mode: "apply" | "check";
+
+  /** The channel a redacted target's full report goes through; none keeps it in the public line alone. */
   privateReport: PrivateReportChannel;
+
   /** The age recipient the `artifact` channel encrypts every report to; empty for the other channels. */
   reportPublicKey: string;
+
   /** The repository the run acts for; a target equal to it is never redacted. */
   selfSlug: string;
+
   /** Link to the workflow run, for the private report metadata; may be empty. */
   runUrl: string;
 }
 
 export interface RunFlowConfig extends DeliveryConfig {
+  /** Whether a section the token cannot access fails the run or is skipped with a warning. */
   onMissingPermission: "fail" | "warn";
+
+  /** The sections allowlist and the required set. */
   sections: SectionSelection;
+
   /** Whether to hide private/internal targets from the public view. */
   privateRepos: PrivateReposPolicy;
+
   /** The `undeclared` input: the fallback policy below a list's wrapper and the file's top-level `_undeclared`; unset by default. */
   undeclared?: UndeclaredPolicy | undefined;
 }

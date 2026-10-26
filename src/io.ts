@@ -20,21 +20,23 @@ type Minted<F> = F & { readonly [MASK_PAIR]: true };
  * from two calls still typechecks; closing that would take one opaque registry value on Io.
  */
 export interface MaskPair {
-  /**
-   * Redaction registers every private slug here as defense in depth. Required, not optional, so a missing
-   * implementation cannot silently no-op in production.
-   */
+  /** Redaction registers every private slug here as defense in depth; required, not optional, so a missing implementation cannot silently no-op in production. */
   readonly mask: Minted<(value: string) => void>;
+
   /** The API trace reads it to redact structurally (whole path, dropped payload) where the runner's literal `***` cannot. */
   readonly masked: Minted<() => ReadonlySet<string>>;
 }
 
 export interface Io extends MaskPair {
   annotate(level: AnnotationLevel, message: string): void;
+
   log(line: string): void;
+
   /** A trace line, shown only when the run has step debug logging enabled. */
   debug(line: string): void;
+
   summary(markdown: string): void;
+
   output(name: OutputName, value: string): void;
 }
 

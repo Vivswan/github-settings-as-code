@@ -27,10 +27,7 @@ const INPUT_NAMES = Object.keys(INPUT_DECLS) as InputName[];
 /** The two inputs that are not subcommand flags: the mode is the subcommand, the token is global. */
 const PROGRAM_INPUTS = ["mode", "token"] as const satisfies readonly InputName[];
 
-/**
- * Inputs no subcommand exposes: the artifact report channel needs the Actions
- * artifact service, which a terminal has no upload for, so its key has no use.
- */
+/** Inputs no subcommand exposes: the artifact report channel needs the Actions artifact service, which a terminal has no upload for, so its key has no use. */
 export const CLI_UNSUPPORTED_INPUTS = ["report-public-key"] as const satisfies readonly InputName[];
 
 /** The flags a mode's subcommand takes: the inputs its mode reads, in declaration order. */
@@ -62,10 +59,7 @@ export function modeSubcommand(mode: Mode): Subcommand {
   return { flags: new Set(inputsForMode(mode)) };
 }
 
-/**
- * The init subcommand: the snapshot inputs of one repository, with
- * settings-file as the destination in place of snapshot-file.
- */
+/** The init subcommand: the snapshot inputs of one repository, with settings-file as the destination in place of snapshot-file. */
 export const INIT_SUBCOMMAND: Subcommand = {
   flags: new Set<InputName>([
     "repository",
@@ -81,10 +75,7 @@ export const INIT_INPUTS: readonly InputName[] = INPUT_NAMES.filter((name) =>
   INIT_SUBCOMMAND.flags.has(name),
 );
 
-/**
- * init's one reworded flag: the declaration describes the file apply and check
- * READ, and init WRITES it; every other init flag keeps its declared text.
- */
+/** init's one reworded flag: the declaration describes the file apply and check READ, and init WRITES it; every other init flag keeps its declared text. */
 export const INIT_SETTINGS_FILE_DESCRIPTION =
   "Where the settings document is written: the file apply and check read. One path; an existing file is kept unless --force is passed.";
 
@@ -109,10 +100,15 @@ export function declared(input: InputName, text: string): string {
  * removed verbatim from the help of a subcommand that lacks one of them.
  */
 interface Clause {
+  /** The input whose description holds the clause. */
   readonly input: InputName;
+
+  /** The clause, verbatim from the declaration. */
   readonly text: string;
+
   /** What stands in for `text` when it is removed. */
   readonly replacement: string;
+
   /** Met when the subcommand accepts every one of these flags. */
   readonly flags: readonly InputName[];
 }

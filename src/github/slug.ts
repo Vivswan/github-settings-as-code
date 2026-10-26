@@ -4,13 +4,12 @@
  * identities (collaborator logins, environment names) fold through that section's branded key.
  */
 
-/**
- * One owner or name, as regex source. Permissive on purpose: parseRepoSlug adds the "." and ".." refusal on top, while
- * trace redaction must still recognize the path a buggy caller built from such a slug.
- */
+/** One owner or name, as regex source. Permissive on purpose: parseRepoSlug adds the "." and ".." refusal on top, while trace redaction must still recognize the path a buggy caller built from such a slug. */
 export const SLUG_SEGMENT = String.raw`[\w.-]+`;
 
+/** The brand's phantom key: declared only, so the fold below is the one way to mint a SlugKey. */
 declare const repoSlugKey: unique symbol;
+
 export type SlugKey = string & { readonly [repoSlugKey]: true };
 
 export function slugKey(slug: string): SlugKey {

@@ -78,6 +78,55 @@ function legalOfType(expected: string | undefined): string {
   }
 }
 
+/** The judgment one walk applies at every node, and what it does with a YAML alias cycle. */
+interface Judgment {
+  readonly offence: (value: unknown, at: "item" | "field") => string | null;
+  readonly cycles: "refuse" | "pass";
+}
+
+/** The objects one walk has entered: `ancestors` the current descent, `walked` every node, so a shared alias is walked once. */
+interface Visited {
+  readonly ancestors: Set<object>;
+  readonly walked: WeakSet<object>;
+}
+
+function offendingBelow(
+  value: unknown,
+  path: string,
+  at: "item" | "field",
+  judgment: Judgment,
+  visited: Visited,
+): string | null {
+  const own = judgment.offence(value, at);
+  if (own !== null) {
+    return `${path} ${own}`;
+  }
+  if (value === null || typeof value !== "object") {
+    return null;
+  }
+  if (judgment.cycles === "refuse" && visited.ancestors.has(value)) {
+    return `${path} refers back to one of its own containers (a YAML alias cycle), which JSON cannot carry; spell the value out instead`;
+  }
+  if (visited.walked.has(value)) {
+    return null;
+  }
+
+  visited.walked.add(value);
+  visited.ancestors.add(value);
+  // Array.from, not map: map skips a hole.
+  const children: [string, unknown, "item" | "field"][] = Array.isArray(value)
+    ? Array.from(value, (entry, index) => [`${path}[${index}]`, entry, "item"])
+    : Object.entries(value).map(([key, entry]) => [`${path}.${key}`, entry, "field"]);
+  for (const [childPath, child, childAt] of children) {
+    const hit = offendingBelow(child, childPath, childAt, judgment, visited);
+    if (hit !== null) {
+      return hit;
+    }
+  }
+  visited.ancestors.delete(value);
+  return null;
+}
+
 /**
  * One walk over a section's value for what no shape can judge, so a new mapping or passthrough field needs no guard
  * of its own; `offence` names the problem at a node. A YAML alias to an ancestor is a cycle JSON cannot carry:
@@ -89,37 +138,9 @@ function findOffending(
   path: string,
   offence: (value: unknown, at: "item" | "field") => string | null,
   cycles: "refuse" | "pass",
-  at: "item" | "field" = "field",
-  ancestors: Set<object> = new Set(),
-  walked: WeakSet<object> = new WeakSet(),
 ): string | null {
-  const own = offence(value, at);
-  if (own !== null) {
-    return `${path} ${own}`;
-  }
-  if (value === null || typeof value !== "object") {
-    return null;
-  }
-  if (cycles === "refuse" && ancestors.has(value)) {
-    return `${path} refers back to one of its own containers (a YAML alias cycle), which JSON cannot carry; spell the value out instead`;
-  }
-  if (walked.has(value)) {
-    return null;
-  }
-  walked.add(value);
-  ancestors.add(value);
-  // Array.from, not map: map skips a hole.
-  const children: [string, unknown, "item" | "field"][] = Array.isArray(value)
-    ? Array.from(value, (entry, index) => [`${path}[${index}]`, entry, "item"])
-    : Object.entries(value).map(([key, entry]) => [`${path}.${key}`, entry, "field"]);
-  for (const [childPath, child, childAt] of children) {
-    const hit = findOffending(child, childPath, offence, cycles, childAt, ancestors, walked);
-    if (hit !== null) {
-      return hit;
-    }
-  }
-  ancestors.delete(value);
-  return null;
+  const visited: Visited = { ancestors: new Set(), walked: new WeakSet() };
+  return offendingBelow(value, path, "field", { offence, cycles }, visited);
 }
 
 /**
@@ -149,6 +170,75 @@ function parsedOffence(value: unknown, at: "item" | "field"): string | null {
   return nonPlainOffence(value, at) ?? nonFiniteOffence(value);
 }
 
+/** zod's issues as the file's problems, five at most, a null the shape refused reworded to the values that exist. */
+function shapeProblems(key: string, declared: unknown, issues: z.ZodError["issues"]): string[] {
+  const problems: string[] = [];
+  for (const issue of issues.slice(0, 5)) {
+    const path = z.core.toDotPath([key, ...issue.path]);
+    // A null the shape refused is the author saying "empty" where GitHub has no empty state: name the values that
+    // exist. A shape's own diagnostic (a custom issue) already names the fix, unless it supplies the legal values itself.
+    if (valueAt(declared, issue.path) === null && rewritesForNull(issue as NullIssue)) {
+      problems.push(`${path} has no empty state; write ${legalValues(issue as NullIssue)}`);
+      continue;
+    }
+    problems.push(`${path}: ${issue.message}`);
+  }
+
+  if (issues.length > 5) {
+    // A silently truncated list costs one fix-and-rerun cycle per hidden offender.
+    problems.push(
+      `${key}: ...and ${countNoun(issues.length - 5, "more issue", "more issues")} in this section`,
+    );
+  }
+  return problems;
+}
+
+/** One declared section judged: zod's output when every file-only check passed, else every problem they found. */
+function sectionProblems(
+  key: (typeof SECTION_KEYS)[number],
+  declared: unknown,
+  secretSource: SettingsSource,
+): Result<unknown, string[]> {
+  const shape = sectionShape(key);
+  // A null section is a value only where the section has an off state (Pages, interaction limits); elsewhere it
+  // declares nothing and the layered fold would write it as such, so it is refused before any shape parse.
+  if (declared === null && !shape.safeParse(null).success) {
+    return err([
+      `${key}: null has no meaning; remove the section or declare its ${LIST_KEYS.has(key) ? "entries" : "fields"}`,
+    ]);
+  }
+
+  // Before the shape parse: zod would accept the tagged value as an empty mapping and never report it.
+  const nonPlain = findOffending(declared, key, nonPlainOffence, "pass");
+  if (nonPlain !== null) {
+    return err([nonPlain]);
+  }
+
+  const parsed = shape.safeParse(declared);
+  if (!parsed.success) {
+    return err(shapeProblems(key, declared, parsed.error.issues));
+  }
+
+  const unplain = findOffending(parsed.data, key, parsedOffence, "refuse");
+  if (unplain !== null) {
+    return err([unplain]);
+  }
+
+  const problems: string[] = [];
+  if (isListSection(key)) {
+    problems.push(...closedSurfaceProblems(key, declaredEntries(parsed.data as ParsedList)));
+  }
+  problems.push(
+    ...fileOnlyProblems(key, parsed.data),
+    ...secretReferenceProblems(key, parsed.data, secretSource),
+  );
+  if (problems.length > 0) {
+    return err(problems);
+  }
+
+  return ok(parsed.data);
+}
+
 /**
  * The result is zod's output (fresh plain objects at every node the shape describes), never the caller's document,
  * branded ProvedPlain: this is the one place the plainness proof is minted, and the one place a document is walked
@@ -169,56 +259,15 @@ export function validateSectionShapes(
     if (declared === undefined) {
       continue;
     }
-    const shape = sectionShape(key);
-    // A null section is a value only where the section has an off state (Pages, interaction limits); elsewhere it
-    // declares nothing and the layered fold would write it as such, so it is refused before any shape parse.
-    if (declared === null && !shape.safeParse(null).success) {
-      problems.push(
-        `${key}: null has no meaning; remove the section or declare its ${LIST_KEYS.has(key) ? "entries" : "fields"}`,
-      );
+
+    const judged = sectionProblems(key, declared, secretSource);
+    if (judged.isErr()) {
+      problems.push(...judged.error);
       continue;
     }
-    // Before the shape parse: zod would accept the tagged value as an empty mapping and never report it.
-    const nonPlain = findOffending(declared, key, nonPlainOffence, "pass");
-    if (nonPlain !== null) {
-      problems.push(nonPlain);
-      continue;
-    }
-    const parsed = shape.safeParse(declared);
-    if (!parsed.success) {
-      const issues = parsed.error.issues;
-      for (const issue of issues.slice(0, 5)) {
-        const path = z.core.toDotPath([key, ...issue.path]);
-        // A null the shape refused is the author saying "empty" where GitHub has no empty state: name the values that
-        // exist. A shape's own diagnostic (a custom issue) already names the fix, unless it supplies the legal values itself.
-        if (valueAt(declared, issue.path) === null && rewritesForNull(issue as NullIssue)) {
-          problems.push(`${path} has no empty state; write ${legalValues(issue as NullIssue)}`);
-          continue;
-        }
-        problems.push(`${path}: ${issue.message}`);
-      }
-      if (issues.length > 5) {
-        // A silently truncated list costs one fix-and-rerun cycle per hidden offender.
-        problems.push(
-          `${key}: ...and ${countNoun(issues.length - 5, "more issue", "more issues")} in this section`,
-        );
-      }
-      continue;
-    }
-    const unplain = findOffending(parsed.data, key, parsedOffence, "refuse");
-    if (unplain !== null) {
-      problems.push(unplain);
-      continue;
-    }
-    problems.push(
-      ...(isListSection(key)
-        ? closedSurfaceProblems(key, declaredEntries(parsed.data as ParsedList))
-        : []),
-      ...fileOnlyProblems(key, parsed.data),
-      ...secretReferenceProblems(key, parsed.data, secretSource),
-    );
-    parsedSections[key] = parsed.data;
+    parsedSections[key] = judged.value;
   }
+
   if (problems.length === 0) {
     // The brand's one cast: every section above passed both plainness walks.
     return ok(parsedSections as ProvedPlain<SettingsFile>);

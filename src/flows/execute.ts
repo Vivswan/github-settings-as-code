@@ -16,9 +16,12 @@ import { concludeSnapshot, runSnapshot } from "./snapshot.js";
 
 /** What a face hands the executor; the config carries everything else. */
 export interface RunDeps {
+  /** The face's sink for every line, output, and summary block. */
   readonly io: Io;
+
   /** Opens the client a config's token authorizes; a merge never asks for one. */
   readonly createClient: (token: string, io: Io, apiVersion: string) => GitHubClient;
+
   /** The artifact channel's uploader; parseConfig refuses that channel for a face that declares no upload capability. */
   readonly uploader?: ArtifactUploader;
 }

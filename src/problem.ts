@@ -12,13 +12,7 @@ import { describeKind } from "./plain-data.js";
 import type { SectionKey } from "./schema.js";
 import { agree, countNoun, quote } from "./text.js";
 
-/**
- * The advice appended to a transient (non-permission) API failure: a network
- * blip or a 5xx that survived the retries. One source for the discovery
- * problems rendered here and multi.ts's remote-file read failure, so the "not
- * a permission problem" wording cannot drift between them. Face-neutral: the
- * action and the command line print the same line.
- */
+/** Appended to a transient (non-permission) API failure, a network blip or a 5xx that survived the retries; one source for the discovery problems here and multi.ts's remote-file read failure, so the "not a permission problem" wording cannot drift between the two faces. */
 export const RERUN_ADVICE =
   "This is not a permission problem; re-run, and retry later if it persists";
 
@@ -81,7 +75,18 @@ export type CentralFileProblem =
  * their prose needs: the prose fragments are literal unions, the positions are
  * numbers, and a document value enters only as `actual`, which the renderer
  * describes by SHAPE. `keyField` is the module's declared key field, never
- * read from a document.
+ * read from a document; `keyKind` is its kind in prose ("string" when the
+ * module says nothing else), `alongside` the other paths of a composite
+ * identity (a reviewer's `type` beside its `id`), `keyPaths` the dotted paths
+ * a removal names its entry by (the key field's own, or a composite), and
+ * `extra` the author's dotted paths riding beside the key and the marker
+ * (`color`, `config.secret`), in the entry's order.
+ *
+ * Three fields carry a convention their names do not: `fallback` is the value
+ * an unset input means, null where unset means "no value" (the `undeclared`
+ * input); `index` is the colliding layer's position in the settings-file list,
+ * from 0; `denied` is true for a denial or an invalid token, where a user PAT
+ * is the fix.
  */
 export type Problem =
   // Action inputs
@@ -91,7 +96,6 @@ export type Problem =
       readonly value: string;
       readonly noun: string;
       readonly allowed: readonly string[];
-      /** The value an unset input means; null when unset means "no value" (the `undeclared` input). */
       readonly fallback: string | null;
     }
   | {
@@ -141,14 +145,12 @@ export type Problem =
   | {
       readonly code: "discovery-filters-without-wildcard";
       readonly filters: readonly string[];
-      /** Where the run's targets come from instead of `repos: "*"`. */
       readonly targets: "single-repo" | "explicit-repos" | "repos-dir" | "snapshot-file";
     }
   | { readonly code: "input-defaults-file-without-multi" }
   | {
       readonly code: "input-settings-file-is-list";
       readonly value: string;
-      /** An engine mode reading its one file, or the command line's init, which writes one. */
       readonly mode: EngineMode | "init";
     }
   | { readonly code: "input-repository-not-slug"; readonly value: string }
@@ -198,9 +200,7 @@ export type Problem =
       readonly layer: string;
       readonly site: string;
       readonly keyField: string;
-      /** The field's kind in prose; "string" when the module says nothing else. */
       readonly keyKind?: string;
-      /** The other paths of a composite identity (a reviewer's `type` beside its `id`), when the module names one. */
       readonly alongside?: readonly string[];
     }
   | {
@@ -221,16 +221,13 @@ export type Problem =
       readonly code: "layer-remove-with-fields";
       readonly layer: string;
       readonly site: string;
-      /** The dotted paths a removal names its entry by: the key field's own, or a composite (`type` and `id`). */
       readonly keyPaths: readonly string[];
-      /** The dotted paths riding beside the key and the marker (`color`, `config.secret`), in the entry's order. */
       readonly extra: readonly string[];
     }
   | {
       readonly code: "layer-remove-nothing";
       readonly layer: string;
       readonly site: string;
-      /** replace: the higher list already wins; swapped: the entry is copied whole; unmatched: no lower entry claims the key. */
       readonly reason: "replace" | "swapped" | "unmatched";
     }
   // The section selection
@@ -239,7 +236,6 @@ export type Problem =
   | {
       readonly code: "rendered-file-is-layer";
       readonly renderedFile: string;
-      /** The colliding layer's position in the settings-file list, from 0. */
       readonly index: number;
       readonly layer: string;
     }
@@ -275,7 +271,6 @@ export type Problem =
       readonly path: string;
       readonly status: number;
       readonly message: string;
-      /** True for a denial or an invalid token, where a user PAT is the fix. */
       readonly denied: boolean;
     }
   | { readonly code: "discovery-transport-failed"; readonly reason: string }
@@ -294,14 +289,24 @@ export type SettingsProblem = ProblemOf<
   "settings-not-mapping" | "settings-not-plain-mapping" | "settings-malformed-sections"
 >;
 
+/** The action-input members, every code under `input-`. */
+type InputProblem = ProblemOf<Extract<Problem["code"], `input-${string}`>>;
+
+/** The snapshot destination's input members, every code under `input-snapshot-`. */
+type SnapshotInputProblem = ProblemOf<Extract<Problem["code"], `input-snapshot-${string}`>>;
+
+/** The target resolution's members: the repos input, the repos-dir, and discovery. */
+type TargetProblem = ProblemOf<Extract<Problem["code"], `repos-${string}` | `discovery-${string}`>>;
+
+/** What is left once the inputs, the layers, and the targets are worded: the document, the sources, the flows. */
+type RunProblem = Exclude<Problem, InputProblem | LayerProblem | TargetProblem>;
+
+/** Why discovery fails under the workflow token: only a user PAT can enumerate a user's repositories. */
 const PAT_ADVICE =
   "Discovery needs a user PAT; the workflow GITHUB_TOKEN and GitHub App installation tokens " +
   'cannot enumerate a user\'s repositories. List the target repositories explicitly in the "repos" input';
 
-/**
- * The underscore rule at the document level; the wrapper's line (src/sections/shared/schema-helpers.ts) says the
- * same in the wrapper's terms. The two directives are all the underscore ever means.
- */
+/** The underscore rule at the document level; the wrapper's line (src/sections/shared/schema-helpers.ts) says the same in the wrapper's terms, and the two directives are all the underscore ever means. */
 const DIRECTIVES_ADVICE =
   "The underscore marks this action's directives, \"_layering\" (a file's top level or a list section's {entries} " +
   'wrapper) and "_undeclared" (a file\'s top level or a wrapper), and nothing else; there are no private-note keys. ' +
@@ -417,48 +422,68 @@ function describeInvalidReposEntries(problem: ProblemOf<"repos-input-invalid-ent
   return `the "repos" input has ${countNoun(count, "invalid entry", "invalid entries")}: ${parts.join("; ")}. Or use "*" alone to discover repositories`;
 }
 
-/**
- * The ONE place a problem is worded. INVARIANT for the layer members: a
- * message names the layer as the layer list names it, the site's key path, and
- * the kind of problem - never a value from the document. mode: render has no
- * private-repos redaction context, so a value echoed there (a label name, a
- * rule type, a mis-shaped section body) could land a private repository's
- * settings in a public log. `actual` reaches the prose only through
- * describeKind; the marker test in test/engine/layers.test.ts pins this.
- */
-export function describeProblem(problem: Problem): string {
+/** The `layer "<name>": <site>` prefix every layer refusal opens with. */
+function layerSite(problem: LayerProblem): string {
+  return `layer ${quote(problem.layer)}: ${problem.site}`;
+}
+
+function describeNothingToRemove(reason: "replace" | "swapped" | "unmatched"): string {
+  switch (reason) {
+    case "replace":
+      return "under _layering: replace the higher list already wins, so there is nothing to remove";
+    case "swapped":
+      return "its entry is copied whole (a new key, or a same-key swap under shallow), so its nested lists meet nothing to remove";
+    case "unmatched":
+      return "no lower layer declares an entry under its key";
+  }
+}
+
+/** Whether the problem's code starts with `prefix`, narrowing to the members it names. */
+function codeStartsWith<P extends string>(
+  problem: Problem,
+  prefix: P,
+): problem is ProblemOf<Extract<Problem["code"], `${P}${string}`>> {
+  return problem.code.startsWith(prefix);
+}
+
+/** The snapshot destination's inputs: one of the two forms, with the targets that form takes. */
+function describeSnapshotInputProblem(problem: SnapshotInputProblem): string {
   switch (problem.code) {
-    case "input-unsupported-value": {
-      const values = problem.allowed.map((v) =>
-        v === problem.fallback ? `"${v}" (default)` : `"${v}"`,
-      );
-      const unset = problem.fallback === null ? ", or leave it unset" : "";
-      return `the "${problem.input}" input is "${problem.value}", which is not a supported ${problem.noun}. Set it to ${values.join(", ")}${unset}`;
-    }
-    case "input-unknown-sections":
-      return problem.unknown
-        .map((unknown) => describeUnknownSectionInput(unknown, problem.known))
-        .join("; ");
-    case "required-sections-excluded": {
-      const count = problem.excluded.length;
-      const pronoun = agree(count, "it", "them");
+    case "input-snapshot-only": {
+      const { subject, applies, inputs, they } = inputsWording(problem.inputs);
       return (
-        `the "required-sections" ${agree(count, "entry", "entries")} ${quoteList(problem.excluded)} ${agree(count, "is", "are")} ` +
-        `excluded by the "sections" allowlist, so the run would pass without ever attempting ` +
-        `${pronoun}. Add ${pronoun} to the "sections" input, or remove ${pronoun} from ` +
-        `"required-sections"`
+        `${subject} only ${applies} to mode: snapshot, but this run is in ` +
+        `${problem.mode} mode, so ${they} would never be ` +
+        `used. Remove the ${inputs}, or set mode: snapshot to write the live settings to a file`
       );
     }
-    case "input-report-key-unused":
-      return `the "report-public-key" input only applies to private-report: artifact, but the channel is "${problem.channel}", so the key would never be used. Remove report-public-key, or set private-report: artifact`;
-    case "input-report-key-missing":
-      return (
-        'private-report: artifact needs a "report-public-key" input: the age recipient every ' +
-        'report is encrypted to. Generate a keypair with "age-keygen -o key.txt", keep key.txt ' +
-        'secret, and set report-public-key to the printed "age1..." recipient (safe to commit)'
-      );
-    case "input-report-key-invalid":
-      return `the "report-public-key" input is not a valid age recipient: ${problem.reason}. It must be an "age1..." public key from "age-keygen" (the recipient line, not the AGE-SECRET-KEY identity)`;
+    case "input-snapshot-destination-missing":
+      return 'mode: snapshot needs exactly one of the "snapshot-file" input (one repository\'s settings written to that file) or the "snapshot-dir" input (one <owner>/<name>.yml per repos or repos-dir target under that directory). Set one of them';
+    case "input-snapshot-destinations-both":
+      return 'the "snapshot-file" and "snapshot-dir" inputs are both set, but a snapshot run writes one form: a single repository to snapshot-file, or one <owner>/<name>.yml per multi-repo target under snapshot-dir. Remove one of them';
+    case "input-snapshot-file-with-multi":
+      return 'the "snapshot-file" input writes one repository\'s snapshot, but "repos" or "repos-dir" names multi-repo targets. Set "snapshot-dir" to write one file per target, or remove the multi-repo inputs and name the repository with "repository"';
+    case "input-snapshot-dir-without-targets":
+      return 'the "snapshot-dir" input needs multi-repo targets: set "repos" (an owner/name list, or "*" to discover) or "repos-dir". To snapshot one repository, set "snapshot-file" instead';
+  }
+}
+
+/** An input of another mode or target form, refused with the step it belongs to. */
+function describeModeInputProblem(
+  problem: ProblemOf<
+    | "input-rejected-in-render"
+    | "input-rendered-file-missing"
+    | "input-settings-file-empty"
+    | "input-render-only"
+    | "input-rejected-in-snapshot"
+    | "input-repository-with-snapshot-dir"
+    | "input-repository-with-multi"
+    | "input-settings-file-with-multi"
+    | "input-defaults-file-without-multi"
+    | "input-settings-file-is-list"
+  >,
+): string {
+  switch (problem.code) {
     case "input-rejected-in-render": {
       const { subject, verb, inputs, them } = inputsWording(problem.inputs);
       return (
@@ -480,14 +505,6 @@ export function describeProblem(problem: Problem): string {
         `used. Remove the ${inputs}, or set mode: render to fold settings files`
       );
     }
-    case "input-snapshot-only": {
-      const { subject, applies, inputs, they } = inputsWording(problem.inputs);
-      return (
-        `${subject} only ${applies} to mode: snapshot, but this run is in ` +
-        `${problem.mode} mode, so ${they} would never be ` +
-        `used. Remove the ${inputs}, or set mode: snapshot to write the live settings to a file`
-      );
-    }
     case "input-rejected-in-snapshot": {
       const { subject, verb, inputs, them, they } = inputsWording(problem.inputs);
       return (
@@ -497,16 +514,52 @@ export function describeProblem(problem: Problem): string {
         `the apply, check, or render step ${they} ${agree(problem.inputs.length, "belongs", "belong")} to`
       );
     }
-    case "input-snapshot-destination-missing":
-      return 'mode: snapshot needs exactly one of the "snapshot-file" input (one repository\'s settings written to that file) or the "snapshot-dir" input (one <owner>/<name>.yml per repos or repos-dir target under that directory). Set one of them';
-    case "input-snapshot-destinations-both":
-      return 'the "snapshot-file" and "snapshot-dir" inputs are both set, but a snapshot run writes one form: a single repository to snapshot-file, or one <owner>/<name>.yml per multi-repo target under snapshot-dir. Remove one of them';
-    case "input-snapshot-file-with-multi":
-      return 'the "snapshot-file" input writes one repository\'s snapshot, but "repos" or "repos-dir" names multi-repo targets. Set "snapshot-dir" to write one file per target, or remove the multi-repo inputs and name the repository with "repository"';
     case "input-repository-with-snapshot-dir":
       return 'the "repository" input cannot be combined with "snapshot-dir", which writes one file per "repos" or "repos-dir" target. Remove "repository", or set "snapshot-file" to snapshot one repository';
-    case "input-snapshot-dir-without-targets":
-      return 'the "snapshot-dir" input needs multi-repo targets: set "repos" (an owner/name list, or "*" to discover) or "repos-dir". To snapshot one repository, set "snapshot-file" instead';
+    case "input-repository-with-multi":
+      return 'the "repository" input cannot be combined with "repos" or "repos-dir"; multi-repo targets come from those inputs. Remove "repository", or remove the multi-repo inputs to stay in single-repo mode';
+    case "input-settings-file-with-multi":
+      return 'the "settings-file" input cannot be combined with "repos" or "repos-dir": central targets are read from repos-dir files and remote targets from each repository\'s own .github/settings.yml. Remove the settings-file override';
+    case "input-defaults-file-without-multi":
+      return 'the "defaults-file" input only applies to multi-repo mode, but this run is in single-repo mode, so the defaults would never apply. Remove the input, or add "repos" or "repos-dir" to switch to multi-repo mode';
+    case "input-settings-file-is-list":
+      return problem.mode === "init"
+        ? `the "settings-file" input is "${problem.value}", which contains a list separator: init writes exactly one settings file, and only mode: render takes a newline- or comma-separated list. Name one file`
+        : `the "settings-file" input is "${problem.value}", which contains a list separator: ` +
+            `${problem.mode} mode reads exactly one settings file, and only mode: render takes a ` +
+            "newline- or comma-separated list. Name one file, or set mode: render to fold the list into " +
+            "one document";
+  }
+}
+
+/** An action input's value, the sections it names, the report channel it asks for, or the target it cannot name. */
+function describeInputProblem(problem: InputProblem): string {
+  if (codeStartsWith(problem, "input-snapshot-")) {
+    return describeSnapshotInputProblem(problem);
+  }
+
+  switch (problem.code) {
+    case "input-unsupported-value": {
+      const values = problem.allowed.map((v) =>
+        v === problem.fallback ? `"${v}" (default)` : `"${v}"`,
+      );
+      const unset = problem.fallback === null ? ", or leave it unset" : "";
+      return `the "${problem.input}" input is "${problem.value}", which is not a supported ${problem.noun}. Set it to ${values.join(", ")}${unset}`;
+    }
+    case "input-unknown-sections":
+      return problem.unknown
+        .map((unknown) => describeUnknownSectionInput(unknown, problem.known))
+        .join("; ");
+    case "input-report-key-unused":
+      return `the "report-public-key" input only applies to private-report: artifact, but the channel is "${problem.channel}", so the key would never be used. Remove report-public-key, or set private-report: artifact`;
+    case "input-report-key-missing":
+      return (
+        'private-report: artifact needs a "report-public-key" input: the age recipient every ' +
+        'report is encrypted to. Generate a keypair with "age-keygen -o key.txt", keep key.txt ' +
+        'secret, and set report-public-key to the printed "age1..." recipient (safe to commit)'
+      );
+    case "input-report-key-invalid":
+      return `the "report-public-key" input is not a valid age recipient: ${problem.reason}. It must be an "age1..." public key from "age-keygen" (the recipient line, not the AGE-SECRET-KEY identity)`;
     case "input-token-missing":
       return 'cannot call the GitHub API: no token was provided. Set the "token" input (--token on the command line), or export GITHUB_TOKEN';
     case "input-report-without-redaction":
@@ -527,21 +580,6 @@ export function describeProblem(problem: Problem): string {
         `negating the whole pattern`
       );
     }
-    case "input-repository-with-multi":
-      return 'the "repository" input cannot be combined with "repos" or "repos-dir"; multi-repo targets come from those inputs. Remove "repository", or remove the multi-repo inputs to stay in single-repo mode';
-    case "input-settings-file-with-multi":
-      return 'the "settings-file" input cannot be combined with "repos" or "repos-dir": central targets are read from repos-dir files and remote targets from each repository\'s own .github/settings.yml. Remove the settings-file override';
-    case "discovery-filters-without-wildcard":
-      return describeFiltersWithoutWildcard(problem);
-    case "input-defaults-file-without-multi":
-      return 'the "defaults-file" input only applies to multi-repo mode, but this run is in single-repo mode, so the defaults would never apply. Remove the input, or add "repos" or "repos-dir" to switch to multi-repo mode';
-    case "input-settings-file-is-list":
-      return problem.mode === "init"
-        ? `the "settings-file" input is "${problem.value}", which contains a list separator: init writes exactly one settings file, and only mode: render takes a newline- or comma-separated list. Name one file`
-        : `the "settings-file" input is "${problem.value}", which contains a list separator: ` +
-            `${problem.mode} mode reads exactly one settings file, and only mode: render takes a ` +
-            "newline- or comma-separated list. Name one file, or set mode: render to fold the list into " +
-            "one document";
     case "input-repository-not-slug":
       return `cannot target a repository: "${problem.value}" is not an owner/name slug. Set the "repository" input (--repository on the command line) to a value like "octocat/hello-world"; inside GitHub Actions, GITHUB_REPOSITORY supplies it`;
     case "input-artifact-unsupported":
@@ -550,16 +588,20 @@ export function describeProblem(problem: Problem): string {
         "Actions runner can do, and this run has no artifact upload (the command line, or a library " +
         'caller without an uploader). Set private-report to "issue", "issue-on-failure", or "none"'
       );
-    case "settings-not-mapping":
-      return `${problem.source} must be a YAML mapping of section names to settings, but its top level parsed as a ${problem.shape}. Rewrite the top level as "section: ..." keys`;
-    case "settings-not-plain-mapping":
-      return `${problem.source} must be a plain YAML mapping of section names to settings, but its top level parsed as another type (a YAML-tagged value like !!timestamp parses to a Date). Rewrite the top level as "section: ..." keys`;
-    case "settings-malformed-sections":
-      return `${problem.source} has malformed section entries: ${problem.issues.join("; ")}. ${PASSTHROUGH_ADVICE}`;
-    case "yaml-invalid":
-      return problem.reason;
-    case "settings-file-unreadable":
-      return describeUnreadable(problem);
+    default:
+      return describeModeInputProblem(problem);
+  }
+}
+
+/**
+ * The layer refusals. INVARIANT: a message names the layer as the layer list names it, the site's key path, and the
+ * kind of problem - never a value from the document. mode: render has no private-repos redaction context, so a value
+ * echoed there (a label name, a rule type, a mis-shaped section body) could land a private repository's settings in
+ * a public log. `actual` reaches the prose only through describeKind; the marker test in test/engine/layers.test.ts
+ * pins this.
+ */
+function describeLayerProblem(problem: LayerProblem): string {
+  switch (problem.code) {
     case "layer-cycle":
       return `${layerSite(problem)} contains a reference cycle (a YAML anchor that includes itself); layers must be trees`;
     case "layer-wrong-shape":
@@ -576,6 +618,56 @@ export function describeProblem(problem: Problem): string {
       return `${layerSite(problem)} carries _remove: true beside ${quoteList(problem.extra)}; a removal names its ${andList(problem.keyPaths)} and nothing else. Drop the ${agree(problem.extra.length, "field", "fields")}, or the marker`;
     case "layer-remove-nothing":
       return `${layerSite(problem)} carries _remove: true, but ${describeNothingToRemove(problem.reason)}. Remove the entry, or fix its key`;
+  }
+}
+
+/** The target resolution: the repos input's entries, the repos-dir's files, and "*" discovery. */
+function describeTargetProblem(problem: TargetProblem): string {
+  switch (problem.code) {
+    case "repos-input-wildcard-mixed":
+      return 'the "repos" input mixes "*" with explicit repositories. Use "*" alone to discover every repository the token owns, or list the repositories without it';
+    case "repos-input-invalid-entries":
+      return describeInvalidReposEntries(problem);
+    case "repos-dir-missing":
+      return `repos-dir "${problem.reposDir}" does not exist in the workspace, so there are no central settings files to read. Add an actions/checkout step before this action, or fix the repos-dir path`;
+    case "repos-dir-unreadable":
+      return `cannot read repos-dir "${problem.reposDir}": ${problem.reason}. Check that it is a readable directory of settings files`;
+    case "repos-dir-invalid-files":
+      return `repos-dir "${problem.reposDir}" has ${countNoun(invalidFileCount(problem.files), "invalid settings file", "invalid settings files")}:\n- ${problem.files.map(describeCentralFile).join("\n- ")}`;
+    case "discovery-filters-without-wildcard":
+      return describeFiltersWithoutWildcard(problem);
+    case "discovery-request-failed":
+      return `cannot discover repositories for repos: "*": GET ${problem.path} failed: ${problem.status} ${problem.message}. ${problem.denied ? PAT_ADVICE : RERUN_ADVICE}`;
+    case "discovery-transport-failed":
+      return `cannot discover repositories for repos: "*": ${problem.reason}. ${RERUN_ADVICE}`;
+    case "discovery-response-not-a-list":
+      return `cannot discover repositories for repos: "*": GET ${problem.path} returned a JSON value that is not a list, so the response cannot be paginated. ${RERUN_ADVICE}`;
+  }
+}
+
+/** The section selection, the settings document and its sources, the flows' fatal paths, and the private report. */
+function describeRunProblem(problem: RunProblem): string {
+  switch (problem.code) {
+    case "required-sections-excluded": {
+      const count = problem.excluded.length;
+      const pronoun = agree(count, "it", "them");
+      return (
+        `the "required-sections" ${agree(count, "entry", "entries")} ${quoteList(problem.excluded)} ${agree(count, "is", "are")} ` +
+        `excluded by the "sections" allowlist, so the run would pass without ever attempting ` +
+        `${pronoun}. Add ${pronoun} to the "sections" input, or remove ${pronoun} from ` +
+        `"required-sections"`
+      );
+    }
+    case "settings-not-mapping":
+      return `${problem.source} must be a YAML mapping of section names to settings, but its top level parsed as a ${problem.shape}. Rewrite the top level as "section: ..." keys`;
+    case "settings-not-plain-mapping":
+      return `${problem.source} must be a plain YAML mapping of section names to settings, but its top level parsed as another type (a YAML-tagged value like !!timestamp parses to a Date). Rewrite the top level as "section: ..." keys`;
+    case "settings-malformed-sections":
+      return `${problem.source} has malformed section entries: ${problem.issues.join("; ")}. ${PASSTHROUGH_ADVICE}`;
+    case "yaml-invalid":
+      return problem.reason;
+    case "settings-file-unreadable":
+      return describeUnreadable(problem);
     case "rendered-file-is-layer":
       return (
         `the "rendered-file" input "${problem.renderedFile}" is layer ${problem.index + 1} of the ` +
@@ -603,39 +695,21 @@ export function describeProblem(problem: Problem): string {
         : `multi-repo mode found no targets: repos-dir yielded no settings files and the "repos" input resolved to no repositories. Add per-repo files to the repos-dir, or list repositories in the "repos" input`;
     case "repo-slug-invalid":
       return `"${problem.value}" is not an owner/name repository slug (use a value like "octocat/hello-world")`;
-    case "repos-input-wildcard-mixed":
-      return 'the "repos" input mixes "*" with explicit repositories. Use "*" alone to discover every repository the token owns, or list the repositories without it';
-    case "repos-input-invalid-entries":
-      return describeInvalidReposEntries(problem);
-    case "repos-dir-missing":
-      return `repos-dir "${problem.reposDir}" does not exist in the workspace, so there are no central settings files to read. Add an actions/checkout step before this action, or fix the repos-dir path`;
-    case "repos-dir-unreadable":
-      return `cannot read repos-dir "${problem.reposDir}": ${problem.reason}. Check that it is a readable directory of settings files`;
-    case "repos-dir-invalid-files":
-      return `repos-dir "${problem.reposDir}" has ${countNoun(invalidFileCount(problem.files), "invalid settings file", "invalid settings files")}:\n- ${problem.files.map(describeCentralFile).join("\n- ")}`;
-    case "discovery-request-failed":
-      return `cannot discover repositories for repos: "*": GET ${problem.path} failed: ${problem.status} ${problem.message}. ${problem.denied ? PAT_ADVICE : RERUN_ADVICE}`;
-    case "discovery-transport-failed":
-      return `cannot discover repositories for repos: "*": ${problem.reason}. ${RERUN_ADVICE}`;
-    case "discovery-response-not-a-list":
-      return `cannot discover repositories for repos: "*": GET ${problem.path} returned a JSON value that is not a list, so the response cannot be paginated. ${RERUN_ADVICE}`;
     case "age-recipient-invalid":
       return `not a valid age recipient: ${problem.reason}`;
   }
 }
 
-/** The `layer "<name>": <site>` prefix every layer refusal opens with. */
-function layerSite(problem: LayerProblem): string {
-  return `layer ${quote(problem.layer)}: ${problem.site}`;
-}
-
-function describeNothingToRemove(reason: "replace" | "swapped" | "unmatched"): string {
-  switch (reason) {
-    case "replace":
-      return "under _layering: replace the higher list already wins, so there is nothing to remove";
-    case "swapped":
-      return "its entry is copied whole (a new key, or a same-key swap under shallow), so its nested lists meet nothing to remove";
-    case "unmatched":
-      return "no lower layer declares an entry under its key";
+/** The ONE place a problem is worded, by the code's family; the layer group's doc states the value-free invariant. */
+export function describeProblem(problem: Problem): string {
+  if (codeStartsWith(problem, "input-")) {
+    return describeInputProblem(problem);
   }
+  if (codeStartsWith(problem, "layer-")) {
+    return describeLayerProblem(problem);
+  }
+  if (codeStartsWith(problem, "repos-") || codeStartsWith(problem, "discovery-")) {
+    return describeTargetProblem(problem);
+  }
+  return describeRunProblem(problem);
 }

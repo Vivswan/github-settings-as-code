@@ -14,6 +14,7 @@ import type { RepoRef } from "../discovery/targets.js";
 import type { GitHubClient } from "../github/api.js";
 import { type ApiError, classifyApiError } from "../github/api-error.js";
 import type { SettingsFile } from "../schema.js";
+import { listEntries } from "../sections/contract/declared.js";
 import { type EndpointDecl, expand } from "../sections/contract/endpoints.js";
 import { grantFor, type SectionPermission } from "../sections/contract/permissions.js";
 import { nameKey } from "../sections/labels/index.js";
@@ -27,14 +28,17 @@ export const ISSUE_TITLE = "[automated] settings-as-code: private settings repor
 /** Makes the lookup one indexed request; the search API is eventually consistent and separately throttled, so it is never used. */
 export const MARKER_LABEL = "settings-as-code-report";
 
+/** The marker label as the injection declares it and the ensure-create posts it. */
 export const MARKER_LABEL_CONFIG = {
   name: MARKER_LABEL,
   color: "0e2a47",
   description: "managed by settings-as-code private reporting - do not remove",
 } as const satisfies LabelConfig;
 
+/** The grant the issue channel needs on the target, for the PAT prose and the mock's permission gate. */
 export const ISSUE_REPORT_PERMISSION: SectionPermission = { repo: ["issues"] };
 
+/** The channel's routes, shaped like a section's so the mock routes and USED_PATHS pick them up. */
 export const ISSUE_REPORT_ENDPOINTS = {
   list: {
     route: "GET /repos/{owner}/{repo}/issues",
@@ -63,6 +67,7 @@ export type IssueReportMode = "always" | "on-failure";
 export interface LandedWrites {
   /** The marker label was created on the target this run (the ensure-create answered 2xx rather than 422). */
   labelCreated: boolean;
+
   /** The report issue this run created before a later step failed; a delivery that succeeds names its issue itself. */
   createdIssue: number | null;
 }
@@ -91,10 +96,7 @@ function deliveryWarning(error: ApiError, landed: LandedWrites): Failure {
   };
 }
 
-/**
- * A request with no HTTP answer: the client's line embeds the request path (the private slug), so nothing from it may
- * escape; the warning is the same one a client that throws instead of answering earns (deliverIssueReport).
- */
+/** A request with no HTTP answer: the client's line embeds the request path (the private slug), so nothing from it may escape; the same warning a client that throws instead of answering earns (deliverIssueReport). */
 const TRANSPORT_WARNING =
   "could not deliver the private report: the request failed before an HTTP response arrived. Re-run, or set private-report: none if it persists";
 
@@ -257,6 +259,126 @@ async function closeIfOpen(
   return { delivered: "updated", number: found.number, labelCreated: landed.labelCreated };
 }
 
+/** The marker label's ensure-create; a 422 means it already exists. */
+async function ensureMarkerLabel(
+  api: GitHubClient,
+  ref: { repo: RepoRef },
+  landed: LandedWrites,
+): Promise<{ created: boolean } | Failure> {
+  const label = await api.tryRequest("POST", expand(ISSUE_REPORT_ENDPOINTS.createLabel, ref), {
+    name: MARKER_LABEL_CONFIG.name,
+    color: MARKER_LABEL_CONFIG.color,
+    description: MARKER_LABEL_CONFIG.description,
+  });
+  if ("failed" in label) {
+    return transportWarning(landed);
+  }
+  if ("error" in label && label.error.status !== 422) {
+    return deliveryWarning(label.error, landed);
+  }
+  return { created: !("error" in label) };
+}
+
+/**
+ * The report issue to reuse: the label lookup, then the title scan for a human-stripped marker. The PATCH leaves
+ * labels alone (a human may have added their own) unless the title scan found the issue with the marker stripped:
+ * without reattaching it, every label-filtered lookup, the on-failure close included, misses forever.
+ */
+async function locateReportIssue(
+  api: GitHubClient,
+  ref: { repo: RepoRef },
+  landed: LandedWrites,
+): Promise<{ found: ReportIssue | null; relabel: string[] | undefined } | Failure> {
+  const listed = await findReportIssue(
+    api,
+    ref,
+    { state: "all", labels: MARKER_LABEL },
+    "the report-issue lookup",
+    landed,
+  );
+  if ("warning" in listed) {
+    return listed;
+  }
+  if (listed.found) {
+    return { found: listed.found, relabel: undefined };
+  }
+
+  const scanned = await fallbackScan(api, ref, landed);
+  if ("warning" in scanned) {
+    return scanned;
+  }
+  const found = scanned.found;
+  const relabel =
+    found && !found.labels.includes(MARKER_LABEL) ? [...found.labels, MARKER_LABEL] : undefined;
+  return { found, relabel };
+}
+
+/** A found issue updated in place: the body replaced, the state mirroring the run, the marker reattached when the scan found it stripped. */
+async function updateReportIssue(
+  api: GitHubClient,
+  ref: { repo: RepoRef },
+  found: ReportIssue,
+  patch: { body: string; state: "open" | "closed"; relabel: string[] | undefined },
+  landed: LandedWrites,
+): Promise<IssueDelivery> {
+  const { body, state, relabel } = patch;
+  const updated = await api.tryRequest(
+    "PATCH",
+    expand(ISSUE_REPORT_ENDPOINTS.update, ref, { issue_number: String(found.number) }),
+    relabel ? { body, state, labels: relabel } : { body, state },
+  );
+  if ("failed" in updated) {
+    return transportWarning(landed);
+  }
+  if ("error" in updated) {
+    return deliveryWarning(updated.error, landed);
+  }
+  return { delivered: "updated", number: found.number, labelCreated: landed.labelCreated };
+}
+
+/** A first delivery: the issue created with the marker, then closed when the run is healthy, since creation cannot set the state. */
+async function createReportIssue(
+  api: GitHubClient,
+  ref: { repo: RepoRef },
+  report: { body: string; state: "open" | "closed" },
+  landed: LandedWrites,
+): Promise<IssueDelivery> {
+  const created = await api.tryRequest("POST", expand(ISSUE_REPORT_ENDPOINTS.create, ref), {
+    title: ISSUE_TITLE,
+    body: report.body,
+    labels: [MARKER_LABEL],
+  });
+  if ("failed" in created) {
+    return transportWarning(landed);
+  }
+  if ("error" in created) {
+    return deliveryWarning(created.error, landed);
+  }
+
+  const issue = created.data as { number?: unknown } | null;
+  if (typeof issue?.number !== "number") {
+    return malformedWarning(
+      "the report issue was created but its response carried no issue number, so the delivery could not be confirmed",
+      landed,
+    );
+  }
+  landed.createdIssue = issue.number;
+  if (report.state === "closed") {
+    const closed = await api.tryRequest(
+      "PATCH",
+      expand(ISSUE_REPORT_ENDPOINTS.update, ref, { issue_number: String(issue.number) }),
+      { state: report.state },
+    );
+    if ("failed" in closed) {
+      return transportWarning(landed);
+    }
+    if ("error" in closed) {
+      return deliveryWarning(closed.error, landed);
+    }
+  }
+  return { delivered: "created", number: issue.number, labelCreated: landed.labelCreated };
+}
+
 /** `landed` is owned by the caller and records each write as it lands, so a failure of any kind can still report them. */
 async function deliver(
   api: GitHubClient,
@@ -270,92 +392,24 @@ async function deliver(
   if (mode === "on-failure" && !needsAttention) {
     return closeIfOpen(api, ref, body, landed);
   }
-  // A 422 means the marker label already exists.
-  const label = await api.tryRequest("POST", expand(ISSUE_REPORT_ENDPOINTS.createLabel, ref), {
-    name: MARKER_LABEL_CONFIG.name,
-    color: MARKER_LABEL_CONFIG.color,
-    description: MARKER_LABEL_CONFIG.description,
-  });
-  if ("failed" in label) {
-    return transportWarning(landed);
+
+  const label = await ensureMarkerLabel(api, ref, landed);
+  if ("warning" in label) {
+    return label;
   }
-  if ("error" in label && label.error.status !== 422) {
-    return deliveryWarning(label.error, landed);
+  landed.labelCreated = label.created;
+
+  const located = await locateReportIssue(api, ref, landed);
+  if ("warning" in located) {
+    return located;
   }
-  landed.labelCreated = !("error" in label);
-  const listed = await findReportIssue(
-    api,
-    ref,
-    { state: "all", labels: MARKER_LABEL },
-    "the report-issue lookup",
-    landed,
-  );
-  if ("warning" in listed) {
-    return listed;
+
+  const state: "open" | "closed" = needsAttention ? "open" : "closed";
+  if (located.found) {
+    const patch = { body, state, relabel: located.relabel };
+    return updateReportIssue(api, ref, located.found, patch, landed);
   }
-  let found = listed.found;
-  // The PATCH leaves labels alone (a human may have added their own) unless the title scan found the issue with the
-  // marker stripped: without reattaching it, every label-filtered lookup, the on-failure close included, misses forever.
-  let relabel: string[] | undefined;
-  if (!found) {
-    const scanned = await fallbackScan(api, ref, landed);
-    if ("warning" in scanned) {
-      return scanned;
-    }
-    found = scanned.found;
-    if (found && !found.labels.includes(MARKER_LABEL)) {
-      relabel = [...found.labels, MARKER_LABEL];
-    }
-  }
-  const state = needsAttention ? "open" : "closed";
-  if (found) {
-    const updated = await api.tryRequest(
-      "PATCH",
-      expand(ISSUE_REPORT_ENDPOINTS.update, ref, { issue_number: String(found.number) }),
-      relabel ? { body, state, labels: relabel } : { body, state },
-    );
-    if ("failed" in updated) {
-      return transportWarning(landed);
-    }
-    if ("error" in updated) {
-      return deliveryWarning(updated.error, landed);
-    }
-    return { delivered: "updated", number: found.number, labelCreated: landed.labelCreated };
-  }
-  const created = await api.tryRequest("POST", expand(ISSUE_REPORT_ENDPOINTS.create, ref), {
-    title: ISSUE_TITLE,
-    body,
-    labels: [MARKER_LABEL],
-  });
-  if ("failed" in created) {
-    return transportWarning(landed);
-  }
-  if ("error" in created) {
-    return deliveryWarning(created.error, landed);
-  }
-  const issue = created.data as { number?: unknown } | null;
-  if (typeof issue?.number !== "number") {
-    return malformedWarning(
-      "the report issue was created but its response carried no issue number, so the delivery could not be confirmed",
-      landed,
-    );
-  }
-  landed.createdIssue = issue.number;
-  if (state === "closed") {
-    // Creation cannot set the state, so a healthy first run closes right after.
-    const closed = await api.tryRequest(
-      "PATCH",
-      expand(ISSUE_REPORT_ENDPOINTS.update, ref, { issue_number: String(issue.number) }),
-      { state },
-    );
-    if ("failed" in closed) {
-      return transportWarning(landed);
-    }
-    if ("error" in closed) {
-      return deliveryWarning(closed.error, landed);
-    }
-  }
-  return { delivered: "created", number: issue.number, labelCreated: landed.labelCreated };
+  return createReportIssue(api, ref, { body, state }, landed);
 }
 
 /**
@@ -390,15 +444,11 @@ export function injectMarkerLabel(settings: SettingsFile): {
 } {
   // Unwrapped here and rebuilt in the SAME form below, so the injection never rewrites the operator's chosen shape or policy.
   const declaration = settings.labels;
-  const wrapped = !Array.isArray(declaration);
-  const labels = wrapped
-    ? declaration !== undefined && Array.isArray(declaration?.entries)
-      ? declaration.entries
-      : null
-    : declaration;
-  if (labels === null || !Array.isArray(labels)) {
+  if (declaration === undefined) {
     return { settings, outcome: "unchanged" };
   }
+  const wrapped = !Array.isArray(declaration);
+  const labels = listEntries(declaration);
   const rebuild = (entries: LabelConfig[]): SettingsFile["labels"] =>
     wrapped ? { ...(declaration as UndeclaredPolicyList<LabelConfig>), entries } : entries;
   const marker = nameKey(MARKER_LABEL);

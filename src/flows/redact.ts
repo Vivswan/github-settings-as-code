@@ -29,21 +29,17 @@ export function privatePlaceholder(n: number): string {
   return `private repository #${n}`;
 }
 
-/**
- * For a redacted target whose visibility could not be PROVEN private or internal, so the report was withheld (delivery
- * fails closed the opposite way from redaction). Shared verbatim by both run flows: the cause and the fix are slug-free.
- */
+/** For a redacted target whose visibility could not be PROVEN private or internal, so the report was withheld (delivery fails closed the opposite way from redaction); shared verbatim by both run flows, since the cause and the fix are slug-free. */
 export const WITHHELD_REPORT_NOTICE =
   "visibility could not be verified (the repository-metadata probe failed or was inconclusive " +
   "- typically the token cannot read the target repository), so the private report was " +
   "withheld rather than risk delivering it to a public repository. Grant the token metadata " +
   "read access and re-run; a transient API failure also leaves visibility unverified";
 
-/** One target's end state: safe closed values plus the detail the public view projects from. */
+/** One target's end state: safe closed values plus the detail the public view projects from; `display` is the public label, the slug or its "private repository #N" placeholder. */
 export interface TargetOutcome {
   source: Target["source"];
   result: RunOutcome;
-  /** The public label: the slug, or its "private repository #N" placeholder. */
   display: string;
   detail: TargetDetail | Private<RedactedDetail>;
 }
@@ -62,16 +58,15 @@ type RedactedOutcome = {
 function redactOutcomes(outcomes: ClosedOutcome[]): RedactedOutcome[] {
   return outcomes.map((o) => {
     const withCode =
-      o.httpStatus !== undefined ? `${REDACTED_DETAIL}, HTTP ${o.httpStatus}` : REDACTED_DETAIL;
+      o.httpStatus === undefined ? REDACTED_DETAIL : `${REDACTED_DETAIL}, HTTP ${o.httpStatus}`;
     return { key: o.key, status: o.status, detail: [withCode] };
   });
 }
 
-/** The public rendering of one target's detail: the section rows, the note under its heading, and the file it wrote. */
+/** The public rendering of one target's detail: the section rows, the note under its heading, and the file a snapshot target wrote, as the public view may show it. */
 export interface PublicDetail {
   outcomes: RedactedOutcome[];
   note?: string;
-  /** Where a snapshot target's file went, as the public view may show it. */
   file?: string;
 }
 
@@ -125,7 +120,7 @@ export function emitRedactedResult(
   const keysWith = (status: ClosedOutcome["status"]): string => {
     const keys = outcomes
       .filter((o) => o.status === status)
-      .map((o) => (o.httpStatus !== undefined ? `${o.key} (${o.httpStatus})` : o.key));
+      .map((o) => (o.httpStatus === undefined ? o.key : `${o.key} (${o.httpStatus})`));
     return keys.length > 0 ? ` - ${keys.join(", ")}` : "";
   };
   switch (result) {
@@ -158,7 +153,9 @@ function unreachable(result: never): never {
 
 export interface RedactionPlan {
   isRedacted(slug: string): boolean;
+
   display(slug: string): string;
+
   /** Every slug that must be masked: redacted targets plus discovery-filtered privates. */
   maskedSlugs: string[];
 }
@@ -239,10 +236,13 @@ export function capturingIo(io: Io): { io: Io; drain(): CollectedLine[] } {
 export interface TargetChannel {
   /** The public label: the slug, or its placeholder. */
   display: string;
+
   /** Sink for the target's own lines, attributed to it (prefixed in the clear). */
   io: Io;
+
   /** Sink for lines that already name their source (validation warnings): unprefixed, or the same capture. */
   unprefixed: Io;
+
   /** Seals or opens the target's end state: everything in its detail but the slug, which the channel holds. */
   close(end: Omit<TargetDetail, "slug">): TargetOutcome["detail"];
 }

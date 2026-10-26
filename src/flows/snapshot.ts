@@ -44,21 +44,24 @@ import { canonicalPath, landingNames, renameTarget, writeReplacing } from "./set
 import { openSingleRepoChannel } from "./single.js";
 import { snapshotTakenLine, writeSnapshotDirSummary, writeSummary } from "./summary.js";
 
-/**
- * The schema the written file's editor hint points at: the schema of this
- * release line, spelled as the README's quick start spells it. The marker
- * lets a major release rewrite the tag here (release-please-config.json lists
- * this file); test/docs/readme.test.ts pins it to the README's hint.
- */
+/** The schema the written file's editor hint points at: the schema of this release line, spelled as the README's quick start spells it. The release-please block markers let a major release rewrite the tag (release-please-config.json lists this file), and test/docs/readme.test.ts pins it to the README's hint. */
+
+// x-release-please-start-major
 export const SNAPSHOT_SCHEMA_URL =
-  "https://raw.githubusercontent.com/Vivswan/github-settings-as-code/v2/lib/settings.schema.json"; // x-release-please-major
+  "https://raw.githubusercontent.com/Vivswan/github-settings-as-code/v2/lib/settings.schema.json";
+
+// x-release-please-end
 
 interface SnapshotConfigBase {
+  /** Whether a denied section skips the document (warn) or fails the run. */
   onMissingPermission: "fail" | "warn";
+
   /** The allowlist; its required set is unused, since a snapshot never writes. */
   sections: SectionSelection;
+
   /** Whether to hide private/internal targets from the public view. */
   privateRepos: PrivateReposPolicy;
+
   /** The repository the run acts for; a target equal to it is never redacted. */
   selfSlug: string;
 }
@@ -138,14 +141,14 @@ function destinationCollision(cfg: SnapshotConfig): Result<void, Problem> {
  * through the target's channel. The engine has already annotated every
  * skipped and failed section; the unsupported ones get one notice here, since
  * they are the sections the file will not carry. The written path names the
- * slug, so it travels in the result for the channel to seal.
+ * slug, so it travels in the result for the channel to seal. `pathInput` is
+ * the input the path came from, named when the write fails.
  */
 async function snapshotTarget(ctx: {
   api: GitHubClient;
   repo: RepoRef;
   cfg: SnapshotConfigBase;
   path: string;
-  /** The input the path came from, named when the write fails. */
   pathInput: "snapshot-file" | "snapshot-dir";
   channel: TargetChannel;
 }): Promise<TargetResult> {

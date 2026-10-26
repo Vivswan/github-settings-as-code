@@ -14,7 +14,7 @@ import {
   endpointPath,
   matchesTemplate,
 } from "../sections/contract/endpoints.js";
-import { thrown } from "../sections/contract/errors.js";
+import { type SectionFailure, thrown } from "../sections/contract/errors.js";
 import type { SectionSnapshot } from "../sections/contract/module.js";
 import {
   concealedAbsenceNote,
@@ -32,11 +32,11 @@ import { SectionSelection } from "./section-selection.js";
 export interface SnapshotRunOptions {
   /** The target repository, parsed at the caller's validated boundary. */
   repo: RepoRef;
-  /**
-   * The allowlist. Its required set goes unread: required-sections governs what must apply, and
-   * a snapshot never writes, so a denial classifies on onMissingPermission alone.
-   */
+
+  /** The allowlist; its required set goes unread, since required-sections governs what must apply and a snapshot never writes, so a denial classifies on onMissingPermission alone. */
   sections: SectionSelection;
+
+  /** Whether a denied section skips the run's document (warn) or fails it. */
   onMissingPermission: OnMissingPermission;
 }
 
@@ -68,6 +68,11 @@ type _UnrankedSnapshotResult = MustBeNever<Exclude<SnapshotResult["result"], Run
 
 /** A snapshot result that carries a document. */
 export type RenderableSnapshot = Extract<SnapshotResult, { settings: ValidatedSettings }>;
+
+/** One section's snapshot: its row, and the document's value under its key when it declared one. */
+type SectionRead =
+  | { readonly outcome: SectionSnapshotOutcome; readonly declared: false }
+  | { readonly outcome: SectionSnapshotOutcome; readonly declared: true; readonly value: unknown };
 
 /** What a section without live state says for itself in the outcome and the file header. */
 const NOTHING_TO_DECLARE = "nothing exists on the repository, so the section is omitted";
@@ -112,6 +117,121 @@ function watchingNotFound(
   };
 }
 
+/** A section whose read failed: a denial skips or fails it by the policy, anything else fails it with the section named. */
+function failedSnapshot(
+  io: Io,
+  key: SectionKey,
+  failure: SectionFailure,
+  policy: OnMissingPermission,
+): SectionSnapshotOutcome {
+  // A denial ends the section from its primary read under both policies and from a sub-read (readOrNote)
+  // under fail, so this branch classifies every denial the run sees.
+  if (failure.kind === "permission-denied") {
+    if (policy === "warn") {
+      io.annotate("warning", `${key}: skipped - ${failure.detail}`);
+      return { key, status: "skipped", detail: [failure.detail] };
+    }
+    io.annotate("error", `${key}: not snapshotted - ${failure.detail}`);
+    return { key, status: "failed", detail: [failure.detail] };
+  }
+
+  const prefixed = failure.message.startsWith(`${key}:`)
+    ? failure.message
+    : `${key}: ${failure.message}`;
+  io.annotate("error", prefixed);
+  return { key, status: "failed", detail: [prefixed] };
+}
+
+/**
+ * A section with nothing live. Chosen at the engine level so every absent-posture section behaves alike: the 404
+ * keeps its "nothing exists" reading, and the note names the denial it could also be. Keyed on an observed 404, so
+ * an empty 200 listing earns no note.
+ */
+function absentSnapshot(
+  io: Io,
+  section: (typeof SECTIONS)[number],
+  absentRead: EndpointDecl | null,
+  notFound: boolean,
+  notes: readonly string[],
+): SectionSnapshotOutcome {
+  const detail = [...notes];
+  const concealed =
+    absentRead !== null && notFound ? concealedAbsenceNote(section, absentRead) : null;
+  if (concealed !== null) {
+    io.annotate("notice", concealed);
+    detail.push(concealed);
+  }
+  detail.push(NOTHING_TO_DECLARE);
+  return { key: section.key, status: "snapshot", detail };
+}
+
+/** One section read back: unsupported without a snapshot handler, else its row and the value its own schema accepted. */
+async function snapshotSection(
+  api: GitHubClient,
+  opts: SnapshotRunOptions,
+  io: Io,
+  section: (typeof SECTIONS)[number],
+): Promise<SectionRead> {
+  if (section.snapshot === undefined) {
+    const detail = [snapshotUnsupportedNote(section)];
+    return { outcome: { key: section.key, status: "unsupported", detail }, declared: false };
+  }
+
+  const absentRead = gatedAbsentRead(section);
+  const seen = { notFound: false };
+  // The catch is for what still throws (the client's own transport error on an unmarked request, a BUG invariant).
+  const read = await section
+    .snapshot(
+      snapshotContext(
+        section,
+        watchingNotFound(api, absentRead, seen),
+        opts.repo,
+        opts.onMissingPermission,
+      ),
+    )
+    .catch((error: unknown) => err(thrown(error)));
+  if (read.isErr()) {
+    const outcome = failedSnapshot(io, section.key, read.error, opts.onMissingPermission);
+    return { outcome, declared: false };
+  }
+
+  const snapshot: SectionSnapshot = read.value;
+  // The section's notes in code-point order: a section notes its entries in the order GitHub listed them, and the
+  // file's header and the annotations must read the same on every run over the same repository.
+  const notes = [...snapshot.notes].sort(compareByCodePoint);
+  for (const note of notes) {
+    io.annotate("notice", underKey(section.key, note));
+  }
+
+  if (snapshot.value === undefined) {
+    const outcome = absentSnapshot(io, section, absentRead, seen.notFound, notes);
+    return { outcome, declared: false };
+  }
+
+  // Validated per section so the rejection names its producer: a value the section's own
+  // schema refuses is a bug in that section, never a document to hand out.
+  const verdict = validateSettingsDoc(
+    { [section.key]: snapshot.value },
+    `the ${section.key} snapshot of ${opts.repo.slug}`,
+    SectionSelection.ALL,
+    io,
+  );
+  if (verdict.isErr()) {
+    const detail = `BUG: ${section.key} produced a snapshot its own schema rejects - ${describeProblem(verdict.error)}`;
+    io.annotate("error", detail);
+    return {
+      outcome: { key: section.key, status: "failed", detail: [...notes, detail] },
+      declared: false,
+    };
+  }
+
+  return {
+    outcome: { key: section.key, status: "snapshot", detail: [...notes] },
+    declared: true,
+    value: verdict.value[section.key],
+  };
+}
+
 /** Read one repository's supported sections back into a validated settings document. */
 export async function snapshotRepository(
   api: GitHubClient,
@@ -120,103 +240,22 @@ export async function snapshotRepository(
 ): Promise<SnapshotResult> {
   const outcomes: SectionSnapshotOutcome[] = [];
   const document: Record<string, unknown> = {};
-  let partial = false;
-  let failed = false;
-
   for (const section of SECTIONS) {
     if (opts.sections.only.size > 0 && !opts.sections.only.has(section.key)) {
       continue;
     }
-    if (section.snapshot === undefined) {
-      outcomes.push({
-        key: section.key,
-        status: "unsupported",
-        detail: [snapshotUnsupportedNote(section)],
-      });
-      continue;
+
+    const read = await snapshotSection(api, opts, io, section);
+    outcomes.push(read.outcome);
+    if (read.declared) {
+      document[section.key] = read.value;
     }
-    const absentRead = gatedAbsentRead(section);
-    const seen = { notFound: false };
-    // The catch is for what still throws (the client's own transport error on an unmarked request, a BUG invariant).
-    const read = await section
-      .snapshot(
-        snapshotContext(
-          section,
-          watchingNotFound(api, absentRead, seen),
-          opts.repo,
-          opts.onMissingPermission,
-        ),
-      )
-      .catch((error: unknown) => err(thrown(error)));
-    if (read.isErr()) {
-      const failure = read.error;
-      // A denial ends the section from its primary read under both policies and from a sub-read (readOrNote)
-      // under fail, so this branch classifies every denial the run sees.
-      if (failure.kind === "permission-denied") {
-        const status = opts.onMissingPermission === "warn" ? "skipped" : "failed";
-        if (status === "skipped") {
-          io.annotate("warning", `${section.key}: skipped - ${failure.detail}`);
-          partial = true;
-        } else {
-          io.annotate("error", `${section.key}: not snapshotted - ${failure.detail}`);
-          failed = true;
-        }
-        outcomes.push({ key: section.key, status, detail: [failure.detail] });
-        continue;
-      }
-      const prefixed = failure.message.startsWith(`${section.key}:`)
-        ? failure.message
-        : `${section.key}: ${failure.message}`;
-      io.annotate("error", prefixed);
-      outcomes.push({ key: section.key, status: "failed", detail: [prefixed] });
-      failed = true;
-      continue;
-    }
-    const snapshot: SectionSnapshot = read.value;
-    // The section's notes in code-point order: a section notes its entries in the order GitHub listed them, and the
-    // file's header and the annotations must read the same on every run over the same repository.
-    const notes = [...snapshot.notes].sort(compareByCodePoint);
-    for (const note of notes) {
-      io.annotate("notice", underKey(section.key, note));
-    }
-    if (snapshot.value === undefined) {
-      // Chosen at the engine level so every absent-posture section behaves alike: the 404 keeps
-      // its "nothing exists" reading, and the note names the denial it could also be. Keyed on an
-      // observed 404, so an empty 200 listing earns no note.
-      const concealed =
-        absentRead !== null && seen.notFound ? concealedAbsenceNote(section, absentRead) : null;
-      if (concealed !== null) {
-        io.annotate("notice", concealed);
-      }
-      outcomes.push({
-        key: section.key,
-        status: "snapshot",
-        detail: [...notes, ...(concealed === null ? [] : [concealed]), NOTHING_TO_DECLARE],
-      });
-      continue;
-    }
-    // Validated per section so the rejection names its producer: a value the section's own
-    // schema refuses is a bug in that section, never a document to hand out.
-    const verdict = validateSettingsDoc(
-      { [section.key]: snapshot.value },
-      `the ${section.key} snapshot of ${opts.repo.slug}`,
-      SectionSelection.ALL,
-      io,
-    );
-    if (verdict.isErr()) {
-      const detail = `BUG: ${section.key} produced a snapshot its own schema rejects - ${describeProblem(verdict.error)}`;
-      io.annotate("error", detail);
-      outcomes.push({ key: section.key, status: "failed", detail: [...notes, detail] });
-      failed = true;
-      continue;
-    }
-    document[section.key] = verdict.value[section.key];
-    outcomes.push({ key: section.key, status: "snapshot", detail: [...notes] });
   }
 
-  if (failed) {
+  if (outcomes.some((outcome) => outcome.status === "failed")) {
     return { repo: opts.repo.slug, result: "failed", outcomes };
   }
+
   // The brand's one mint, over the already-parsed fragments in the canonical order (so the document a library caller
   // reads is ordered as the file is): every section validated alone above, so the whole cannot fail.
   const verdict = validateSettingsDoc(
@@ -230,6 +269,8 @@ export async function snapshotRepository(
       `BUG: the assembled snapshot of ${opts.repo.slug} failed validation after every section validated on its own: ${describeProblem(verdict.error)}`,
     );
   }
+
+  const partial = outcomes.some((outcome) => outcome.status === "skipped");
   return {
     repo: opts.repo.slug,
     result: partial ? "partial" : "snapshot",
