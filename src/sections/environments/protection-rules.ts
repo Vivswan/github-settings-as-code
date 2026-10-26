@@ -11,20 +11,16 @@ import { type EnvironmentsRestContext, unreconcilable } from "./endpoints.js";
 import type { NestedPlan } from "./nested.js";
 import type { DeploymentProtectionRuleConfig } from "./schema.js";
 
-// "keep" for a security reason: Apps can enable themselves as deployment gates, and silently
-// disabling a gate the file never named would weaken a protection nobody asked to weaken.
+/** "keep" for a security reason: Apps can enable themselves as deployment gates, and silently disabling a gate the file never named would weaken a protection nobody asked to weaken. */
 export const PROTECTION_RULES_DEFAULT_POLICY: UndeclaredPolicy = "keep";
 
-/**
- * The endpoint documents enabled rules only, so presence is the enablement signal; `enabled` is
- * read as a belt over that, since a rule the API ever reported disabled must not satisfy a declared
- * gate. An enabled rule without an App slug fails loudly: it has no identity to reconcile by.
- */
+// Presence is the enablement signal (the endpoint documents enabled rules only); `enabled` is read as a belt over it, since a rule the API ever reported disabled must not satisfy a declared gate.
 const LiveProtectionRule = z.looseObject({
   id: z.number().optional(),
   enabled: z.boolean().optional(),
   app: z.looseObject({ id: z.number().optional(), slug: z.string().optional() }).optional(),
 });
+
 type LiveProtectionRule = z.infer<typeof LiveProtectionRule>;
 
 const RULE = { list: "deployment protection rule", entry: "rule" };
@@ -45,11 +41,7 @@ function liveRuleId(rule: LiveProtectionRule, envName: string): Result<string, S
   return ok(String(rule.id));
 }
 
-/**
- * A single call(), NOT listAllEnveloped: this endpoint documents no page/per_page parameters, so
- * the page loop would append a query GitHub never specified. Both envelope keys are optional in the
- * spec, so an ABSENT list reads as empty, while a PRESENT off-shape value fails loudly at the port.
- */
+// Read by a single call(), not listAllEnveloped: the endpoint documents no page parameters, so a page loop would append a query GitHub never specified.
 const LiveProtectionRules = z
   .looseObject({ custom_deployment_protection_rules: z.array(LiveProtectionRule).optional() })
   .nullable();

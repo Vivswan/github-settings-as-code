@@ -22,21 +22,59 @@ import {
   ROUTED_KEYS,
   type RoutedProtection,
 } from "./graphql-vocabulary.js";
-import { type BranchConfig, type BranchProtectionConfig, parseBypassActor } from "./schema.js";
+import {
+  type BranchConfig,
+  type BranchProtectionConfig,
+  type BypassActor,
+  parseBypassActor,
+} from "./schema.js";
 
 /** The node id a lookup selects; null when the token cannot see the object. */
 const NodeId = z.looseObject({ id: z.string() }).nullable().optional();
 
+/** REPO_LOOKUP's answer; the actor lookups select the same field, which adoptRepoId reads off them. */
 const RepositoryLookup = z.looseObject({ repository: NodeId });
 
+/** ACTOR_USER's answer; the repository selection beside the user is what routes the read. */
 const UserLookup = z.looseObject({ repository: NodeId, user: NodeId });
 
+/** ACTOR_TEAM's answer; the team hangs under its organization, each null when invisible. */
 const TeamLookup = z.looseObject({
   repository: NodeId,
   organization: z.looseObject({ team: NodeId }).nullable().optional(),
 });
 
+/** The REST App body; only node_id is read, which an old App may still carry in the legacy format (endpoints.ts appLookup). */
 const AppLookup = z.looseObject({ node_id: z.string().optional() });
+
+/** The two protection mappings a wildcard rule carries as an on/off flag plus the named sub-keys' twins. */
+const STRUCTURED_PAIRS: Readonly<Record<string, StructuredPair>> = {
+  required_status_checks: { flag: "requiresStatusChecks", twins: GRAPHQL_STATUS_CHECK_TWINS },
+  required_pull_request_reviews: { flag: "requiresApprovingReviews", twins: GRAPHQL_REVIEW_TWINS },
+};
+
+interface StructuredPair {
+  flag: string;
+  twins: Readonly<Record<string, string>>;
+}
+
+function translateStructuredPair(
+  input: Record<string, unknown>,
+  pair: StructuredPair,
+  value: unknown,
+): void {
+  if (value === null) {
+    input[pair.flag] = false;
+    return;
+  }
+  input[pair.flag] = true;
+  const mapping = value as Record<string, unknown>;
+  for (const [classic, twin] of Object.entries(pair.twins)) {
+    if (classic in mapping) {
+      input[twin] = mapping[classic];
+    }
+  }
+}
 
 /** Shape validation already restricted a wildcard entry's keys, so an unknown key here is a bug. */
 function translateWildcardProtection(protection: BranchProtectionConfig): Record<string, unknown> {
@@ -50,32 +88,9 @@ function translateWildcardProtection(protection: BranchProtectionConfig): Record
       input[booleanTwin] = value;
       continue;
     }
-    if (key === "required_status_checks") {
-      if (value === null) {
-        input.requiresStatusChecks = false;
-      } else {
-        input.requiresStatusChecks = true;
-        const checks = value as Record<string, unknown>;
-        for (const [classic, twin] of Object.entries(GRAPHQL_STATUS_CHECK_TWINS)) {
-          if (classic in checks) {
-            input[twin] = checks[classic];
-          }
-        }
-      }
-      continue;
-    }
-    if (key === "required_pull_request_reviews") {
-      if (value === null) {
-        input.requiresApprovingReviews = false;
-      } else {
-        input.requiresApprovingReviews = true;
-        const reviews = value as Record<string, unknown>;
-        for (const [classic, twin] of Object.entries(GRAPHQL_REVIEW_TWINS)) {
-          if (classic in reviews) {
-            input[twin] = reviews[classic];
-          }
-        }
-      }
+    const pair = STRUCTURED_PAIRS[key];
+    if (pair !== undefined) {
+      translateStructuredPair(input, pair, value);
       continue;
     }
     throw new Error(`BUG: wildcard protection key "${key}" escaped shape validation`);
@@ -162,75 +177,191 @@ function verifyDeploymentReadback(
   return ok(undefined);
 }
 
+/** The force_push_bypassers line when the declared actors and the live rule's allowances differ. */
+function bypassersDrift(
+  prefix: string,
+  declared: readonly string[],
+  node: RuleNode | undefined,
+): string[] {
+  const live = node ? [...bypassActorStrings(node)].sort() : [];
+  if (sameNamesFold(declared, live)) {
+    return [];
+  }
+  return [
+    `${prefix}.force_push_bypassers: the settings file declares [${[...declared].sort().join(", ")}] but the live rule allows [${live.join(
+      ", ",
+    )}]; apply will replace the allowance list`,
+  ];
+}
+
+/** The required_deployments line when the declaration and the live rule differ. */
+function deploymentsDrift(
+  prefix: string,
+  declared: NonNullable<BranchProtectionConfig["required_deployments"]> | null,
+  node: RuleNode | undefined,
+): string[] {
+  const liveOn = node?.requiresDeployments === true;
+  const liveEnvs = (
+    Array.isArray(node?.requiredDeploymentEnvironments)
+      ? (node.requiredDeploymentEnvironments as unknown[]).map(String)
+      : []
+  ).sort();
+  if (declared === null) {
+    if (!liveOn) {
+      return [];
+    }
+    return [
+      `${prefix}.required_deployments: declared null (not required) but the live rule requires deployments to [${liveEnvs.join(
+        ", ",
+      )}]; apply will turn the requirement off`,
+    ];
+  }
+  if (liveOn && sameNamesFold(declared.environments, liveEnvs)) {
+    return [];
+  }
+  return [
+    `${prefix}.required_deployments: the settings file requires deployments to [${[
+      ...declared.environments,
+    ]
+      .sort()
+      .join(
+        ", ",
+      )}] but the live rule ${liveOn ? `requires [${liveEnvs.join(", ")}]` : "does not require deployments"}; apply will set the declared list`,
+  ];
+}
+
 function routedKeyDrift(
   prefix: string,
   protection: BranchProtectionConfig,
   rules: LiveRules,
   pattern: string,
 ): string[] {
-  const drift: string[] = [];
   if (rules === null) {
     // An unreadable view can never read as clean, so the declared value is written regardless.
-    for (const key of ROUTED_KEYS) {
-      if (protection[key] !== undefined) {
-        drift.push(
-          `${prefix}.${key}: the live rule cannot be read (the rules query answered not found); apply will set the declared value`,
-        );
-      }
-    }
-    return drift;
+    return ROUTED_KEYS.filter((key) => protection[key] !== undefined).map(
+      (key) =>
+        `${prefix}.${key}: the live rule cannot be read (the rules query answered not found); apply will set the declared value`,
+    );
   }
   const node = rules.get(pattern);
-  const declaredActors = protection.force_push_bypassers;
-  if (declaredActors !== undefined) {
-    const live = node ? [...bypassActorStrings(node)].sort() : [];
-    if (!sameNamesFold(declaredActors, live)) {
-      drift.push(
-        `${prefix}.force_push_bypassers: the settings file declares [${[...declaredActors].sort().join(", ")}] but the live rule allows [${live.join(
-          ", ",
-        )}]; apply will replace the allowance list`,
-      );
-    }
+  const drift: string[] = [];
+  if (protection.force_push_bypassers !== undefined) {
+    drift.push(...bypassersDrift(prefix, protection.force_push_bypassers, node));
   }
-  const declaredDeployments = protection.required_deployments;
-  if (declaredDeployments !== undefined) {
-    const liveOn = node?.requiresDeployments === true;
-    const liveEnvs = (
-      Array.isArray(node?.requiredDeploymentEnvironments)
-        ? (node.requiredDeploymentEnvironments as unknown[]).map(String)
-        : []
-    ).sort();
-    if (declaredDeployments === null) {
-      if (liveOn) {
-        drift.push(
-          `${prefix}.required_deployments: declared null (not required) but the live rule requires deployments to [${liveEnvs.join(
-            ", ",
-          )}]; apply will turn the requirement off`,
-        );
-      }
-    } else if (!liveOn || !sameNamesFold(declaredDeployments.environments, liveEnvs)) {
-      drift.push(
-        `${prefix}.required_deployments: the settings file requires deployments to [${[
-          ...declaredDeployments.environments,
-        ]
-          .sort()
-          .join(
-            ", ",
-          )}] but the live rule ${liveOn ? `requires [${liveEnvs.join(", ")}]` : "does not require deployments"}; apply will set the declared list`,
-      );
-    }
+  if (protection.required_deployments !== undefined) {
+    drift.push(...deploymentsDrift(prefix, protection.required_deployments, node));
   }
   return drift;
 }
 
+function adoptRepoId(graphqlRun: GraphqlRun, data: z.infer<typeof RepositoryLookup>): void {
+  const id = data.repository?.id;
+  if (graphqlRun.repoId === null && id !== undefined && id.length > 0) {
+    graphqlRun.repoId = id;
+  }
+}
+
+/** The user's node id, undefined when the token cannot see the user; the repository id rides along. */
+function lookupUserId(
+  ctx: BranchesContext,
+  exec: ExecTools,
+  graphqlRun: GraphqlRun,
+  login: string,
+  raw: string,
+): Read<string | undefined> {
+  return ctx.read.actorUser
+    .call(
+      exec,
+      UserLookup,
+      { ...repoVariables(ctx), login },
+      { describe: `resolving force-push bypass user "${raw}"` },
+    )
+    .map((data) => {
+      adoptRepoId(graphqlRun, data);
+      return data.user?.id;
+    });
+}
+
+/** The team's node id; a missing team under the organization is refused by name. */
+function lookupTeamId(
+  ctx: BranchesContext,
+  exec: ExecTools,
+  graphqlRun: GraphqlRun,
+  actor: { org: string; team: string },
+  raw: string,
+): Read<string> {
+  return ctx.read.actorTeam
+    .call(
+      exec,
+      TeamLookup,
+      { ...repoVariables(ctx), org: actor.org, team: actor.team },
+      { describe: `resolving force-push bypass team "${raw}"` },
+    )
+    .andThen((data) => {
+      adoptRepoId(graphqlRun, data);
+      const team = data.organization?.team;
+      if (team === null || team === undefined) {
+        return err(
+          sectionFailure(
+            "refused",
+            `branches: force_push_bypassers actor "${raw}": the organization "${actor.org}" has no team with slug "${actor.team}" (or the token cannot see it); check the actor spelling in the settings file`,
+          ),
+        );
+      }
+      return ok(team.id);
+    });
+}
+
+/** The App's node id from the public REST lookup; no App with the slug is refused by name. */
+function lookupAppId(
+  ctx: BranchesContext,
+  exec: ExecTools,
+  slug: string,
+  raw: string,
+): Read<string | undefined> {
+  return ctx.read.appLookup
+    .tryCall(exec, AppLookup, {
+      params: { app_slug: slug },
+      describe: `resolving force-push bypass App "${raw}"`,
+    })
+    .andThen((result) => {
+      if ("error" in result) {
+        return err(
+          sectionFailure(
+            "refused",
+            `branches: force_push_bypassers actor "${raw}": no GitHub App with slug "${slug}" exists; check the actor spelling in the settings file`,
+          ),
+        );
+      }
+      return ok(result.data.node_id);
+    });
+}
+
 /**
- * Cached per run under the case-folded string: GitHub canonicalizes actor names. A user or team read
- * also selects the repository's node id, which a later rule CREATE reuses instead of a dedicated lookup.
+ * A user or team read also selects the repository's node id, which a later rule CREATE reuses
+ * instead of a dedicated lookup.
  *
  * user  -> GraphQL (REST /users can still carry a legacy node_id; see ACTOR_USER)
  * team  -> GraphQL
  * app   -> the public REST lookup (legacy-id caveat on appLookup in endpoints.ts); no repository id
  */
+function lookupActorId(
+  ctx: BranchesContext,
+  exec: ExecTools,
+  graphqlRun: GraphqlRun,
+  actor: BypassActor,
+  raw: string,
+): Read<string | undefined> {
+  if (actor.kind === "user") {
+    return lookupUserId(ctx, exec, graphqlRun, actor.login, raw);
+  }
+  if (actor.kind === "team") {
+    return lookupTeamId(ctx, exec, graphqlRun, actor, raw);
+  }
+  return lookupAppId(ctx, exec, actor.slug, raw);
+}
+
+/** Cached per run under the case-folded string: GitHub canonicalizes actor names. */
 async function resolveActorId(
   ctx: BranchesContext,
   exec: ExecTools,
@@ -246,50 +377,7 @@ async function resolveActorId(
   if (actor === null) {
     throw new Error(`BUG: force_push_bypassers actor "${raw}" escaped shape validation`);
   }
-  return safeTry(async function* () {
-    let id: string | undefined;
-    if (actor.kind === "user") {
-      const data = yield* ctx.read.actorUser.call(
-        exec,
-        UserLookup,
-        { ...repoVariables(ctx), login: actor.login },
-        { describe: `resolving force-push bypass user "${raw}"` },
-      );
-      adoptRepoId(graphqlRun, data);
-      id = data.user?.id;
-    } else if (actor.kind === "team") {
-      const data = yield* ctx.read.actorTeam.call(
-        exec,
-        TeamLookup,
-        { ...repoVariables(ctx), org: actor.org, team: actor.team },
-        { describe: `resolving force-push bypass team "${raw}"` },
-      );
-      adoptRepoId(graphqlRun, data);
-      const team = data.organization?.team;
-      if (team === null || team === undefined) {
-        return err(
-          sectionFailure(
-            "refused",
-            `branches: force_push_bypassers actor "${raw}": the organization "${actor.org}" has no team with slug "${actor.team}" (or the token cannot see it); check the actor spelling in the settings file`,
-          ),
-        );
-      }
-      id = team.id;
-    } else {
-      const result = yield* ctx.read.appLookup.tryCall(exec, AppLookup, {
-        params: { app_slug: actor.slug },
-        describe: `resolving force-push bypass App "${raw}"`,
-      });
-      if ("error" in result) {
-        return err(
-          sectionFailure(
-            "refused",
-            `branches: force_push_bypassers actor "${raw}": no GitHub App with slug "${actor.slug}" exists; check the actor spelling in the settings file`,
-          ),
-        );
-      }
-      id = result.data.node_id;
-    }
+  return lookupActorId(ctx, exec, graphqlRun, actor, raw).andThen((id) => {
     if (id === undefined || id.length === 0) {
       return err(
         sectionFailure(
@@ -301,13 +389,6 @@ async function resolveActorId(
     graphqlRun.actorIds.set(cacheKey, id);
     return ok(id);
   });
-}
-
-function adoptRepoId(graphqlRun: GraphqlRun, data: z.infer<typeof RepositoryLookup>): void {
-  const id = data.repository?.id;
-  if (graphqlRun.repoId === null && id !== undefined && id.length > 0) {
-    graphqlRun.repoId = id;
-  }
 }
 
 /**
@@ -466,22 +547,23 @@ export function planRoutedUpdate(
   }
   const deploymentFields =
     requiredDeployments === undefined ? {} : deploymentInputFields(requiredDeployments);
+  // A rule the plan-time fetch did not carry is looked up at execution: the PUT planned above may
+  // create it, or the rules query answered NOT_FOUND.
+  const variables =
+    node === undefined
+      ? ruleVariables(ctx, graphqlRun, deploymentFields, forcePushBypassers, async () =>
+          lateRuleId(ctx, name).map((id) => ({ branchProtectionRuleId: id })),
+        )
+      : ruleVariables(
+          ctx,
+          graphqlRun,
+          { branchProtectionRuleId: node.id, ...deploymentFields },
+          forcePushBypassers,
+        );
   plan.ops.push({
     role: "updateRule",
     describe: `setting the GraphQL-only protection fields of branch "${name}"`,
-    // A rule the plan-time fetch did not carry is looked up at execution: the PUT planned above may
-    // create it, or the rules query answered NOT_FOUND.
-    variables:
-      node !== undefined
-        ? ruleVariables(
-            ctx,
-            graphqlRun,
-            { branchProtectionRuleId: node.id, ...deploymentFields },
-            forcePushBypassers,
-          )
-        : ruleVariables(ctx, graphqlRun, deploymentFields, forcePushBypassers, async () =>
-            lateRuleId(ctx, name).map((id) => ({ branchProtectionRuleId: id })),
-          ),
+    variables,
     drift,
     change: verifiedChange(
       `set ${routedKeys} on "${name}"`,

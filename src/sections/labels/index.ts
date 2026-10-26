@@ -5,19 +5,16 @@ import type { ListComparable, ListWrite } from "../shared/list/decl.js";
 import { listSection } from "../shared/list/section.js";
 import { LabelConfig } from "./schema.js";
 
-/** Case-insensitive matching is the section's whole contract; the brand marks a name as already folded. */
 declare const labelNameKey: unique symbol;
+/** Case-insensitive matching is the section's whole contract; the brand marks a name as already folded. */
 export type NameKey = string & { readonly [labelNameKey]: true };
 
 export function nameKey(name: string): NameKey {
   return name.toLowerCase() as NameKey;
 }
 
-/**
- * GitHub stores colors without the leading '#', lowercase; a color compared or written unfolded
- * would drift forever against the stored form, so both lens sides may only spell a folded one.
- */
 declare const labelHexColor: unique symbol;
+/** GitHub stores a color lowercase without the "#"; one compared or written unfolded would drift forever, so both lens sides may only spell a folded one. */
 type HexColor = string & { readonly [labelHexColor]: true };
 
 function normalizeColor(color: string): HexColor {

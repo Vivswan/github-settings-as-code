@@ -6,8 +6,6 @@ import { stringItems } from "../shared/raw-values.js";
 import { open, rule } from "../shared/schema-helpers.js";
 import { BOOLEAN_CONTROL_SET, isGetOnlyKey, isUrlKey } from "./keys.js";
 
-// --- Actor vocabulary (branches force_push_bypassers) ------------------------
-
 export type BypassActor =
   | { kind: "user"; login: string }
   | { kind: "team"; org: string; team: string }
@@ -48,8 +46,6 @@ function duplicateIn(list: unknown): string | null {
   return null;
 }
 
-// --- Actor holders: restrictions, dismissal_restrictions, bypass_pull_request_allowances --------
-
 const ACTOR_LIST_EXAMPLE = {
   users: { nameKey: "login", example: "octocat" },
   teams: { nameKey: "slug", example: "platform-team" },
@@ -57,7 +53,8 @@ const ACTOR_LIST_EXAMPLE = {
 } as const;
 type ActorList = keyof typeof ACTOR_LIST_EXAMPLE;
 
-function copiedActorName(item: unknown): string | null {
+/** The login or slug of a GET actor object, or null for anything else. */
+export function copiedActorName(item: unknown): string | null {
   if (!isPlainObject(item)) {
     return null;
   }
@@ -117,20 +114,16 @@ function reviewActorHolder(holder: string) {
   );
 }
 
-/**
- * The PUT requires users and teams under restrictions (apps stays optional), so a mapping missing
- * either would 422 at apply and is refused at parse instead.
- */
 const Restrictions = z.looseObject(
   {
+    // The PUT requires users and teams here (apps stays optional), so a mapping missing either
+    // would 422 at apply and is refused at parse instead.
     users: actorList("restrictions", "users"),
     teams: actorList("restrictions", "teams"),
     apps: actorList("restrictions", "apps").optional(),
   },
   { error: holderError("restrictions") },
 );
-
-// --- Controls whose wrong shapes the settings file alone reveals ---------------
 
 const STRICT_ERROR =
   "required_status_checks.strict must be an unquoted true or false (GitHub's protection PUT rejects the requirement without it): true also requires the branch to be up to date with its base before merging, false only requires the checks to pass";
@@ -159,13 +152,10 @@ function checkItemKeyError(issue: z.core.$ZodRawIssue): string | undefined {
   return `a required_status_checks.checks item takes only context and app_id (GitHub's protection PUT has no other field there); remove ${keys}`;
 }
 
-/**
- * One required check, GitHub's PUT vocabulary exactly: the check's name and the App that must report
- * it (`null` reads back from GitHub as "any App" and is sent as -1, see index.ts putStatusChecks).
- */
 const RequiredStatusCheck = z.strictObject(
   {
     context: z.string({ error: CHECK_CONTEXT_ERROR }),
+    // null reads back from GitHub as "any App" and is sent as -1 (index.ts putStatusChecks).
     app_id: z.int({ error: CHECK_APP_ID_ERROR }).nullable().optional(),
   },
   { error: checkItemKeyError },
@@ -190,9 +180,11 @@ const RequiredStatusChecks = z
       }
     }),
   )
-  // The refinement's published-schema twin: zod refinements do not reach z.toJSONSchema, and
-  // test/published-schema.test.ts holds the two sides to the same verdicts.
-  .meta({ anyOf: [{ required: ["contexts"] }, { required: ["checks"] }] });
+  .meta({
+    // The refinement's published-schema twin: zod refinements do not reach z.toJSONSchema, and
+    // test/published-schema.test.ts holds the two sides to the same verdicts.
+    anyOf: [{ required: ["contexts"] }, { required: ["checks"] }],
+  });
 
 const RequiredPullRequestReviews = z.looseObject(
   {
@@ -214,7 +206,6 @@ const RequiredPullRequestReviews = z.looseObject(
   },
 );
 
-/** What carries the fact a GET-only echo repeats, so the message can say why removing it loses nothing. */
 const ECHO_CARRIER: Readonly<Record<string, string>> = {
   name: "the entry's name already names the branch",
   enabled: "the control's own key carries the toggle",
@@ -281,11 +272,7 @@ function refuseGetOnlyKeys(
   ancestors.delete(value);
 }
 
-/**
- * The keys the schema declares under each open protection mapping, by the mapping's dotted path.
- * index.ts completes the PUT vocabulary with the controls that pass through (the boolean controls,
- * the review booleans) and notes a declared key outside it that the GET never echoes.
- */
+/** The schema's keys under each open protection mapping, by dotted path; index.ts adds the pass-through controls to complete the PUT vocabulary and notes a declared key outside it that the GET never echoes. */
 export const PROTECTION_MAPPING_KEYS = {
   required_status_checks: Object.keys(RequiredStatusChecks.shape),
   required_pull_request_reviews: Object.keys(RequiredPullRequestReviews.shape),
@@ -294,6 +281,7 @@ export const PROTECTION_MAPPING_KEYS = {
   restrictions: Object.keys(Restrictions.shape),
 } as const satisfies Readonly<Record<string, readonly string[]>>;
 
+/** The protection mapping; the GET-only sweep runs at every depth, since the wrappers sit under each control and the links under the actor holders too. */
 export const BranchProtectionConfig = z
   .looseObject({
     required_status_checks: RequiredStatusChecks.nullable().optional(),
@@ -321,13 +309,13 @@ export const BranchProtectionConfig = z
       .nullable()
       .optional(),
   })
-  // Every depth: the wrappers sit under each control, and the links under the actor holders too.
   .check(
     rule((protection, refineCtx) => {
       refuseGetOnlyKeys(protection, [], refineCtx);
     }),
   )
   .meta({ id: "BranchProtectionConfig" });
+
 export type BranchProtectionConfig = z.infer<typeof BranchProtectionConfig>;
 
 export const BranchConfig = open({

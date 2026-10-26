@@ -3,7 +3,6 @@
 import { z } from "zod";
 import { open } from "../shared/schema-helpers.js";
 
-// GitHub's own charset for a prefix; the create 422s on anything else, so the document refuses it first.
 const KEY_PREFIX = /^[A-Za-z0-9.\-_+=:/#]+$/;
 
 export const AutolinkConfig = open({

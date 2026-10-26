@@ -1,12 +1,6 @@
-/** The REST endpoint dictionary both index.ts and graphql-ops.ts derive their plan context type from. */
-
 import type { DefinitiveRejection, EndpointDecl } from "../contract/endpoints.js";
 
-/**
- * GitHub's one body for a protection endpoint on a branch that does not exist. A denied request never
- * spells it (a fine-grained read is "Not Found", a write "Resource not accessible ..."), so the match is
- * definitive wherever it lands: the PUT (this declaration) and the advisory probe (index.ts).
- */
+/** GitHub's one body for a protection call on a missing branch; no denial spells it (a fine-grained read says "Not Found", a write "Resource not accessible"), so the match is definitive at the PUT here and at index.ts's advisory probe. */
 export const MISSING_BRANCH: DefinitiveRejection = {
   status: 404,
   message: "Branch not found",
@@ -14,6 +8,7 @@ export const MISSING_BRANCH: DefinitiveRejection = {
     "the declared branch does not exist on the repo, so its protection cannot be applied; create the branch, or remove it from the settings file",
 };
 
+/** The REST endpoint dictionary both index.ts and graphql-ops.ts derive their plan context type from. */
 export const ENDPOINTS = {
   // A fine-grained 404 reads as "unprotected", so a denied token surfaces on the first write, not here.
   getProtection: {

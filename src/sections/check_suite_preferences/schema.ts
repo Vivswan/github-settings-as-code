@@ -4,8 +4,6 @@ import { z } from "zod";
 import { isPlainObject } from "../../plain-data.js";
 import { open, rule } from "../shared/schema-helpers.js";
 
-// No GitHub App has id 0, and GitHub rejects fractions. Parse refuses the id here; otherwise the PATCH reports whatever
-// GitHub answers, late and on every run. The duplicate below is the case nothing would ever report.
 const APP_ID_RULE =
   "a GitHub App id is a positive integer (the App's settings page shows it); GitHub has no app 0 and rejects fractions";
 const AppId = z.int(APP_ID_RULE).positive(APP_ID_RULE);

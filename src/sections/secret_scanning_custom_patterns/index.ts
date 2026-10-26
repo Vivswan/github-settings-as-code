@@ -12,6 +12,7 @@ import { isDeepStrictEqual } from "node:util";
 import { ok, type Result } from "neverthrow";
 import { z } from "zod";
 import { agree } from "../../text.js";
+import type { UndeclaredPolicy } from "../../types.js";
 import {
   missingDrift,
   undeclaredDrift,
@@ -39,9 +40,10 @@ import {
 } from "../shared/snapshot-helpers.js";
 import { SecretScanningPatternConfig, unverifiableRegexFields } from "./schema.js";
 
+const key = "secret_scanning_custom_patterns";
+
 const permission: SectionPermission = { repo: ["secret_scanning_alerts"] };
 
-/** The known entry keys the update PATCH accepts: everything but the immutable name. */
 export const UPDATABLE_KEYS = [
   "pattern",
   "start_delimiter",
@@ -51,6 +53,7 @@ export const UPDATABLE_KEYS = [
 ] as const;
 type UpdatableKey = (typeof UPDATABLE_KEYS)[number];
 
+/** Every route's denial hint: secret scanning switched off answers the same 404 as a missing grant. */
 const NOT_ENABLED_HINT =
   "a 404 can also mean secret scanning is not enabled for the repository (it requires GitHub Advanced Security on private repositories)";
 
@@ -58,6 +61,7 @@ const NOT_ENABLED_HINT =
 export const STALE_VERSION_HINT =
   "the pattern changed on GitHub between this run's read and its write (stale custom_pattern_version); re-run the workflow";
 
+/** The update and the remove both carry custom_pattern_version, so both can answer the 412 their hint names. */
 const ENDPOINTS = {
   list: {
     route: "GET /repos/{owner}/{repo}/secret-scanning/custom-patterns",
@@ -87,6 +91,8 @@ const ENDPOINTS = {
   },
 } as const satisfies Record<string, EndpointDecl>;
 
+type PatternOp = PlannedOp<typeof ENDPOINTS>;
+
 interface LivePattern {
   id: number;
   name: string;
@@ -94,8 +100,7 @@ interface LivePattern {
   fields: Partial<Record<UpdatableKey, unknown>>;
 }
 
-// A null or absent version is the API's own version-less form (no optimistic concurrency), but a
-// PRESENT value of any other type must not bypass it.
+// A null or absent version is the API's own version-less form (no optimistic concurrency), but a PRESENT value of any other type must not bypass it.
 const LivePatternEntry = z.looseObject({
   id: z.number(),
   name: z.string(),
@@ -159,7 +164,137 @@ function patternsByName<T extends { id: number; name: string }>(
   );
 }
 
-const key = "secret_scanning_custom_patterns";
+/** The PATCH for a declared pattern whose live fields diverge, or undefined when every declared field matches. */
+function updateOp(
+  entry: SecretScanningPatternConfig,
+  existing: LivePattern,
+): PatternOp | undefined {
+  const divergent = Object.entries(declaredFields(entry)).filter(
+    ([field, value]) => !matches(value, existing.fields[field as UpdatableKey]),
+  );
+  const drift = divergent.map(([field, value]) => {
+    const liveValue = existing.fields[field as UpdatableKey];
+    // JSON.stringify(undefined) is not a string; spell absence out.
+    const liveRendered = liveValue === undefined ? "(absent)" : JSON.stringify(liveValue);
+    return valueDrift(`${key}[${entry.name}].${field}`, JSON.stringify(value), liveRendered);
+  });
+  if (!hasDrift(drift)) {
+    return undefined;
+  }
+
+  return {
+    role: "update",
+    params: { pattern_id: String(existing.id) },
+    // The PATCH body REQUIRES the version key but accepts null: a version-less live pattern
+    // writes without the concurrency check.
+    payload: {
+      custom_pattern_version: existing.version ?? null,
+      ...Object.fromEntries(divergent),
+    },
+    describe: `updating secret scanning pattern "${existing.name}"`,
+    drift,
+    change: `updated secret scanning custom pattern "${existing.name}"`,
+  };
+}
+
+/** The one bulk create, its drift and change lines one per pattern; undefined with nothing to create. */
+function createOp(toCreate: readonly SecretScanningPatternConfig[]): PatternOp | undefined {
+  const [first, ...rest] = toCreate;
+  if (first === undefined) {
+    return undefined;
+  }
+
+  const missing = (p: SecretScanningPatternConfig): string => missingDrift(`${key}[${p.name}]`);
+  const created = (p: SecretScanningPatternConfig): string =>
+    `created secret scanning custom pattern "${p.name}"`;
+  return {
+    role: "create",
+    payload: { patterns: toCreate.map(createBody) },
+    describe: `creating secret scanning ${agree(toCreate.length, "pattern", "patterns")} ${toCreate.map((p) => `"${p.name}"`).join(", ")}`,
+    drift: [missing(first), ...rest.map(missing)],
+    change: () => ok([created(first), ...rest.map(created)] as const),
+  };
+}
+
+/** The one bulk delete of the undeclared patterns, their alerts resolved; undefined with nothing to delete. */
+function deleteOp(
+  toDelete: readonly LivePattern[],
+  listDefault: UndeclaredPolicy,
+): PatternOp | undefined {
+  const [first, ...rest] = toDelete;
+  if (first === undefined) {
+    return undefined;
+  }
+
+  const undeclared = (p: LivePattern): string =>
+    undeclaredDrift(listDefault, {
+      label: `${key}[${p.name}]`,
+      action: "DELETE it and resolve its alerts",
+    });
+  const deleted = (p: LivePattern): string =>
+    `DELETED undeclared secret scanning custom pattern "${p.name}" (alerts resolved, not deleted)`;
+  // post_delete_action is ALWAYS "resolve_alerts": this action never destroys alert history
+  // (upstream defaults to delete_alerts), and there is no user knob.
+  return {
+    role: "remove",
+    payload: { patterns: toDelete.map(deleteBody), post_delete_action: "resolve_alerts" },
+    describe: `deleting undeclared secret scanning ${agree(toDelete.length, "pattern", "patterns")} ${toDelete.map((p) => `"${p.name}"`).join(", ")}`,
+    drift: [undeclared(first), ...rest.map(undeclared)],
+    change: () => ok([deleted(first), ...rest.map(deleted)] as const),
+  };
+}
+
+/** The declared walk: an entry with no live pattern goes to the bulk create, the rest PATCH where their fields diverge. */
+function declaredWrites(
+  desired: readonly SecretScanningPatternConfig[],
+  liveByName: ReadonlyMap<string, LivePattern>,
+): { toCreate: SecretScanningPatternConfig[]; updates: PatternOp[] } {
+  const toCreate: SecretScanningPatternConfig[] = [];
+  const updates: PatternOp[] = [];
+  for (const entry of desired) {
+    const existing = liveByName.get(entry.name);
+    if (existing === undefined) {
+      toCreate.push(entry);
+      continue;
+    }
+
+    const update = updateOp(entry, existing);
+    if (update !== undefined) {
+      updates.push(update);
+    }
+  }
+
+  return { toCreate, updates };
+}
+
+/** The live patterns nobody declared, for the bulk delete; under the keep policy each earns a note on `plan` instead. */
+function undeclaredPatterns(
+  live: readonly LivePattern[],
+  declaredNames: ReadonlySet<string>,
+  policy: UndeclaredPolicy,
+  plan: SectionPlan<PatternOp>,
+): LivePattern[] {
+  const toDelete: LivePattern[] = [];
+  for (const pattern of live) {
+    if (declaredNames.has(pattern.name)) {
+      continue;
+    }
+
+    if (policy === "keep") {
+      plan.notes.push(
+        undeclaredNote({
+          subject: `secret scanning custom pattern "${pattern.name}"`,
+          action: "DELETE it (its alerts are then resolved, not deleted)",
+        }),
+      );
+      continue;
+    }
+
+    toDelete.push(pattern);
+  }
+
+  return toDelete;
+}
 
 export const secretScanningPatternsSection = {
   // Verbatim: GitHub matches pattern names exactly.
@@ -182,105 +317,28 @@ export const secretScanningPatternsSection = {
       'the pattern endpoints accept no other field - in particular "state" and "push_protection_enabled" are read-only through this API surface - so the key would be dropped silently and never converge',
   },
   async plan(ctx, declared) {
-    const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
+    const listDefault = defaultUndeclaredPolicy(this);
+    const { policy, entries: desired } = undeclaredPolicy(declared, listDefault);
     return ctx.read.list
       .listAll(LivePatternEntry)
       .map((entries) => entries.map(liveFrom))
       .andThen((live) =>
         patternsByName(this, live).map((liveByName) => {
           const declaredNames = new Set(desired.map((p) => p.name));
+          const plan: SectionPlan<PatternOp> = { ops: [], notes: [], drift: [] };
+          const { toCreate, updates } = declaredWrites(desired, liveByName);
+          const toDelete = undeclaredPatterns(live, declaredNames, policy, plan);
 
-          const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
-          const toCreate: SecretScanningPatternConfig[] = [];
-          const updates: PlannedOp<typeof ENDPOINTS>[] = [];
-          for (const entry of desired) {
-            const existing = liveByName.get(entry.name);
-            if (existing === undefined) {
-              toCreate.push(entry);
-              continue;
-            }
-            const divergent = Object.entries(declaredFields(entry)).filter(
-              ([field, value]) => !matches(value, existing.fields[field as UpdatableKey]),
-            );
-            const drift = divergent.map(([field, value]) => {
-              const liveValue = existing.fields[field as UpdatableKey];
-              // JSON.stringify(undefined) is not a string; spell absence out.
-              const liveRendered = liveValue === undefined ? "(absent)" : JSON.stringify(liveValue);
-              return valueDrift(
-                `${key}[${entry.name}].${field}`,
-                JSON.stringify(value),
-                liveRendered,
-              );
-            });
-            if (!hasDrift(drift)) {
-              continue;
-            }
-            updates.push({
-              role: "update",
-              params: { pattern_id: String(existing.id) },
-              // The PATCH body REQUIRES the version key but accepts null: a version-less live pattern
-              // writes without the concurrency check.
-              payload: {
-                custom_pattern_version: existing.version ?? null,
-                ...Object.fromEntries(divergent),
-              },
-              describe: `updating secret scanning pattern "${existing.name}"`,
-              drift,
-              change: `updated secret scanning custom pattern "${existing.name}"`,
-            });
-          }
-
-          const toDelete: LivePattern[] = [];
-          for (const pattern of live) {
-            if (declaredNames.has(pattern.name)) {
-              continue;
-            }
-            if (policy === "keep") {
-              plan.notes.push(
-                undeclaredNote({
-                  subject: `secret scanning custom pattern "${pattern.name}"`,
-                  action: "DELETE it (its alerts are then resolved, not deleted)",
-                }),
-              );
-              continue;
-            }
-            toDelete.push(pattern);
-          }
-
-          const [firstCreate, ...restCreate] = toCreate;
-          if (firstCreate !== undefined) {
-            const missing = (p: SecretScanningPatternConfig): string =>
-              missingDrift(`${key}[${p.name}]`);
-            const created = (p: SecretScanningPatternConfig): string =>
-              `created secret scanning custom pattern "${p.name}"`;
-            plan.ops.push({
-              role: "create",
-              payload: { patterns: toCreate.map(createBody) },
-              describe: `creating secret scanning ${agree(toCreate.length, "pattern", "patterns")} ${toCreate.map((p) => `"${p.name}"`).join(", ")}`,
-              drift: [missing(firstCreate), ...restCreate.map(missing)],
-              change: () => ok([created(firstCreate), ...restCreate.map(created)] as const),
-            });
+          const create = createOp(toCreate);
+          if (create !== undefined) {
+            plan.ops.push(create);
           }
           plan.ops.push(...updates);
-          const [firstDelete, ...restDelete] = toDelete;
-          if (firstDelete !== undefined) {
-            const undeclared = (p: LivePattern): string =>
-              undeclaredDrift(defaultUndeclaredPolicy(this), {
-                label: `${key}[${p.name}]`,
-                action: "DELETE it and resolve its alerts",
-              });
-            const deleted = (p: LivePattern): string =>
-              `DELETED undeclared secret scanning custom pattern "${p.name}" (alerts resolved, not deleted)`;
-            // post_delete_action is ALWAYS "resolve_alerts": this action never destroys alert history
-            // (upstream defaults to delete_alerts), and there is no user knob.
-            plan.ops.push({
-              role: "remove",
-              payload: { patterns: toDelete.map(deleteBody), post_delete_action: "resolve_alerts" },
-              describe: `deleting undeclared secret scanning ${agree(toDelete.length, "pattern", "patterns")} ${toDelete.map((p) => `"${p.name}"`).join(", ")}`,
-              drift: [undeclared(firstDelete), ...restDelete.map(undeclared)],
-              change: () => ok([deleted(firstDelete), ...restDelete.map(deleted)] as const),
-            });
+          const remove = deleteOp(toDelete, listDefault);
+          if (remove !== undefined) {
+            plan.ops.push(remove);
           }
+
           return plan;
         }),
       );

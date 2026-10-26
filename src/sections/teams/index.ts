@@ -5,8 +5,9 @@
  * listSection: the live list carries no role, so each team's access is a separate probe.
  */
 
-import { ok, type Result, safeTry } from "neverthrow";
+import { ok, okAsync, type Result, safeTry } from "neverthrow";
 import { z } from "zod";
+import type { UndeclaredPolicy } from "../../types.js";
 import {
   undeclaredDrift,
   undeclaredNote,
@@ -59,20 +60,25 @@ const ENDPOINTS = {
 
 type TeamsContext = PlanContext<typeof ENDPOINTS>;
 
-// The repo object under the repository media type, of which only role_name is read. Nullish,
-// because a server ignoring the media type answers a bare 204, which still means "the team has access".
+type TeamsOp = PlannedOp<typeof ENDPOINTS>;
+
+// Nullish because a server ignoring the repository media type answers a bare 204, which still means "the team has access".
 const LiveTeamRepo = z.looseObject({ role_name: z.string().optional() }).nullish();
 
-/**
- * A listed team: the slug the probe and the grant address, its id (which tells two same-fold slugs
- * apart), and how its access was granted (present only in a repository listing; absent reads as direct).
- */
+// The id tells two same-fold slugs apart; access_source appears only in a repository listing, and absent reads as direct.
 const LiveTeam = z.looseObject({
   id: z.number().optional(),
   slug: z.string(),
   access_source: z.string().optional(),
 });
+
 type LiveTeam = z.infer<typeof LiveTeam>;
+
+/** What the access probe answers for one team. */
+type TeamAccess = { access: false } | { access: true; role: string | undefined };
+
+/** The role a listed team reads back, or why the snapshot leaves the team out. */
+type SnapshotRole = { role: string } | { leftOut: string };
 
 /** Access granted above the repository (the organization, the enterprise), which no repository call revokes. */
 function inheritedAccess(team: LiveTeam): string | undefined {
@@ -87,10 +93,7 @@ function inheritedAccessReason(repo: string, source: string): string {
 }
 
 /** The probe plan() and snapshot() share, under the media type LiveTeamRepo describes. */
-function probeTeamRole(
-  ctx: TeamsContext,
-  slug: string,
-): Read<{ access: false } | { access: true; role: string | undefined }> {
+function probeTeamRole(ctx: TeamsContext, slug: string): Read<TeamAccess> {
   return ctx.read.probe
     .probeAbsent(LiveTeamRepo, {
       params: { org: ctx.repo.owner, team_slug: slug },
@@ -106,6 +109,7 @@ function probeTeamRole(
 
 /** A team's slug is its lowercased name; the brand marks a name or slug already folded to the key every lookup reads. */
 declare const teamSlugKey: unique symbol;
+
 type TeamKey = string & { readonly [teamSlugKey]: true };
 
 function teamKey(nameOrSlug: string): TeamKey {
@@ -129,6 +133,111 @@ function teamsBySlug(
   );
 }
 
+/** The drift line a declared team's probe earns, or undefined once its live role matches. */
+function declaredTeamDrift(
+  repo: string,
+  team: TeamConfig,
+  role: string,
+  probe: TeamAccess,
+): string | undefined {
+  if (!probe.access) {
+    return `teams[${team.name}]: no access to ${repo}; apply will grant "${role}"`;
+  }
+
+  const wantRole = roleForPermission(role);
+  const liveRole = probe.role ?? "";
+  if (liveRole === wantRole) {
+    return undefined;
+  }
+
+  return valueDrift(`teams[${team.name}]`, JSON.stringify(wantRole), JSON.stringify(liveRole), {
+    remedy: "apply will set the declared permission",
+  });
+}
+
+/** A keep-note or the revocation for each live team the file does not name; access granted above the repository is beyond either. */
+function undeclaredTeams(
+  ctx: TeamsContext,
+  section: SectionMeta<"teams">,
+  live: ReadonlyMap<TeamKey, LiveTeam>,
+  declaredSlugs: ReadonlySet<TeamKey>,
+  policy: UndeclaredPolicy,
+): { ops: TeamsOp[]; notes: string[] } {
+  const ops: TeamsOp[] = [];
+  const notes: string[] = [];
+  for (const [slugKey, team] of live) {
+    if (declaredSlugs.has(slugKey)) {
+      continue;
+    }
+
+    const inherited = inheritedAccess(team);
+    if (inherited !== undefined) {
+      // Only a revocation would act on it, so only the policy that would revoke is told it cannot.
+      if (policy === "delete") {
+        notes.push(
+          `teams[${team.slug}]: ${inheritedAccessReason(ctx.repo.slug, inherited)}, so "_undeclared: delete" cannot revoke it; left untouched`,
+        );
+      }
+      continue;
+    }
+
+    if (policy === "keep") {
+      notes.push(
+        undeclaredNote({
+          subject: `team "${team.slug}"`,
+          state: "has access but is not declared",
+          manage: "its access",
+          action: "REVOKE its access",
+        }),
+      );
+      continue;
+    }
+
+    ops.push({
+      role: "revoke",
+      params: { org: ctx.repo.owner, team_slug: team.slug },
+      drift: [
+        undeclaredDrift(defaultUndeclaredPolicy(section), {
+          label: `teams[${team.slug}]`,
+          action: "REVOKE its access",
+          keep: "its access",
+        }),
+      ],
+      change: `REVOKED undeclared team "${team.slug}"`,
+    });
+  }
+
+  return { ops, notes };
+}
+
+/** Inherited access is never probed; a 404 or a roleless answer leaves the team out with the reason. */
+function snapshotRole(ctx: TeamsContext, section: SectionMeta, team: LiveTeam): Read<SnapshotRole> {
+  const inherited = inheritedAccess(team);
+  if (inherited !== undefined) {
+    return okAsync({
+      leftOut: `${inheritedAccessReason(ctx.repo.slug, inherited)}, and declaring it would grant direct access`,
+    });
+  }
+
+  return probeTeamRole(ctx, team.slug).map((probe): SnapshotRole => {
+    if (!probe.access) {
+      // No write follows to surface a denial, so the note names both readings of the 404.
+      return {
+        leftOut:
+          `listed with access to ${ctx.repo.slug}, but the access probe answered 404, read here as no access. ` +
+          "A fine-grained token missing the grant gets the same answer; if the team does have access, " +
+          `${sectionGrant(section)}, then snapshot again`,
+      };
+    }
+    if (probe.role === undefined) {
+      return {
+        leftOut: `has access to ${ctx.repo.slug}, but GitHub reported no role for it; add the entry with the intended permission`,
+      };
+    }
+    return { role: probe.role };
+  });
+}
+
 export const teamsSection = {
   ...identifiedBy("teams", "name", "team", { fold: teamKey }),
   undeclaredDefault: "keep",
@@ -149,7 +258,7 @@ export const teamsSection = {
         declared,
         defaultUndeclaredPolicy(section),
       );
-      const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
+      const plan: SectionPlan<TeamsOp> = { ops: [], notes: [], drift: [] };
       // The listing is read BEFORE the declared walk, so the undeclared teams are judged against the state the grants
       // below start from; a declared team's role still comes from the probe, which names a custom role.
       const live = yield* ctx.read.list
@@ -158,27 +267,14 @@ export const teamsSection = {
       const declaredSlugs = new Set(desired.map((team) => teamKey(team.name)));
       for (const team of desired) {
         const role = team.permission ?? DEFAULT_ROLE;
-        const params = { org: ctx.repo.owner, team_slug: team.name };
         const probe = yield* probeTeamRole(ctx, team.name);
-        const wantRole = roleForPermission(role);
-        let drift: string;
-        if (!probe.access) {
-          drift = `teams[${team.name}]: no access to ${ctx.repo.slug}; apply will grant "${role}"`;
-        } else {
-          const liveRole = probe.role ?? "";
-          if (liveRole === wantRole) {
-            continue;
-          }
-          drift = valueDrift(
-            `teams[${team.name}]`,
-            JSON.stringify(wantRole),
-            JSON.stringify(liveRole),
-            { remedy: "apply will set the declared permission" },
-          );
+        const drift = declaredTeamDrift(ctx.repo.slug, team, role, probe);
+        if (drift === undefined) {
+          continue;
         }
         plan.ops.push({
           role: "grant",
-          params,
+          params: { org: ctx.repo.owner, team_slug: team.name },
           payload: { permission: role },
           describe: `granting team "${team.name}" access`,
           drift: [drift],
@@ -186,44 +282,9 @@ export const teamsSection = {
         });
       }
 
-      for (const [slugKey, team] of live) {
-        if (declaredSlugs.has(slugKey)) {
-          continue;
-        }
-        const inherited = inheritedAccess(team);
-        if (inherited !== undefined) {
-          // Only a revocation would act on it, so only the policy that would revoke is told it cannot.
-          if (policy === "delete") {
-            plan.notes.push(
-              `teams[${team.slug}]: ${inheritedAccessReason(ctx.repo.slug, inherited)}, so "_undeclared: delete" cannot revoke it; left untouched`,
-            );
-          }
-          continue;
-        }
-        if (policy === "keep") {
-          plan.notes.push(
-            undeclaredNote({
-              subject: `team "${team.slug}"`,
-              state: "has access but is not declared",
-              manage: "its access",
-              action: "REVOKE its access",
-            }),
-          );
-          continue;
-        }
-        plan.ops.push({
-          role: "revoke",
-          params: { org: ctx.repo.owner, team_slug: team.slug },
-          drift: [
-            undeclaredDrift(defaultUndeclaredPolicy(section), {
-              label: `teams[${team.slug}]`,
-              action: "REVOKE its access",
-              keep: "its access",
-            }),
-          ],
-          change: `REVOKED undeclared team "${team.slug}"`,
-        });
-      }
+      const undeclared = undeclaredTeams(ctx, section, live, declaredSlugs, policy);
+      plan.ops.push(...undeclared.ops);
+      plan.notes.push(...undeclared.notes);
       return ok(plan);
     });
   },
@@ -245,39 +306,12 @@ export const teamsSection = {
       const entries: TeamConfig[] = [];
       for (const team of teams.values()) {
         const label = `teams[${team.slug}]`;
-        const inherited = inheritedAccess(team);
-        if (inherited !== undefined) {
-          notes.push(
-            leftOutOfSnapshot(
-              label,
-              `${inheritedAccessReason(ctx.repo.slug, inherited)}, and declaring it would grant direct access`,
-            ),
-          );
+        const probed = yield* snapshotRole(ctx, section, team);
+        if ("leftOut" in probed) {
+          notes.push(leftOutOfSnapshot(label, probed.leftOut));
           continue;
         }
-        const probe = yield* probeTeamRole(ctx, team.slug);
-        if (!probe.access) {
-          // No write follows to surface a denial, so the note names both readings of the 404.
-          notes.push(
-            leftOutOfSnapshot(
-              label,
-              `listed with access to ${ctx.repo.slug}, but the access probe answered 404, read here as no access. ` +
-                "A fine-grained token missing the grant gets the same answer; if the team does have access, " +
-                `${sectionGrant(section)}, then snapshot again`,
-            ),
-          );
-          continue;
-        }
-        if (probe.role === undefined) {
-          notes.push(
-            leftOutOfSnapshot(
-              label,
-              `has access to ${ctx.repo.slug}, but GitHub reported no role for it; add the entry with the intended permission`,
-            ),
-          );
-          continue;
-        }
-        const permission = yield* readBackPermission(section, label, probe.role, notes);
+        const permission = yield* readBackPermission(section, label, probed.role, notes);
         if (permission === undefined) {
           continue;
         }

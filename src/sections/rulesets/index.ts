@@ -88,11 +88,7 @@ function repeatedRuleTypes(
   return `${agree(repeated.size, "rule type", "rule types")} ${types}`;
 }
 
-/**
- * A summary or a full body: the list and the per-item GET share these fields. The API type leaves
- * `source_type` optional; a body without it reads as repository-owned, the only kind the repository
- * endpoints can write anyway.
- */
+// The list summary and the per-item GET share these fields; a body without source_type reads as repository-owned, the only kind the repository endpoints can write.
 const LiveRuleset = z.looseObject({
   id: z.number(),
   name: z.string(),
@@ -109,6 +105,7 @@ const LiveRuleset = z.looseObject({
     )
     .optional(),
 });
+
 type LiveRuleset = z.infer<typeof LiveRuleset>;
 
 /**
@@ -135,9 +132,6 @@ function comparableRuleset(live: LiveRuleset): Result<LiveRuleset, SectionFailur
   );
 }
 
-// A rule type the vendored spec does not know passes through verbatim (schema.ts UnknownRule), so a
-// typo'd rules[].type reaches GitHub unchanged and comes back as a 422 naming it; a known type's
-// parameters were already checked at parse, so what is left for GitHub is what only the live repository can judge.
 const RULES_HINT =
   'Usually this means a rules[].type GitHub does not recognize (a type the vendored spec does not know passes through verbatim, so a typo reaches GitHub unchanged), or "parameters" the live repository rejects for that rule type';
 
@@ -150,6 +144,7 @@ const ENDPOINTS = {
   create: {
     route: "POST /repos/{owner}/{repo}/rulesets",
     statuses: { 201: "ruleset created" },
+    // An unknown rule type passes through verbatim (schema.ts UnknownRule) and a known type's parameters were checked at parse, so a 422 on a create or an update is what only the live repository can judge.
     hints: { 422: RULES_HINT },
   },
   get: {

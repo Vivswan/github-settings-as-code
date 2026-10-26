@@ -40,22 +40,19 @@ interface GroupRewrite {
   form: string;
 }
 
-/**
- * The `(?` group openings the check knows. The flag-only group (`(?i)`, `(?im-s)`, and PCRE's empty
- * `(?)`) is removed: flags change what a pattern matches, never whether it parses, except the
- * extended-mode `x`, which changes how PCRE lexes what follows; `extendedMode()` names that case
- * and `compileFailure()` passes it unchecked. An atomic group
- * and a flagged non-capturing group are plain non-capturing groups to the check. A JavaScript-style
- * named group and the lookarounds are their own spelling, listed so a name counts toward a
- * duplicate and so no `(?` PCRE knows falls to the refusal of the ones it does not.
- */
+/** The `(?` openings the check rewrites; a `(?#` comment is dropped before the table is read, and any other `(?` outside it (a subroutine call, a conditional) is refused as unrecognized rather than guessed at. */
 const GROUP_REWRITES: readonly GroupRewrite[] = [
   { syntax: new RegExp(`^\\(\\?P<${GROUP_NAME}>`), form: "(?<$1>" },
   { syntax: new RegExp(`^\\(\\?'${GROUP_NAME}'`), form: "(?<$1>" },
+  // JavaScript's own named group, listed so its name counts toward a duplicate.
   { syntax: new RegExp(`^\\(\\?<${GROUP_NAME}>`), form: "(?<$1>" },
+  // A flag-only group (`(?i)`, `(?im-s)`, PCRE's empty `(?)`) is removed: flags change what a pattern matches, never
+  // whether it parses, except the extended-mode `x`, which extendedMode() names and compileFailure() passes unchecked.
   { syntax: /^\(\?(?:[imsx]*(?:-[imsx]+)?)\)/, form: "" },
+  // A flagged non-capturing group and an atomic group are plain non-capturing groups to the check.
   { syntax: /^\(\?(?:[imsx]*(?:-[imsx]+)?):/, form: "(?:" },
   { syntax: /^\(\?>/, form: "(?:" },
+  // The lookarounds are their own spelling.
   { syntax: /^\(\?<?[=!]/, form: "$&" },
 ];
 
@@ -99,13 +96,10 @@ function repeatable(previous: Token | undefined): boolean {
   }
 }
 
+/** PCRE2's own wording, so the refusal reads as the engine's would. */
 const NOT_REPEATABLE = "quantifier does not follow a repeatable item";
 
-/**
- * Hyperscan's control verbs, accepted only as a run at the very start of the pattern and read by
- * neither PCRE nor Hyperscan as a group; dropped before the tokens are read, so the `(` and `*` do
- * not lex as a literal and a dangling quantifier. A `(*` anywhere else stays that refusal.
- */
+/** Hyperscan's control verbs, a run at the very start only, dropped before lexing so `(*` is not a literal and a dangling quantifier; a `(*` anywhere else stays that refusal. */
 const START_VERBS = /^(?:\(\*(?:UTF8|UTF|UCP)\))+/;
 
 /** The `{m}`, `{m,}`, `{m,n}` quantifier at a `{`; any other brace is a literal to Hyperscan and to a flagless RegExp alike. */
@@ -122,16 +116,10 @@ const LAST_CODE_POINT = 0x10ffff;
 interface CodePointEscape {
   syntax: RegExp;
   value: (captured: string) => number;
-  /** `\1` to `\7` are octal only inside a class; outside they are backreferences, which pass through. */
   inClassOnly?: true;
 }
 
-/**
- * PCRE's code point spellings, each reaching as far as PCRE reads it (`\x` takes zero to two hex
- * digits, `\0` zero to two more octal digits), so a digit after a dropped token never joins one:
- * `\0\E40` is NUL, 4, 0. A flagless RegExp reads several of these differently (`\x{41}` as an x
- * repeated, `\a` as an a), so they render as their value.
- */
+/** PCRE's code point spellings, each reaching exactly as far as PCRE reads (so `\0\E40` is NUL, 4, 0) and rendered as their value, since a flagless RegExp reads `\x{41}` as a repeated x and `\a` as an a. */
 const CODE_POINT_ESCAPES: readonly CodePointEscape[] = [
   { syntax: /^\\x\{([0-9A-Fa-f]+)\}/, value: (hex) => Number.parseInt(hex, 16) },
   {
@@ -141,6 +129,7 @@ const CODE_POINT_ESCAPES: readonly CodePointEscape[] = [
   { syntax: /^\\o\{([0-7]+)\}/, value: (octal) => Number.parseInt(octal, 8) },
   { syntax: /^\\(0[0-7]{0,2})/, value: (octal) => Number.parseInt(octal, 8) },
   {
+    // `\1` to `\7` are octal only inside a class; outside they are backreferences, which pass through.
     syntax: /^\\([1-7][0-7]{0,2})/,
     value: (octal) => Number.parseInt(octal, 8),
     inClassOnly: true,
@@ -156,143 +145,219 @@ const MALFORMED_ESCAPES: readonly [syntax: RegExp, reason: string][] = [
   [/^\\c/, "\\c needs a printable ASCII character after it"],
 ];
 
+/** The `\Q...\E` quote at `index`, reaching to the end of the pattern when unclosed; an empty one is dropped. */
+function quoteAt(source: string, index: number): [Token, number] {
+  const end = source.indexOf("\\E", index + 2);
+  const literal = end === -1 ? source.slice(index + 2) : source.slice(index + 2, end);
+  const token: Token = literal === "" ? { kind: "dropped" } : { kind: "quote", literal };
+  return [token, (end === -1 ? source.length : end + 2) - index];
+}
+
+/** The code point escape opening `rest`, with how far it reaches, or null when no spelling matches there. */
+function codePointAt(rest: string, inClass: boolean): [Token, number] | null {
+  for (const row of CODE_POINT_ESCAPES) {
+    if (row.inClassOnly && !inClass) {
+      continue;
+    }
+
+    const match = row.syntax.exec(rest);
+    if (match === null) {
+      continue;
+    }
+
+    const text = match[0];
+    const value = row.value(match[1] as string);
+    const token: Token =
+      value > LAST_CODE_POINT
+        ? { kind: "refused", text, reason: `${text} is above U+10FFFF` }
+        : { kind: "codePoint", value };
+    return [token, text.length];
+  }
+
+  return null;
+}
+
 /** The escape starting at `index` as PCRE reads it, with how far it reaches. */
 function escapeAt(source: string, index: number, inClass: boolean): [Token, number] {
   if (source.startsWith("\\Q", index)) {
-    const end = source.indexOf("\\E", index + 2);
-    const literal = end === -1 ? source.slice(index + 2) : source.slice(index + 2, end);
-    const token: Token = literal === "" ? { kind: "dropped" } : { kind: "quote", literal };
-    return [token, (end === -1 ? source.length : end + 2) - index];
+    return quoteAt(source, index);
   }
+
   if (source.startsWith("\\E", index)) {
     return [{ kind: "dropped" }, 2];
   }
+
   const rest = source.slice(index);
-  for (const row of CODE_POINT_ESCAPES) {
-    const match = row.inClassOnly && !inClass ? null : row.syntax.exec(rest);
-    if (match !== null) {
-      const text = match[0];
-      const value = row.value(match[1] as string);
-      const token: Token =
-        value > LAST_CODE_POINT
-          ? { kind: "refused", text, reason: `${text} is above U+10FFFF` }
-          : { kind: "codePoint", value };
-      return [token, text.length];
-    }
+  const codePoint = codePointAt(rest, inClass);
+  if (codePoint !== null) {
+    return codePoint;
   }
+
   const malformed = MALFORMED_ESCAPES.find(([syntax]) => syntax.test(rest));
   if (malformed !== undefined) {
     return [{ kind: "refused", text: rest.slice(0, 2), reason: malformed[1] }, 2];
   }
+
   // A lone trailing backslash is a one-character escape the RegExp then refuses.
   const text = rest.slice(0, 2);
   return [{ kind: "escape", text }, text.length];
 }
 
-function tokenize(source: string): Token[] {
-  const tokens: Token[] = [];
-  let previous: Token | undefined;
-  let inClass = false;
-  let classHasMember = false;
-  const push = (token: Token, advance: number): number => {
-    tokens.push(token);
-    if (token.kind !== "dropped") {
-      previous = token;
-      classHasMember = inClass;
+/**
+ * One walk of the tokenizer: `previous` is the last token PCRE sees (a dropped one never takes the
+ * slot), and `classHasMember` whether the open class has read a member yet, which decides how a
+ * `]` reads.
+ */
+interface Walk {
+  tokens: Token[];
+  previous: Token | undefined;
+  inClass: boolean;
+  classHasMember: boolean;
+}
+
+/** Records `token` and hands back `advance`; a dropped token leaves `previous` and the class membership untouched. */
+function push(walk: Walk, token: Token, advance: number): number {
+  walk.tokens.push(token);
+  if (token.kind !== "dropped") {
+    walk.previous = token;
+    walk.classHasMember = walk.inClass;
+  }
+  return advance;
+}
+
+/** The next unit inside a class, with how far it reaches: the negation, a closing `]`, a POSIX class, or one character. */
+function classUnitAt(walk: Walk, rest: string): number {
+  const ch = rest[0] as string;
+  const { previous } = walk;
+  if (ch === "^" && previous?.kind === "classOpen" && !previous.negated) {
+    // The negation is the first thing PCRE reads after the `[` and what it drops: `[\Q\E^]` is negated.
+    previous.negated = true;
+    return 1;
+  }
+
+  if (ch === "]" && !walk.classHasMember) {
+    // PCRE reads a `]` before any member as a literal one, where a flagless RegExp would close the class.
+    return push(walk, { kind: "escape", text: "\\]" }, 1);
+  }
+
+  if (ch === "]") {
+    walk.inClass = false;
+    return push(walk, { kind: "classClose" }, 1);
+  }
+
+  const posix = POSIX_CLASS.exec(rest);
+  if (posix === null) {
+    return push(walk, { kind: "literal", text: ch }, 1);
+  }
+  return push(walk, { kind: "posixClass" }, posix[0].length);
+}
+
+/** The `(?` opening at the start of `rest` as PCRE reads it (a `(?#` comment is dropped), or null when `rest` opens with no `(?`. */
+function groupOpeningAt(rest: string): [Token, number] | null {
+  if (rest.startsWith("(?#")) {
+    const end = rest.indexOf(")");
+    if (end === -1) {
+      return [{ kind: "refused", text: rest, reason: "missing ) after (?# comment" }, rest.length];
     }
-    return advance;
-  };
+    return [{ kind: "dropped" }, end + 1];
+  }
+
+  if (!rest.startsWith("(?")) {
+    return null;
+  }
+
+  for (const row of GROUP_REWRITES) {
+    const match = row.syntax.exec(rest);
+    if (match === null) {
+      continue;
+    }
+
+    const token: Token = {
+      kind: "group",
+      text: match[0],
+      form: match[0].replace(row.syntax, row.form),
+      name: match[1],
+    };
+    return [token, match[0].length];
+  }
+
+  // PCRE's other `(?` openings (conditions, recursion, callouts, branch reset, `(?P=`) it may accept
+  // and Hyperscan refuses; refused here as one unit, so a dropped token cannot re-fuse one into a known form.
+  const text = rest.slice(0, 3);
+  return [{ kind: "refused", text, reason: "unrecognized character after (?" }, text.length];
+}
+
+/** The quantifier spelled at the start of `rest` (`*`, `+`, `?`, or a `{m,n}` brace), or null when `rest` opens with none. */
+function quantifierText(rest: string): string | null {
+  const ch = rest[0] as string;
+  if (ch === "*" || ch === "+" || ch === "?") {
+    return ch;
+  }
+
+  if (ch !== "{") {
+    return null;
+  }
+  return BRACE_QUANTIFIER.exec(rest)?.[0] ?? null;
+}
+
+/** What a quantifier spelled `text` is after `previous`: a modifier on a quantifier, a quantifier on a repeatable item, else PCRE's refusal. */
+function quantifierToken(previous: Token | undefined, text: string): Token {
+  // One modifier at most after a quantifier: `?` lazy, `+` possessive; anything more is a quantifier again, dangling.
+  if (previous?.kind === "quantifier" && text === "?") {
+    return { kind: "lazy" };
+  }
+
+  if (previous?.kind === "quantifier" && text === "+") {
+    return { kind: "possessive" };
+  }
+
+  if (repeatable(previous)) {
+    return { kind: "quantifier", text };
+  }
+  return { kind: "refused", text, reason: NOT_REPEATABLE };
+}
+
+function tokenize(source: string): Token[] {
+  const walk: Walk = { tokens: [], previous: undefined, inClass: false, classHasMember: false };
   let i = START_VERBS.exec(source)?.[0].length ?? 0;
   while (i < source.length) {
     const rest = source.slice(i);
     const ch = rest[0] as string;
     if (ch === "\\") {
-      const [token, advance] = escapeAt(source, i, inClass);
-      i += push(token, advance);
+      const [token, advance] = escapeAt(source, i, walk.inClass);
+      i += push(walk, token, advance);
       continue;
     }
-    if (inClass) {
-      if (ch === "^" && previous?.kind === "classOpen" && !previous.negated) {
-        // The negation is the first thing PCRE reads after the `[` and what it drops: `[\Q\E^]` is negated.
-        previous.negated = true;
-        i += 1;
-        continue;
-      }
-      if (ch === "]" && !classHasMember) {
-        // PCRE reads a `]` before any member as a literal one, where a flagless RegExp would close the class.
-        i += push({ kind: "escape", text: "\\]" }, 1);
-        continue;
-      }
-      if (ch === "]") {
-        inClass = false;
-        i += push({ kind: "classClose" }, 1);
-        continue;
-      }
-      const posix = POSIX_CLASS.exec(rest);
-      i +=
-        posix === null
-          ? push({ kind: "literal", text: ch }, 1)
-          : push({ kind: "posixClass" }, posix[0].length);
+
+    if (walk.inClass) {
+      i += classUnitAt(walk, rest);
       continue;
     }
+
     if (ch === "[") {
-      i += push({ kind: "classOpen", negated: false }, 1);
-      inClass = true;
-      classHasMember = false;
+      i += push(walk, { kind: "classOpen", negated: false }, 1);
+      walk.inClass = true;
+      walk.classHasMember = false;
       continue;
     }
-    if (rest.startsWith("(?#")) {
-      const end = rest.indexOf(")");
-      i +=
-        end === -1
-          ? push(
-              { kind: "refused", text: rest, reason: "missing ) after (?# comment" },
-              rest.length,
-            )
-          : push({ kind: "dropped" }, end + 1);
+
+    const group = groupOpeningAt(rest);
+    if (group !== null) {
+      const [token, advance] = group;
+      i += push(walk, token, advance);
       continue;
     }
-    const rewrite = GROUP_REWRITES.map((row) => ({ row, match: row.syntax.exec(rest) })).find(
-      (candidate) => candidate.match !== null,
-    );
-    if (rewrite?.match) {
-      const { row, match } = rewrite;
-      i += push(
-        {
-          kind: "group",
-          text: match[0],
-          form: match[0].replace(row.syntax, row.form),
-          name: match[1],
-        },
-        match[0].length,
-      );
+
+    const quantifier = quantifierText(rest);
+    if (quantifier !== null) {
+      i += push(walk, quantifierToken(walk.previous, quantifier), quantifier.length);
       continue;
     }
-    if (rest.startsWith("(?")) {
-      // PCRE's other `(?` openings (conditions, recursion, callouts, branch reset, `(?P=`) it may accept
-      // and Hyperscan refuses; refused here as one unit, so a dropped token cannot re-fuse one into a known form.
-      const text = rest.slice(0, 3);
-      i += push({ kind: "refused", text, reason: "unrecognized character after (?" }, text.length);
-      continue;
-    }
-    const brace = ch === "{" ? BRACE_QUANTIFIER.exec(rest) : null;
-    if (ch === "*" || ch === "+" || ch === "?" || brace !== null) {
-      const text = brace === null ? ch : brace[0];
-      // One modifier at most after a quantifier: `?` lazy, `+` possessive; anything more is a quantifier again, dangling.
-      if (previous?.kind === "quantifier" && ch === "?") {
-        i += push({ kind: "lazy" }, 1);
-      } else if (previous?.kind === "quantifier" && ch === "+") {
-        i += push({ kind: "possessive" }, 1);
-      } else if (repeatable(previous)) {
-        i += push({ kind: "quantifier", text }, text.length);
-      } else {
-        i += push({ kind: "refused", text, reason: NOT_REPEATABLE }, text.length);
-      }
-      continue;
-    }
-    i += push({ kind: "literal", text: ch }, 1);
+
+    i += push(walk, { kind: "literal", text: ch }, 1);
   }
-  return tokens;
+
+  return walk.tokens;
 }
 
 /** Every character `\Q...\E` quotes that would otherwise be syntax, spelled as its escape. */

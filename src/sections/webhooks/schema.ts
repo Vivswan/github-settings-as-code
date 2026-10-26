@@ -5,8 +5,7 @@ import { describeValue } from "../../plain-data.js";
 import { open, rule } from "../shared/schema-helpers.js";
 import { REPOSITORY_WEBHOOK_EVENTS, WEBHOOK_EVENTS_REFERENCE } from "./events.js";
 
-// GitHub 422s each of these at apply time ("is not a valid event", "Url is not a valid URL"); the REST wire types are
-// bare strings, so the parser carries the list GitHub's webhooks description publishes and refuses the rest naming it.
+// The REST wire types are bare strings and GitHub 422s a bad event only at apply time ("is not a valid event"), so the parser carries the list GitHub's webhooks description publishes.
 const WebhookEvent = z.enum([...REPOSITORY_WEBHOOK_EVENTS, "*"] as const, {
   error: (issue) =>
     `${describeValue(issue.input)} is not an event GitHub delivers to repository webhooks ("*" means every event); ` +
@@ -14,6 +13,7 @@ const WebhookEvent = z.enum([...REPOSITORY_WEBHOOK_EVENTS, "*"] as const, {
     "so an event GitHub added since arrives in the release that bumps that package",
 });
 
+// Only url is required; an omitted content_type or insecure_ssl takes GitHub's default ("form", "0").
 const WebhookDeliveryConfig = z
   .looseObject({
     url: z.url({
@@ -37,6 +37,7 @@ const WebhookDeliveryConfig = z
   })
   .meta({ id: "WebhookDeliveryConfig" });
 
+/** name admits only "web", the one hook kind the REST API creates. */
 export const WebhookConfig = open({
   name: z.literal("web").optional(),
   config: WebhookDeliveryConfig,
@@ -59,4 +60,5 @@ export const WebhookConfig = open({
     }),
   )
   .meta({ id: "WebhookConfig" });
+
 export type WebhookConfig = z.infer<typeof WebhookConfig>;

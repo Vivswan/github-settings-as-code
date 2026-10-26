@@ -14,15 +14,16 @@ const LIMIT_RULE = `limit is one of ${INTERACTION_GROUPS.join(", ")} (GitHub's i
 const EXPIRY_RULE = `expiry is one of ${INTERACTION_EXPIRIES.join(", ")} (GitHub's interaction durations)`;
 const { minimum: CAP_MIN, maximum: CAP_MAX } = MAX_OPEN_PULL_REQUESTS;
 const CAP_RULE = `max_open_pull_requests is a whole number from ${CAP_MIN} to ${CAP_MAX} (GitHub's range)`;
-/** GitHub caps the list itself, and the cap is what makes single-request reconciliation valid: one write takes it whole. */
 export const BYPASS_MAX = 100;
-
-// GitHub reads the base limit back as limit, origin, and expires_at; the last two are never accepted, and an
-// expires_at declared here would compare unequal on every run.
 const KNOWN_KEYS =
   "interaction_limits takes limit, expiry, pull_request_creation_cap, and pull_request_creation_bypass " +
   "(origin and expires_at are what GitHub reports, not what it accepts); remove the key, or fix its spelling";
 
+/**
+ * The strict mapping's unrecognized-key error, naming what GitHub accepts: it reads the base limit
+ * back as limit, origin, and expires_at, but takes only the first, and an expires_at declared here
+ * would compare unequal on every run.
+ */
 function unknownKeyError(issue: z.core.$ZodRawIssue): string | undefined {
   if (issue.code !== "unrecognized_keys") {
     return undefined;
@@ -31,8 +32,7 @@ function unknownKeyError(issue: z.core.$ZodRawIssue): string | undefined {
   return `${agree(issue.keys.length, "Unrecognized key", "Unrecognized keys")}: ${keys}; ${KNOWN_KEYS}`;
 }
 
-// Not exported: consumers spell it NonNullable<InteractionLimitsConfig>. The definition id stays
-// "InteractionLimitsConfig"; moving it onto the nullable wrapper would change the published schema.
+// Not exported (consumers spell NonNullable<InteractionLimitsConfig>); the "InteractionLimitsConfig" id stays here, since moving it onto the nullable wrapper would change the published schema.
 const InteractionLimits = z
   .strictObject(
     {
@@ -111,5 +111,7 @@ const InteractionLimits = z
   )
   .meta({ id: "InteractionLimitsConfig" });
 
+/** The declared mapping, or null, which clears the base limit alone. */
 export const InteractionLimitsConfig = InteractionLimits.nullable();
+
 export type InteractionLimitsConfig = z.infer<typeof InteractionLimitsConfig>;

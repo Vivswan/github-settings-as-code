@@ -76,11 +76,61 @@ function wrapped<E>(key: NestedKey, entries: E[]): UndeclaredPolicyList<E> {
 }
 
 /**
- * One environment's nested lists read back. The branch policies are listed only while the live
- * flag enables them (the endpoint 404s otherwise); a disabled protection rule is not an active
- * gate, so it is not declared. Each secret becomes a `$NAME` reference with a note asking for it.
- * The policy and rule lists sit behind the Actions grant, not the section's, so a denial there
- * is the key's own: a note under the warn policy, the section's failure under fail.
+ * The two lists behind the Actions grant, not the section's, so a denial there is the key's own: a note
+ * under the warn policy, the section's failure under fail. The branch policies are listed only while the
+ * live flag enables them (the endpoint 404s otherwise); a disabled protection rule is not an active
+ * gate, so it is not declared.
+ */
+async function snapshotGatedLists(
+  ctx: SnapshotContext<typeof ENDPOINTS>,
+  section: SectionMeta,
+  envName: string,
+  liveEnv: LiveEnvironmentBody,
+): Promise<Result<{ nested: NestedSnapshot; notes: string[] }, SectionFailure>> {
+  return safeTry(async function* () {
+    const nested: NestedSnapshot = {};
+    const notes: string[] = [];
+    if (liveEnv.deployment_branch_policy?.custom_branch_policies === true) {
+      const policies = yield* await readOrNote(
+        ctx,
+        notes,
+        `environments[${envName}].deployment_branch_policies`,
+        () => listBranchPolicies(ctx, envName),
+      );
+      if ("value" in policies && policies.value.length > 0) {
+        const byName = yield* policiesByName(section, policies.value, envName);
+        nested.deployment_branch_policies = wrapped(
+          "deployment_branch_policies",
+          [...byName.values()].map((policy) =>
+            projectOntoSchema(DeploymentBranchPolicyConfig, policy),
+          ),
+        );
+      }
+    }
+
+    const rules = yield* await readOrNote(
+      ctx,
+      notes,
+      `environments[${envName}].deployment_protection_rules`,
+      () => listProtectionRules(ctx, envName),
+    );
+    if ("value" in rules) {
+      const enabled = [...(yield* enabledRulesBySlug(section, rules.value, envName)).keys()];
+      if (enabled.length > 0) {
+        nested.deployment_protection_rules = wrapped(
+          "deployment_protection_rules",
+          enabled.map((app) => ({ app })),
+        );
+      }
+    }
+
+    return ok({ nested, notes });
+  });
+}
+
+/**
+ * One environment's nested lists read back: the variables and secrets the engines index, then the two
+ * Actions-gated lists. Each secret becomes a `$NAME` reference with a note asking for it.
  */
 export async function snapshotNested(
   ctx: SnapshotContext<typeof ENDPOINTS>,
@@ -124,39 +174,10 @@ export async function snapshotNested(
         );
       }
     }
-    if (liveEnv.deployment_branch_policy?.custom_branch_policies === true) {
-      const policies = yield* await readOrNote(
-        ctx,
-        notes,
-        `environments[${envName}].deployment_branch_policies`,
-        () => listBranchPolicies(ctx, envName),
-      );
-      if ("value" in policies && policies.value.length > 0) {
-        const byName = yield* policiesByName(section, policies.value, envName);
-        nested.deployment_branch_policies = wrapped(
-          "deployment_branch_policies",
-          [...byName.values()].map((policy) =>
-            projectOntoSchema(DeploymentBranchPolicyConfig, policy),
-          ),
-        );
-      }
-    }
-    const rules = yield* await readOrNote(
-      ctx,
-      notes,
-      `environments[${envName}].deployment_protection_rules`,
-      () => listProtectionRules(ctx, envName),
-    );
-    if ("value" in rules) {
-      const enabled = [...(yield* enabledRulesBySlug(section, rules.value, envName)).keys()];
-      if (enabled.length > 0) {
-        nested.deployment_protection_rules = wrapped(
-          "deployment_protection_rules",
-          enabled.map((app) => ({ app })),
-        );
-      }
-    }
-    return ok({ nested, notes });
+
+    const gated = yield* await snapshotGatedLists(ctx, section, envName, liveEnv);
+    notes.push(...gated.notes);
+    return ok({ nested: { ...nested, ...gated.nested }, notes });
   });
 }
 

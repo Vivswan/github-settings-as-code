@@ -37,8 +37,7 @@ const READ_ONLY_SITE_FIELDS = {
 const EMPTY_SITE_FIX =
   "an empty mapping configures nothing; declare at least one field, declare pages: null to disable the site, or remove the section";
 
-// Not exported: consumers spell it NonNullable<PagesConfig>. The definition id stays "PagesConfig";
-// moving it onto the nullable wrapper would change the published schema.
+// Not exported: consumers spell it NonNullable<PagesConfig>; the definition id stays "PagesConfig", since moving it onto the nullable wrapper would change the published schema.
 const PagesSite = open({
   build_type: z.enum(PAGES_BUILD_TYPES).optional(),
   source: open({ branch: z.string(), path: z.enum(PAGES_SOURCE_PATHS).optional() }).optional(),
@@ -77,7 +76,9 @@ const PagesSite = open({
     not: { anyOf: Object.keys(READ_ONLY_SITE_FIELDS).map((key) => ({ required: [key] })) },
   });
 
+/** The section's shape; null is the declared "Pages off". */
 export const PagesConfig = PagesSite.nullable();
+
 export type PagesConfig = z.infer<typeof PagesConfig>;
 
 /** The site's own keys: a declared one the GET omits is drift the PUT resolves, so only a key outside this shape is a phantom. */

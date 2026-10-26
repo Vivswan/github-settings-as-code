@@ -1,14 +1,13 @@
-/** The `deploy_keys:` section's schema slice; root src/schema.ts composes the SettingsFile property from it. */
+/**
+ * The `deploy_keys:` section's schema slice; root src/schema.ts composes the SettingsFile property from it.
+ * PUBLIC_KEY_ALGORITHMS is listed by hand in the docs field note and leaves out DSA (ssh-dss): GitHub stopped
+ * accepting it on 2022-03-15, so a DSA key passing the parse would only fail at the create.
+ */
 
 import { err, ok, type Result } from "neverthrow";
 import { z } from "zod";
 import { open, rule } from "../shared/schema-helpers.js";
 
-/**
- * The key types GitHub accepts for a deploy key; the docs field note lists them for the reader. DSA (ssh-dss) is
- * absent on purpose: GitHub stopped accepting DSA keys on 2022-03-15, so a DSA key passing here would only fail at the
- * create request.
- */
 export const PUBLIC_KEY_ALGORITHMS = [
   "ssh-ed25519",
   "ssh-rsa",
@@ -18,11 +17,11 @@ export const PUBLIC_KEY_ALGORITHMS = [
   "sk-ssh-ed25519@openssh.com",
   "sk-ecdsa-sha2-nistp256@openssh.com",
 ] as const;
+const ALGORITHMS = new Set<string>(PUBLIC_KEY_ALGORITHMS);
 
 const BASE64_QUARTET = "[A-Za-z0-9+/]{4}";
 const BASE64_BLOB = `(?:${BASE64_QUARTET})*(?:${BASE64_QUARTET}|[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)`;
 
-/** The one field separator; the rejection helpers split on it so they see the fields the pattern saw. */
 const FIELD_SEPARATOR = String.raw`[ \t]`;
 
 /** A second line is refused rather than dropped, so nothing pasted after a valid key is silently normalized away. */
@@ -34,33 +33,29 @@ function materialPattern(algorithms: string): RegExp {
 
 const FIELDS = new RegExp(`${FIELD_SEPARATOR}+`);
 const LINE_BREAK = /[\r\n]/;
-/** Whitespace the pattern never accepts as a separator, a non-breaking space for one; a comment may hold it. */
 const ODD_WHITESPACE = /[^\S \t\r\n]/;
 
+/** Splits on FIELD_SEPARATOR, so the rejection helpers see the fields the pattern saw. */
 function fieldsOf(raw: string): string[] {
   return raw.split(FIELDS).filter((field) => field !== "");
 }
 
-/**
- * The ONE acceptance rule for DECLARED deploy key material: the runtime parses through it and the published JSON
- * schema carries its source as the field's `pattern`, so an editor and the run agree.
- */
+// The ONE acceptance rule for DECLARED material: the runtime parses through it and the published JSON schema carries its source as the field's pattern, so an editor and the run agree.
 const PUBLIC_KEY_PATTERN = materialPattern(
   PUBLIC_KEY_ALGORITHMS.map((algorithm) => algorithm.replaceAll(".", "\\.")).join("|"),
 );
 
-/**
- * The rule for material GitHub STORED: any algorithm token. GitHub validated the key when it accepted it and is
- * the authority on what it takes, so a live key under an algorithm this list lacks must not abort the section.
- */
+// The rule for material GitHub STORED, any algorithm token: GitHub validated the key when it accepted it, so a live key under an algorithm PUBLIC_KEY_ALGORITHMS lacks must not abort the section.
 const STORED_KEY_PATTERN = materialPattern(String.raw`\S+`);
 
-const ALGORITHMS = new Set<string>(PUBLIC_KEY_ALGORITHMS);
+// The header and footer framing of every PEM and OpenSSH private key, assembled at runtime so no source line holds the string a secret scanner flags.
+const PRIVATE_KEY_FRAMING = ["PRIVATE", "KEY-----"].join(" ");
 
 /** Whether the settings file can declare a key under this algorithm; a live key under any other is outside the section. */
 export function declaresAlgorithm(algorithm: string): boolean {
   return ALGORITHMS.has(algorithm);
 }
+
 const PUBLIC_KEY_FORM = `one line, "<algorithm> <base64> [comment]", with the algorithm one of ${PUBLIC_KEY_ALGORITHMS.join(", ")}`;
 const FEWER_THAN_TWO_FIELDS = "the key has fewer than two fields separated by a space or tab";
 const HAS_LINE_BREAK = "the key contains a line break";
@@ -68,12 +63,6 @@ const HAS_ODD_WHITESPACE =
   "the key contains whitespace other than a space or tab (a non-breaking space, for one)";
 const BLOB_NOT_BASE64 =
   "the key's second field is not base64 (the alphabet A-Z a-z 0-9 + / with = padding to a multiple of four)";
-
-/**
- * The framing every PEM and OpenSSH private key carries in its header and footer, assembled at runtime so no
- * source line holds the string a secret scanner flags as a private key.
- */
-const PRIVATE_KEY_FRAMING = ["PRIVATE", "KEY-----"].join(" ");
 
 /** `material` is the comparable form, algorithm + blob: GitHub may strip or rewrite the comment on storage. */
 export interface PublicKeyMaterial {
@@ -112,7 +101,8 @@ function declaredRejection(raw: string): string {
 
 /**
  * The shape rules both readings share, in the order a reader fixes them; undefined once the value is two or more
- * fields on one line, so that only the algorithm or the blob can have failed the pattern.
+ * fields on one line, so that only the algorithm or the blob can have failed the pattern. Only those two fields are
+ * tested for odd whitespace (a non-breaking space, for one), since a comment may hold it.
  */
 function formRejection(
   raw: string,
@@ -153,12 +143,12 @@ export function parseStoredKey(raw: string): Result<PublicKeyMaterial, string> {
   return parseMaterial(STORED_KEY_PATTERN, raw, storedRejection);
 }
 
+/** The check is entry-level so the refusal can name the entry by title; a field-level one would know only the index. */
 export const DeployKeyConfig = open({
   title: z.string(),
   key: z.string().meta({ pattern: PUBLIC_KEY_PATTERN.source }),
   read_only: z.boolean().optional(),
 })
-  // Entry-level so the refusal can name the entry by title; the field-level form would know only the index.
   .check(
     rule((entry, refineCtx) => {
       // The key or the title may be raw beside its own shape issue (see ../shared/raw-values.ts): a non-string key is
@@ -179,4 +169,5 @@ export const DeployKeyConfig = open({
     }),
   )
   .meta({ id: "DeployKeyConfig" });
+
 export type DeployKeyConfig = z.infer<typeof DeployKeyConfig>;

@@ -15,16 +15,10 @@ import { isPlainObject } from "../../plain-data.js";
 import { rule as gatedRule, open } from "../shared/schema-helpers.js";
 import { RULE_OVERRIDES, withOverrides } from "./rule-overrides.js";
 
-// --- Ref-name conditions ------------------------------------------------------
-
 /** The two tokens GitHub reads in a ref-name pattern; any other "~" means nothing, since no ref name contains one. */
 const REF_NAME_TOKENS = ["~ALL", "~DEFAULT_BRANCH"] as const;
 
-/**
- * What git check-ref-format refuses in a ref name and a ruleset fnmatch pattern has no use for either (GitHub
- * documents "\\" quoting and "[^...]" as unsupported): "~" outside the two tokens, "^", ":", "\\", space, "..", "@{",
- * and control characters. A pattern carrying one is a typo. "*", "?", and "[" are pattern syntax and stay.
- */
+// What git check-ref-format refuses in a ref name and a ruleset fnmatch pattern has no use for (GitHub documents "\\" quoting and "[^...]" as unsupported), so a pattern carrying one is a typo; "*", "?", and "[" are pattern syntax and stay.
 const REF_NAME_ILLEGAL = String.raw`[~^:\\ \x00-\x1f\x7f]|\.\.|@\{`;
 
 /** A token, or a value with no illegal sequence at any position; as a regex so the published schema carries the rule. */
@@ -54,10 +48,10 @@ function refNamePatterns(field: z.ZodOptional<z.ZodArray<z.ZodString>>) {
     .optional();
 }
 
+// The generated ref_name body; Conditions rebuilds it below with the ref-name grammar on its two lists.
 const refName = RulesetConditions.shape.ref_name.unwrap();
 
-// open() over the generated body at both levels, which only the section can mint (shared/schema-marks.ts): the
-// published form keeps saying nothing about undeclared keys, and the parsed type carries no index signature.
+// open() at both levels, which only the section can mint (shared/schema-marks.ts): the published form keeps saying nothing about undeclared keys, and the parsed type carries no index signature.
 const Conditions = open({
   ...RulesetConditions.shape,
   ref_name: open({
@@ -67,8 +61,6 @@ const Conditions = open({
   }).optional(),
 }).meta(RulesetConditions.meta() ?? {});
 
-// --- Bypass actors --------------------------------------------------------------
-
 /** The actor types whose actor_id GitHub requires; OrganizationAdmin ignores it and DeployKey documents it as null. */
 const IDENTIFIED_ACTOR_TYPES: ReadonlySet<string> = new Set([
   "Integration",
@@ -77,11 +69,7 @@ const IDENTIFIED_ACTOR_TYPES: ReadonlySet<string> = new Set([
   "User",
 ]);
 
-/**
- * The three refusals the descriptor states in prose alone. Rebuilt from the generated shape, not checked in place:
- * a check clone keeps its parent, and the published schema would then meet the id twice. The id and prose come
- * back through the meta.
- */
+// The three refusals the descriptor states in prose alone, rebuilt from the generated shape rather than checked in place: a check clone keeps its parent, so the published schema would meet the id twice.
 const BypassActor = z
   .looseObject(BypassActorConfig.shape)
   .check(
@@ -113,17 +101,13 @@ const BypassActor = z
   )
   .meta(BypassActorConfig.meta() ?? {});
 
-// --- Rules ------------------------------------------------------------------------
-
+// The generated rule shapes with the parameter checks the descriptor states in prose alone (rule-overrides.ts).
 const RULES = withOverrides(SPEC_RULES, RULE_OVERRIDES);
 
+/** The e2e mock reads this list too, to answer GitHub's 422 for a rules[].type the descriptor does not know. */
 export const KNOWN_RULE_TYPES: readonly string[] = RULES.map((known) => known.shape.type.value);
 
-/**
- * A rule type the spec does not know passes through untouched, so a type GitHub ships tomorrow reaches it the
- * day it ships and a typo'd type comes back as GitHub's own 422 (the rulesets-invalid-rule-type scenario).
- * The published schema says the same through `not`.
- */
+// A rule type the spec does not know passes through untouched, so a type GitHub ships tomorrow reaches it the day it ships and a typo'd type comes back as GitHub's own 422 (the rulesets-invalid-rule-type scenario).
 const UnknownRule = z
   .looseObject({
     type: z
@@ -161,8 +145,6 @@ function ruleUnionError(issue: z.core.$ZodRawIssue): string | undefined {
 const RuleConfig = z
   .union([z.discriminatedUnion("type", [...RULES]), UnknownRule], { error: ruleUnionError })
   .meta({ id: "RuleConfig" });
-
-// --- The ruleset --------------------------------------------------------------------
 
 export const RulesetConfig = open({
   name: z.string(),

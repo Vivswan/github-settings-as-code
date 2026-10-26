@@ -21,6 +21,7 @@ export const CODE_QUALITY_LANGUAGES = {
   declarable: ["csharp", "go", "java-kotlin", "javascript-typescript", "python", "ruby"],
   getOnly: { rust: null },
 } as const satisfies SetupLanguages;
+
 type _VocabularyIsTheVendoredSpec = MustBeNever<
   VocabularyDrift<
     typeof CODE_QUALITY_LANGUAGES,

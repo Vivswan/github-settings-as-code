@@ -4,6 +4,7 @@ import { z } from "zod";
 import { minLength, open, rule } from "../shared/schema-helpers.js";
 import { compileFailure } from "./compilable-form.js";
 
+/** "" cannot mean "clear the delimiter" (the PATCH updates provided fields only), so the spelling fails at document validation, before any repository is touched. */
 const DELIMITER_CLEAR_ERROR =
   "a delimiter cannot be cleared with an empty string; remove the pattern and redeclare it without the field instead";
 
@@ -59,8 +60,6 @@ export function unverifiableRegexFields(entry: unknown): string[] {
 export const SecretScanningPatternConfig = open({
   name: z.string(),
   pattern: regexSource(),
-  // "" cannot mean "clear the delimiter" (the PATCH updates provided fields only), so the spelling
-  // fails at document validation, before any repository is touched.
   start_delimiter: regexSource().check(minLength(1, DELIMITER_CLEAR_ERROR)).optional(),
   end_delimiter: regexSource().check(minLength(1, DELIMITER_CLEAR_ERROR)).optional(),
   must_match: z.array(regexSource()).optional(),

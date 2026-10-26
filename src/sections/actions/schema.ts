@@ -15,18 +15,14 @@ import { open, rule } from "../shared/schema-helpers.js";
 /** GitHub's rule for an OIDC claim key; the PUT 422s on anything else. */
 const CLAIM_KEY = /^[A-Za-z0-9_]+$/;
 
-/**
- * The fields the GET reports and the PUT does not take, as [path to the holder, field]: a declared value
- * can only diff against live and re-PUT forever, so the document is refused with the key named. The
- * holder is read off the open() parse output, which is how the refinement sees a key the shape does
- * not declare.
- */
+/** [path to the holder, field] pairs the GET reports and the PUT does not take; declared, one could only diff against live and re-PUT forever, so the parse refuses it by name. */
 const REPORTED_ONLY: readonly (readonly [readonly string[], string])[] = [
   [[], "selected_actions_url"],
   [["artifact_and_log_retention"], "maximum_allowed_days"],
   [["oidc_customization_sub"], "sub_claim_prefix"],
 ];
 
+/** The holder is read off the open() parse output, which is how the refinement sees a key the shape does not declare. */
 function refuseReportedOnly(ctx: z.core.$RefinementCtx, declared: object): void {
   for (const [path, field] of REPORTED_ONLY) {
     const holder = path.reduce<unknown>(
@@ -75,12 +71,7 @@ const ClaimKeys = z
     }),
   );
 
-/**
- * The two templates are two variants, discriminated on use_default, so the claim-key list has no
- * home on the default one and the plan narrows on the flag instead of re-checking it. The default
- * variant is open(), so a list declared beside use_default: true is refused by name here rather
- * than riding through.
- */
+/** Two variants discriminated on use_default, so the plan narrows on the flag instead of re-checking it; the default variant is open(), so a list declared beside use_default: true is refused by name here rather than riding through. */
 export const OidcTemplate = z
   .discriminatedUnion("use_default", [
     open({ use_default: z.literal(true), use_immutable_subject: z.boolean().optional() }),
@@ -105,6 +96,7 @@ export const OidcTemplate = z
     }),
   );
 
+/** The declared actions: mapping, open so an undeclared key rides through to the base permissions PUT. */
 export const ActionsConfig = open({
   enabled: z.boolean().optional(),
   allowed_actions: z.enum(ALLOWED_ACTIONS).optional(),
@@ -149,4 +141,5 @@ export const ActionsConfig = open({
     }),
   )
   .meta({ id: "ActionsConfig" });
+
 export type ActionsConfig = z.infer<typeof ActionsConfig>;

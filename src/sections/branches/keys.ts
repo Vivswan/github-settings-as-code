@@ -4,16 +4,10 @@
  * would otherwise never read back equal and drift forever, or 422 where the PUT expects a boolean.
  */
 
+/** The echoes by name; the links (url, *_url) match by suffix in isUrlKey. */
 export const GET_ONLY_KEYS: ReadonlySet<string> = new Set(["name", "enabled", "enforcement_level"]);
 
-export const isUrlKey = (key: string): boolean => key === "url" || key.endsWith("_url");
-
-export const isGetOnlyKey = (key: string): boolean => GET_ONLY_KEYS.has(key) || isUrlKey(key);
-
-/**
- * The controls the PUT takes as a bare boolean and the GET wraps as {url, enabled};
- * graphql-vocabulary.ts pins its twin table to this list, so a control added there is added here first.
- */
+// The controls the PUT takes as a bare boolean and the GET wraps as {url, enabled}; graphql-vocabulary.ts pins its twin table to this list, so a control added there is added here first.
 const BOOLEAN_CONTROLS = [
   "enforce_admins",
   "required_linear_history",
@@ -25,14 +19,22 @@ const BOOLEAN_CONTROLS = [
   "allow_fork_syncing",
   "required_signatures",
 ] as const;
-export type BooleanControl = (typeof BOOLEAN_CONTROLS)[number];
+
+/** The string-keyed view for the walks whose keys are plain strings. */
 export const BOOLEAN_CONTROL_SET: ReadonlySet<string> = new Set(BOOLEAN_CONTROLS);
 
-/**
- * The controls whose PUT schema marks the boolean nullable, null being the "off" spelling; the PUT
- * 422s null under any other control.
- */
+/** The controls whose PUT schema marks the boolean nullable, null being the "off" spelling; the PUT 422s null under any other control. */
 export const NULLABLE_CONTROLS: ReadonlySet<string> = new Set<BooleanControl>([
   "enforce_admins",
   "allow_force_pushes",
 ]);
+
+export type BooleanControl = (typeof BOOLEAN_CONTROLS)[number];
+
+export function isUrlKey(key: string): boolean {
+  return key === "url" || key.endsWith("_url");
+}
+
+export function isGetOnlyKey(key: string): boolean {
+  return GET_ONLY_KEYS.has(key) || isUrlKey(key);
+}

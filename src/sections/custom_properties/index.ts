@@ -1,12 +1,14 @@
 /**
  * `custom_properties:` section: values of organization-defined custom properties, set through ONE
  * bulk PATCH. Definitions are org-scoped, so only values are managed; a personal account no-ops
- * with a note, and `value: null` unsets (reverting to the org default). Bespoke, not on listSection:
- * every value rides one write, so there is no per-item create, update, or delete to declare.
+ * with a note, and `value: null` unsets (reverting to the org default), so a higher layer's null is
+ * the value, never a marker for the lower one. Bespoke, not on listSection: every value rides one
+ * write, so there is no per-item create, update, or delete to declare.
  */
 
 import { ok, type Result } from "neverthrow";
 import { z } from "zod";
+import type { UndeclaredPolicy } from "../../types.js";
 import { type DeclaredIssue, declaredEntries } from "../contract/declared.js";
 import {
   undeclaredDrift,
@@ -119,11 +121,12 @@ const LiveProperty = z.looseObject({
   property_name: z.string(),
   value: z.union([z.string(), z.array(z.string()), z.null()]),
 });
+type LiveProperty = z.infer<typeof LiveProperty>;
 
 function propertiesByName(
   section: SectionMeta,
-  live: readonly z.infer<typeof LiveProperty>[],
-): Result<Map<string, z.infer<typeof LiveProperty>>, SectionFailure> {
+  live: readonly LiveProperty[],
+): Result<Map<string, LiveProperty>, SectionFailure> {
   return liveByIdentity(
     section,
     "custom property",
@@ -140,11 +143,110 @@ interface PendingUpdate {
   readonly change: string;
 }
 
-// Verbatim: GitHub documents no case folding for property names, so entries are duplicates only when they match exactly.
-// `value: null` unsets the property, so a higher layer's null is the value, never a marker for the lower one.
+/** What the undeclared walk needs besides the live values: who is declared, and what the policy says to do with the rest. */
+interface Undeclared {
+  readonly declaredNames: ReadonlySet<string>;
+  readonly policy: UndeclaredPolicy;
+  readonly listDefault: UndeclaredPolicy;
+}
+
+/** The pending updates of the declared properties whose live value differs; a declared null unsets. */
+function declaredUpdates(
+  desired: readonly CustomPropertyConfig[],
+  liveByName: ReadonlyMap<string, LiveProperty>,
+): PendingUpdate[] {
+  const updates: PendingUpdate[] = [];
+  for (const property of desired) {
+    const name = property.property_name;
+    const wanted = normalizeValue(property.value);
+    // A live null and an absent live entry both mean "unset".
+    const current = liveByName.get(name)?.value ?? null;
+    if (sameValue(wanted, current)) {
+      continue;
+    }
+
+    const label = `custom_properties[${name}]`;
+    if (wanted === null) {
+      updates.push({
+        property_name: name,
+        value: null,
+        drift: `${label}: declared null but the live value is ${show(current)}; apply will unset it (reverting to the org default, if any)`,
+        change: `unset custom property "${name}"`,
+      });
+      continue;
+    }
+
+    updates.push({
+      property_name: name,
+      value: wanted,
+      drift: valueDrift(label, show(wanted), show(current)),
+      change: `set custom property "${name}" to ${show(wanted)}`,
+    });
+  }
+
+  return updates;
+}
+
+/** The unsets of the live properties set but undeclared; under the keep policy each earns a note instead. */
+function undeclaredUpdates(
+  live: readonly LiveProperty[],
+  undeclared: Undeclared,
+  notes: string[],
+): PendingUpdate[] {
+  const updates: PendingUpdate[] = [];
+  for (const property of live) {
+    const name = property.property_name;
+    if (undeclared.declaredNames.has(name) || property.value === null) {
+      continue;
+    }
+
+    if (undeclared.policy === "keep") {
+      notes.push(
+        undeclaredNote({
+          subject: `custom property "${name}"`,
+          state: "is set on the repo but not declared",
+          action: "UNSET it",
+        }),
+      );
+      continue;
+    }
+
+    updates.push({
+      property_name: name,
+      value: null,
+      drift: undeclaredDrift(undeclared.listDefault, {
+        label: `custom_properties[${name}]`,
+        action: "unset it (reverting to the org default, if any)",
+      }),
+      change: `unset undeclared custom property "${name}"`,
+    });
+  }
+
+  return updates;
+}
+
+/** The one PATCH carrying every pending update, its drift and change lines one per property; undefined with none. */
+function bulkUpdate(updates: readonly PendingUpdate[]): PlannedOp<typeof ENDPOINTS> | undefined {
+  const [first, ...rest] = updates;
+  if (first === undefined) {
+    return undefined;
+  }
+
+  return {
+    role: "update",
+    payload: {
+      properties: updates.map(({ property_name, value }) => ({ property_name, value })),
+    },
+    describe: "updating custom property values",
+    drift: [first.drift, ...rest.map((update) => update.drift)],
+    change: () => ok([first.change, ...rest.map((update) => update.change)] as const),
+  };
+}
+
 const IDENTITY = identifiedBy("custom_properties", "property_name", "custom property");
 
 export const customPropertiesSection = {
+  // Verbatim: GitHub documents no case folding for property names, so entries are duplicates only when they match exactly.
   ...IDENTITY,
   undeclaredDefault: "keep",
   permission,
@@ -170,77 +272,23 @@ export const customPropertiesSection = {
     ];
   },
   async plan(ctx, declared) {
-    const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
+    const listDefault = defaultUndeclaredPolicy(this);
+    const { policy, entries: desired } = undeclaredPolicy(declared, listDefault);
     const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
     // Not paginated upstream: one GET carries every value.
     return ctx.read.list.call(z.array(LiveProperty)).andThen((live) =>
       propertiesByName(this, live).map((liveByName) => {
         const declaredNames = new Set(desired.map((p) => p.property_name));
+        const undeclared: Undeclared = { declaredNames, policy, listDefault };
+        const updates = [
+          ...declaredUpdates(desired, liveByName),
+          ...undeclaredUpdates(live, undeclared, plan.notes),
+        ];
 
-        // A live null and an absent live entry both mean "unset".
-        const updates: PendingUpdate[] = [];
-        for (const property of desired) {
-          const name = property.property_name;
-          const wanted = normalizeValue(property.value);
-          const current = liveByName.get(name)?.value ?? null;
-          if (sameValue(wanted, current)) {
-            continue;
-          }
-          const label = `custom_properties[${name}]`;
-          updates.push(
-            wanted === null
-              ? {
-                  property_name: name,
-                  value: null,
-                  drift: `${label}: declared null but the live value is ${show(current)}; apply will unset it (reverting to the org default, if any)`,
-                  change: `unset custom property "${name}"`,
-                }
-              : {
-                  property_name: name,
-                  value: wanted,
-                  drift: valueDrift(label, show(wanted), show(current)),
-                  change: `set custom property "${name}" to ${show(wanted)}`,
-                },
-          );
+        const update = bulkUpdate(updates);
+        if (update !== undefined) {
+          plan.ops.push(update);
         }
-        for (const property of live) {
-          const name = property.property_name;
-          if (declaredNames.has(name) || property.value === null) {
-            continue;
-          }
-          if (policy === "keep") {
-            plan.notes.push(
-              undeclaredNote({
-                subject: `custom property "${name}"`,
-                state: "is set on the repo but not declared",
-                action: "UNSET it",
-              }),
-            );
-            continue;
-          }
-          updates.push({
-            property_name: name,
-            value: null,
-            drift: undeclaredDrift(defaultUndeclaredPolicy(this), {
-              label: `custom_properties[${name}]`,
-              action: "unset it (reverting to the org default, if any)",
-            }),
-            change: `unset undeclared custom property "${name}"`,
-          });
-        }
-        const [first, ...rest] = updates;
-        if (first === undefined) {
-          return plan;
-        }
-        plan.ops.push({
-          role: "update",
-          payload: {
-            properties: updates.map(({ property_name, value }) => ({ property_name, value })),
-          },
-          describe: "updating custom property values",
-          drift: [first.drift, ...rest.map((update) => update.drift)],
-          change: () => ok([first.change, ...rest.map((update) => update.change)] as const),
-        });
         return plan;
       }),
     );

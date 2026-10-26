@@ -32,6 +32,7 @@ export const CODE_SCANNING_LANGUAGES = {
   ],
   getOnly: { javascript: "javascript-typescript", typescript: "javascript-typescript" },
 } as const satisfies SetupLanguages;
+
 type _VocabularyIsTheVendoredSpec = MustBeNever<
   VocabularyDrift<
     typeof CODE_SCANNING_LANGUAGES,

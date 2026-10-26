@@ -18,6 +18,7 @@ import { type EnvironmentKey, environmentKey, MAX_PINNED_ENVIRONMENTS } from "./
 const PINS_SELECTION =
   "($owner: String!, $repo: String!, $cursor: String) { repository(owner: $owner, name: $repo) { pinnedEnvironments(first: 100, after: $cursor) { nodes { position environment { name } } pageInfo { hasNextPage endCursor } } } }";
 
+// The planner's read; its tolerated NOT_FOUND is what listLivePins reads as "no pins".
 const PINS_QUERY = graphqlOp<{ owner: string; repo: string }>()({
   name: "EnvironmentPins",
   kind: "read",
@@ -30,10 +31,7 @@ const PINS_QUERY = graphqlOp<{ owner: string; repo: string }>()({
   },
 });
 
-/**
- * The snapshot's read of the same pins. No write follows a snapshot to surface a denial, so
- * NOT_FOUND is not tolerated here: a concealed denial fails the read with the grant advice.
- */
+// The snapshot's read of the same pins: no write follows a snapshot to surface a denial, so NOT_FOUND is not tolerated here and a concealed denial fails the read with the grant advice.
 const PINS_SNAPSHOT = graphqlOp<{ owner: string; repo: string }>()({
   name: "EnvironmentPinsSnapshot",
   kind: "read",
@@ -42,10 +40,7 @@ const PINS_SNAPSHOT = graphqlOp<{ owner: string; repo: string }>()({
   outcomes: { ok: "the pinned environments with their 1-based positions, for the snapshot" },
 });
 
-/**
- * Verified live: a new pin lands at the TAIL (so appends are modelled locally), and UNPROCESSABLE
- * is GitHub's cap rejection, the belt under the plan's own gate.
- */
+// Verified live: a new pin lands at the TAIL (so appends are modelled locally), and UNPROCESSABLE is GitHub's cap rejection, the belt under the plan's own gate.
 const PIN_ENVIRONMENT = graphqlOp<{ environmentId: string; pinned: boolean }>()({
   name: "PinEnvironment",
   kind: "write",
@@ -61,11 +56,7 @@ const PIN_ENVIRONMENT = graphqlOp<{ environmentId: string; pinned: boolean }>()(
   },
 });
 
-/**
- * Verified live: the position is a 1-based RANK, and this is the only mutation that renumbers the
- * list (it reads back contiguous afterwards). The reconciler only ever moves a pin LEFT, toward
- * rank 1, where remove-and-insert semantics are unambiguous.
- */
+// Verified live: the position is a 1-based RANK and this is the only mutation that renumbers the list, so the reconciler only ever moves a pin LEFT, toward rank 1, where remove-and-insert semantics are unambiguous.
 const REORDER_ENVIRONMENT = graphqlOp<{ environmentId: string; position: number }>()({
   name: "ReorderEnvironment",
   kind: "write",
@@ -74,6 +65,7 @@ const REORDER_ENVIRONMENT = graphqlOp<{ environmentId: string; position: number 
   outcomes: { ok: "the pinned environment moved to its declared position" },
 });
 
+/** The pin operations: plan() issues them only for a declared pinned key, so a pin-free file's plan never touches /graphql; snapshot reads pinsSnapshot whenever the listing is nonempty. */
 export const GRAPHQL_OPS = {
   pins: PINS_QUERY,
   pinsSnapshot: PINS_SNAPSHOT,
@@ -88,28 +80,49 @@ export type EnvironmentsOp = PlannedOp<typeof ENDPOINTS, typeof GRAPHQL_OPS>;
 export type EnvironmentsPlan = SectionPlan<EnvironmentsOp>;
 
 export interface PinDeclaration {
+  /** The entry's name as declared; every lookup folds it through environmentKey. */
   name: string;
+
+  /** true leads the pinned list in declaration order; false unpins. */
   pinned: boolean;
+
   /** Fails when the body lacks a node_id; the plan calls it only from a mutation thunk. */
   nodeId: () => Result<string, SectionFailure>;
 }
 
 interface LivePin {
-  /**
-   * Possibly NON-CONTIGUOUS on live GitHub (unpinning leaves a hole, a new pin appends via a
-   * monotonic counter, only a reorder renumbers), so only its RANK in the sorted list is compared.
-   */
+  /** Possibly NON-CONTIGUOUS on live GitHub (unpinning leaves a hole, a new pin appends via a monotonic counter, only a reorder renumbers), so only its RANK in the sorted list is compared. */
   position: number;
+
+  /** As GitHub names the environment; compared through environmentKey. */
   name: string;
 }
 
 /** The pinned environment names in rank order, as the snapshot orders its pinned entries. */
 export type PinnedNames = readonly string[];
 
-/**
- * A pin needs a numeric position and a name to reconcile by; silently skipping one would let check
- * report falsely clean while apply reordered blind, so the node schema demands both.
- */
+/** What planPins computes from the declarations and the live pins; check renders it and apply executes it. */
+interface PinPlan {
+  /** The live pins declared pinned: false. */
+  unpins: string[];
+
+  /** The declared pins not yet live, in declaration order; each appends at the tail. */
+  pins: string[];
+
+  /** Each a leftward move to a 1-based rank. */
+  reorders: Array<{ name: string; rank: number }>;
+
+  /** Live pins without a declaration that sit among the leading ranks; apply moves them after the declared block. */
+  interleaved: string[];
+
+  /** The pinned count once the plan has run; the cap is never transiently exceeded. */
+  finalCount: number;
+
+  /** The live pin names in rank order, for the order drift line. */
+  liveOrder: string[];
+}
+
+// Both fields are demanded: silently skipping a pin without a position or a name would let check report falsely clean while apply reordered blind.
 const LivePinNode = z.looseObject({
   position: z.number(),
   environment: z.looseObject({ name: z.string() }),
@@ -164,19 +177,7 @@ function rankPins(
  * pinned: false   -> unpinned
  * no declaration  -> never unpinned; moved after the declared block when it sits among the leading ranks
  */
-function planPins(
-  declarations: readonly PinDeclaration[],
-  live: readonly LivePin[],
-): {
-  unpins: string[];
-  pins: string[];
-  /** Each a leftward move to a 1-based rank. */
-  reorders: Array<{ name: string; rank: number }>;
-  interleaved: string[];
-  /** The pinned count once the plan has run; the cap is never transiently exceeded. */
-  finalCount: number;
-  liveOrder: string[];
-} {
+function planPins(declarations: readonly PinDeclaration[], live: readonly LivePin[]): PinPlan {
   const desired = declarations.filter((entry) => entry.pinned).map((entry) => entry.name);
   const desiredKeys = new Set(desired.map(environmentKey));
   const unpinKeys = new Set(
