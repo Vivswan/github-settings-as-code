@@ -17,23 +17,17 @@ import { asObject, type Handler, type Json, noContent, ok, paged } from "./suppo
 export interface ListMockSpec {
   /** The MockState collection the section's live list is served from. */
   readonly collection: (state: MockState) => Json[];
+
   /** GET-shape fields the server fills on create when the body omits them (a label's color, its null description). */
   readonly defaults: Json;
-  /**
-   * The server-owned fields of one item (minted on create, re-applied after every update); a body can never set
-   * them. `siblings` is the repository's collection (the item itself included once stored), for a per-repository
-   * sequence like a milestone number.
-   */
+
+  /** Minted on create and re-applied after every update, so a body can never set them; `siblings` is the repository's collection (the item itself included once stored), for a per-repository sequence like a milestone number. */
   readonly owned: (id: number, slug: string, item: Json, siblings: readonly Json[]) => Json;
-  /**
-   * What the server holds unique per repository, so a create repeating it answers GitHub's 422:
-   * the folded identity field, or another key (deploy keys repeat titles but never material).
-   */
+
+  /** What the server holds unique per repository, so a create repeating it answers GitHub's 422: the folded identity field, or another key (deploy keys repeat titles but never material). */
   readonly unique: "identity" | ((item: Json) => string);
-  /**
-   * A create GitHub refuses against the items already stored (an autolink prefix that begins, or is begun by, a
-   * live one): the 422 message, or undefined when the server accepts it. Runs after the uniqueness rule.
-   */
+
+  /** A create GitHub refuses against the items already stored (an autolink prefix that begins, or is begun by, a live one): the 422 message, or undefined when the server accepts it; runs after the uniqueness rule. */
   readonly rejects?: (item: Json, siblings: readonly Json[]) => string | undefined;
 }
 

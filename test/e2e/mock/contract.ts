@@ -11,29 +11,34 @@ import type { MockResponse } from "./support.js";
  * requests_contain substring-matches "METHOD pathname?query".
  */
 export interface LoggedRequest {
+  /** The HTTP method as sent; a GraphQL request is always a POST, so `graphql` carries its real kind. */
   method: string;
+
+  /** The path with the GHES base prefix stripped, so the runner's rules match one spelling on every server. */
   pathname: string;
+
+  /** The raw query string without its "?", empty when the request sent none. */
   query: string;
+
+  /** The status answered; 0 until the pipeline sets it, and 0 for a connection drop that answered nothing. */
   status: number;
+
   /** The masked resource that denied this request, when a denial fired. */
   deniedBy?: string;
+
+  /** The request body as server.ts parsed it: JSON, or the raw text when it did not parse. */
   body?: unknown;
+
   /** Attached by server.ts, not the pipeline, for the OpenAPI validator; unset for an off-spec response. */
   responseBody?: unknown;
-  /**
-   * Set by server.ts when the whole response is deliberately off the OpenAPI contract (a raw media type, a transport
-   * fault, a chaos body); the validator skips status AND body.
-   */
+
+  /** Set by server.ts when the whole response is deliberately off the OpenAPI contract (a raw media type, a transport fault, a chaos body); the validator skips status AND body. */
   offSpec?: boolean;
-  /**
-   * The handler rejected a body deliberately off the request schema (a passthrough user typo answered with GitHub's real
-   * 422); the validator skips only the request-body SCHEMA check. Copied from MockResponse.requestOffSpec.
-   */
+
+  /** The handler rejected a body deliberately off the request schema (a passthrough user typo answered with GitHub's real 422), so the validator skips only the request-body SCHEMA check; copied from MockResponse.requestOffSpec. */
   requestOffSpec?: boolean;
-  /**
-   * Set when a /graphql request resolved to a declared operation. Where the HTTP method cannot be exact (a GraphQL read
-   * is a POST) consumers read this: the runner's write classification, the "GRAPHQL <opName>" spelling, the coverage tripwire.
-   */
+
+  /** Set when a /graphql request resolved to a declared operation; consumers needing more than the POST read it (the runner's write classification, the "GRAPHQL <opName>" spelling, the coverage tripwire). */
   graphql?: { operationName: string; kind: "read" | "write" };
 }
 
@@ -62,22 +67,17 @@ export interface FaultOption {
 export interface PipelineRunState {
   /** Per-endpoint chaos-corruption counts, mutated in place so `times` is honored. */
   corruptCounts: Map<string, number>;
+
   /** Per-endpoint fault fire counts, mutated in place so `times` is honored. */
   faultCounts: Map<string, number>;
-  /**
-   * Keys whose read was fatally denied this run, per target so one repo's denial never arms another repo's write. The
-   * engine aborts a section at its first fatal denied read, so a later write for the same key proves broken sequencing.
-   */
+
+  /** Keys whose read was fatally denied this run, per target so one repo's denial never arms another's write; the engine aborts a section at its first fatal denied read, so a later write for the same key proves broken sequencing. */
   deniedReadSections: Set<string>;
-  /**
-   * Per slug, the repository.get attempts that faulted at the transport barrier. The probe retries up to 1 + MAX_RETRIES
-   * of them; routes.ts bounds the probe's denial-barrier exemption with this count.
-   */
+
+  /** Per slug, the repository.get attempts that faulted at the transport barrier; the probe retries up to 1 + MAX_RETRIES of them, and routes.ts bounds the probe's denial-barrier exemption with this count. */
   probeGetFaults: Map<string, number>;
-  /**
-   * Slugs whose repository.get delivered a real response. The probe delivers at most once, so any later repository.get
-   * is not the probe and arms the barrier normally.
-   */
+
+  /** Slugs whose repository.get delivered a real response; the probe delivers at most once, so any later repository.get is not the probe and arms the barrier normally. */
   probeGetDelivered: Set<string>;
 }
 
@@ -99,32 +99,34 @@ export type WorkingState =
   | { mode: "single"; state: MockState }
   | { mode: "multi"; multi: MultiMockState };
 
+/**
+ * What one request runs against. `checkMode` is the scenario's mode ORed with the server's one-way enterCheckMode()
+ * override, so the convergence re-run (same server, check-mode child) arms the barrier although the scenario is still
+ * apply-mode.
+ */
 export interface PipelineOptions extends PipelineRunState {
   scenario: Scenario;
   working: WorkingState;
   basePrefix?: string;
   corrupt?: CorruptOption;
   faults?: FaultOption[];
-  /**
-   * The scenario's mode ORed with the server's one-way enterCheckMode() override, so the convergence re-run (same
-   * server, check-mode child) arms the barrier although the scenario is still apply-mode.
-   */
   checkMode: boolean;
 }
 
 export interface PipelineResult {
+  /** What the transport writes, unless `wire` takes over. */
   response: MockResponse;
+
+  /** The entry server.ts appends to the request log, its status already that of the answer. */
   log: LoggedRequest;
+
+  /** A mock-contract violation server.ts collects; a scenario with any fails. */
   violation?: string;
-  /**
-   * "drop" destroys the socket before any response bytes leave: a true network failure the client's retries absorb
-   * (times 1) or exhaust into a hard connectivity error. The log still records the attempt with status 0.
-   */
+
+  /** "drop" destroys the socket before any response bytes leave, a true network failure the client's retries absorb (times 1) or exhaust into a hard connectivity error; the log still records the attempt with status 0. */
   wire?: { kind: "raw"; text: string } | { kind: "drop" };
-  /**
-   * A deliberate off-contract body the validator must skip, else it re-reports a fault the test already asserts.
-   * Raw-media-type bodies are exempted separately in server.ts, keyed on the request's Accept header, not this flag.
-   */
+
+  /** A deliberate off-contract body the validator must skip, else it re-reports a fault the test already asserts; raw-media-type bodies are exempted separately in server.ts, keyed on the request's Accept header. */
   offSpecBody?: boolean;
 }
 

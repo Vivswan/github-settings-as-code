@@ -49,155 +49,153 @@ interface LabelsGenerate {
 export interface LiveState {
   /** Partial repo object merged (deep) over repo.json. */
   repo?: Json;
+
   /** Replaces the baseline; a seed may be sparse ({name, color}), buildState completes it. */
   labels?: Json[] | { generate: LabelsGenerate };
+
   /** Repository rulesets (summary + full bodies), replaces the baseline. */
   rulesets?: Json[];
+
   /** Branch protection keyed by branch name; null means "unprotected". */
   branch_protection?: Record<string, Json | null>;
-  /**
-   * GraphQL-only fields of LITERAL rules (bypassForcePushActors as actor strings, requiresDeployments,
-   * requiredDeploymentEnvironments), keyed by branch: the REST GET shape cannot carry them, so the rules
-   * query merges them into the node it projects from branch_protection.
-   */
+
+  /** GraphQL-only fields of LITERAL rules, keyed by branch (bypassForcePushActors as actor strings, requiresDeployments, requiredDeploymentEnvironments); the rules query merges them into the node it projects from branch_protection. */
   branch_protection_graphql?: Record<string, Json>;
-  /**
-   * WILDCARD-pattern classic rules, invisible to every REST protection endpoint like on GitHub and served
-   * only by the GraphQL rules query. Seeds use the internal rule shape (GraphQL field names,
-   * bypassForcePushActors as actor strings); buildState completes them and stamps their ids.
-   */
+
+  /** WILDCARD-pattern classic rules in the internal rule shape (GraphQL field names, actor strings), served only by the GraphQL rules query and invisible to REST like on GitHub; buildState completes them and stamps their ids. */
   branch_protection_rules?: Json[];
+
   /** Branch names that exist on the repo (drives the advisory branch probe). */
   branches?: string[];
+
   /** Deployment environments keyed by name (GET shape). */
   environments?: Record<string, Json>;
+
   /** Per-environment Actions variables (GET shape), keyed by environment name. */
   environment_variables?: Record<string, Json[]>;
-  /**
-   * Per-environment deployment branch-policy patterns (GET shape {id, name, type}), keyed by environment.
-   * Served only while the environment's deployment_branch_policy enables custom_branch_policies; the
-   * endpoints 404 otherwise, like GitHub.
-   */
+
+  /** Per-environment deployment branch-policy patterns (GET shape {id, name, type}), keyed by environment; served only while the environment's deployment_branch_policy enables custom_branch_policies, the endpoints 404 otherwise like GitHub. */
   environment_branch_policies?: Record<string, Json[]>;
-  /**
-   * Per-environment enabled custom deployment protection rules (GET shape), keyed by environment. Seed
-   * apps from PROTECTION_RULE_APPS so the available-Apps listing agrees with them.
-   */
+
+  /** Per-environment enabled custom deployment protection rules (GET shape), keyed by environment; seed apps from PROTECTION_RULE_APPS so the available-Apps listing agrees with them. */
   environment_protection_rules?: Record<string, Json[]>;
-  /**
-   * A plain string takes the next contiguous position; the object form seeds an explicit, possibly HOLE-Y
-   * position, since live GitHub does not renumber on unpin. Seeded names should exist in `environments`:
-   * a pin's target is always a real environment.
-   */
+
+  /** A plain string takes the next contiguous position; the object form seeds an explicit, possibly HOLE-Y position, since live GitHub does not renumber on unpin; a seeded name should exist in `environments`. */
   pinned_environments?: Array<string | { name: string; position: number }>;
+
   /** Autolinks, replaces the baseline; a sparse seed is completed like a label. */
   autolinks?: Json[];
+
   /** GET /actions/permissions body. */
   actions_permissions?: Json;
+
   /** GET /actions/permissions/selected-actions body. */
   selected_actions?: Json;
+
   /** GET /actions/permissions/workflow body. */
   workflow_permissions?: Json;
+
   /** GET /actions/permissions/access body. */
   actions_access?: Json;
+
   /** GET /actions/permissions/artifact-and-log-retention body. */
   actions_retention?: Json;
+
   /** GET /actions/cache/retention-limit body. */
   cache_retention_limit?: Json;
+
   /** GET /actions/cache/storage-limit body. */
   cache_storage_limit?: Json;
+
   /** GET /actions/oidc/customization/sub body. */
   oidc_customization_sub?: Json;
+
   /** GET /actions/permissions/fork-pr-contributor-approval body. */
   fork_pr_contributor_approval?: Json;
+
   /** GET /actions/permissions/fork-pr-workflows-private-repos body. */
   fork_pr_workflows_private_repos?: Json;
-  /**
-   * Actions secrets list items (GET shape: {name, created_at, updated_at}). Values are never part of the
-   * GET shape; the mock tracks a digest of each uploaded value separately.
-   */
+
+  /** Actions secrets list items (GET shape: {name, created_at, updated_at}); values are never part of the GET shape, the mock tracks a digest of each uploaded value separately. */
   actions_secrets?: Json[];
+
   /** Dependabot secrets list items, same GET shape as actions_secrets. */
   dependabot_secrets?: Json[];
+
   /** Codespaces secrets list items, same GET shape as actions_secrets. */
   codespaces_secrets?: Json[];
+
   /** Copilot agents secrets list items, same GET shape as actions_secrets. */
   agents_secrets?: Json[];
+
   /** Per-environment Actions secrets, same GET shape as actions_secrets; digests are tracked per environment. */
   environment_secrets?: Record<string, Json[]>;
+
   /** Workflows list items ({id, name, path, state}), replaces the baseline. */
   workflows?: Json[];
+
   /** GET /pages body, or null for "Pages not enabled". */
   pages?: Json | null;
+
   /** GET /code-scanning/default-setup body. */
   code_scanning?: Json;
+
   /** GET /code-quality/setup body. */
   code_quality?: Json;
-  /**
-   * Stored check suite preferences ({auto_trigger_checks}): write-only on the real API (no GET exists),
-   * the PATCH echoes them under a `preferences` wrapper.
-   */
+
+  /** Stored check suite preferences ({auto_trigger_checks}): write-only on the real API (no GET exists), the PATCH echoes them under a `preferences` wrapper. */
   check_suite_preferences?: Json;
+
   /** Direct collaborators (GET shape with role_name), replaces the baseline. */
   collaborators?: Json[];
-  /**
-   * Pending repository invitations; typically only {invitee: {login}, permissions, expired} is seeded and
-   * buildState completes the rest of the spec's required shape.
-   */
+
+  /** Pending repository invitations; typically only {invitee: {login}, permissions, expired} is seeded and buildState completes the rest of the spec's required shape. */
   invitations?: Json[];
+
   /** Team access keyed by team slug; null means "no access". */
   teams?: Record<string, { role_name: string } | null>;
+
   /** Milestones (GET shape), replaces the baseline. */
   milestones?: Json[];
+
   /** GET /interaction-limits body ({limit, origin, expires_at}); default none. */
   interaction_limits?: Json;
-  /**
-   * GET /interaction-limits/pulls/creation-cap body; the spec requires both fields in every response, so
-   * the default is an unconfigured repo's disabled cap.
-   */
+
+  /** GET /interaction-limits/pulls/creation-cap body; the spec requires both fields in every response, so the default is an unconfigured repo's disabled cap. */
   pull_creation_cap?: Json;
+
   /** When true, both creation-cap endpoints answer GitHub's documented 405 (the cap is not available here). */
   pull_creation_cap_unavailable?: boolean;
-  /**
-   * The creation-cap bypass list (simple-user GET shape); a seed may be just a login, buildState completes
-   * it via bypassUser, the same completion the PUT handler applies.
-   */
+
+  /** The creation-cap bypass list (simple-user GET shape); a seed may be just a login, which buildState completes via bypassUser, the same completion the PUT handler applies. */
   pull_bypass_list?: Json[];
+
   /** Actions repository variables (GET shape); GitHub stores names uppercased, so seed uppercase names. */
   actions_variables?: Json[];
+
   /** Copilot agents repository variables, same GET shape and uppercase-name rule as actions_variables. */
   agents_variables?: Json[];
+
   /** When true, an org- or user-level limit is in effect: repo-level PUT/DELETE answer 409, matching GitHub. */
   interaction_limits_org_override?: boolean;
-  /**
-   * Repository webhooks; a sparse seed is completed to the spec's shape by completeHook. A seeded
-   * config.secret is STORED verbatim but every GET echoes it as "********", matching GitHub.
-   */
+
+  /** Repository webhooks; a sparse seed is completed to the spec's shape by completeHook, and a seeded config.secret is STORED verbatim but every GET echoes it as "********", matching GitHub. */
   hooks?: Json[];
-  /**
-   * Deploy keys (GET shape), replaces the (empty) baseline; a sparse seed is completed like a label,
-   * its key material stored comment-free the way GitHub normalizes a created key.
-   */
+
+  /** Deploy keys (GET shape), replaces the (empty) baseline; a sparse seed is completed like a label, its key material stored comment-free the way GitHub normalizes a created key. */
   deploy_keys?: Json[];
-  /**
-   * Issues the repo already has; the private-report issue channel lists, creates, and patches these, so
-   * a seeded report issue exercises the update-in-place path.
-   */
+
+  /** Issues the repo already has; the private-report issue channel lists, creates, and patches these, so a seeded report issue exercises the update-in-place path. */
   issues?: Json[];
-  /**
-   * Custom property values ({property_name, value}); seed names from CUSTOM_PROPERTY_DEFINITIONS so the
-   * PATCH handler's defined-property check agrees with them.
-   */
+
+  /** Custom property values ({property_name, value}); seed names from CUSTOM_PROPERTY_DEFINITIONS so the PATCH handler's defined-property check agrees with them. */
   custom_property_values?: Json[];
+
   /** Secret scanning custom patterns in GET shape. */
   secret_scanning_patterns?: Json[];
 }
 
-/**
- * The runtime enum the scenario schema keys `live_state` off (test/e2e/scenario.ts), so a typo'd family
- * fails scenario LOAD instead of being accepted and silently unseeded. The `satisfies` and the
- * MustBeNever pin keep it in lockstep with the interface in both directions.
- */
+/** The runtime enum the scenario schema keys `live_state` off (test/e2e/scenario.ts), so a typo'd family fails scenario LOAD instead of being silently unseeded; the `satisfies` and the MustBeNever pin hold it equal to LiveState in both directions. */
 export const LIVE_STATE_KEYS = [
   "repo",
   "labels",
@@ -249,117 +247,193 @@ export const LIVE_STATE_KEYS = [
   "custom_property_values",
   "secret_scanning_patterns",
 ] as const satisfies readonly (keyof LiveState)[];
+
 type _LiveStateKeysComplete = MustBeNever<
   Exclude<keyof LiveState, (typeof LIVE_STATE_KEYS)[number]>
 >;
 
 export interface MockState {
-  /**
-   * The "owner/name" identity node ids and per-slug routing key off, fixed at construction. Never read it
-   * off the repo body: a PATCH that writes `full_name` must not move the identity minted ids carry.
-   */
+  /** The "owner/name" identity node ids and per-slug routing key off, fixed at construction; never read it off the repo body, since a PATCH that writes `full_name` must not move the identity minted ids carry. */
   readonly slug: string;
+
+  /** Whether the owner is an organization or a personal account; the grant vocabularies differ by it. */
   ownerKind: OwnerKind;
+
   /** The org body, or null when the owner is a personal account. */
   org: Json | null;
+
+  /** The repo body, re-slugged for a multi-repo target; REST surfaces pass it through restRepoSurface, which strips the GraphQL-only fields it also carries. */
   repo: Json;
+
+  /** Labels in GET shape, completed from LABELS_MOCK as a created label would be. */
   labels: Json[];
+
+  /** Repository rulesets (summary + full bodies), completed from RULESETS_MOCK. */
   rulesets: Json[];
+
+  /** Classic protection in GET shape keyed by branch name; null marks a branch left unprotected. */
   branch_protection: Record<string, Json | null>;
+
   /** GraphQL-only fields of literal rules, keyed by branch name. */
   branch_protection_graphql: Record<string, Json>;
+
   /** Wildcard classic rules in the internal rule shape (see LiveState). */
   branch_protection_rules: Json[];
+
+  /** The branch names that exist on the repo, which the advisory branch probe answers from. */
   branches: string[];
+
+  /** Deployment environments in GET shape, keyed by name. */
   environments: Record<string, Json>;
+
+  /** Per-environment Actions variables in GET shape, keyed by environment name. */
   environment_variables: Record<string, Json[]>;
+
+  /** Per-environment branch-policy patterns, served only while custom_branch_policies is enabled (see LiveState). */
   environment_branch_policies: Record<string, Json[]>;
+
+  /** Per-environment enabled custom deployment protection rules in GET shape, keyed by environment. */
   environment_protection_rules: Record<string, Json[]>;
-  /**
-   * Pins in rank order; positions mirror verified GitHub behavior.
-   *   new pin  -> _pinned_position_counter + 1 (monotonic)
-   *   unpin    -> leaves a HOLE, no renumbering
-   *   reorder  -> the only path that renormalizes to contiguous 1..N
-   */
+
+  /** Pins in rank order; positions mirror verified GitHub behavior: a new pin takes _pinned_position_counter + 1 (monotonic), an unpin leaves a HOLE with no renumbering, and reorder is the only path that renormalizes to contiguous 1..N. */
   pinned_environments: Array<{ name: string; position: number }>;
-  /**
-   * Starts at the seeded maximum. Underscore prefix: mock bookkeeping, excluded from the idempotence
-   * snapshot (snapshotFamilies in apply-idempotence-proof.ts).
-   */
+
+  /** Starts at the seeded maximum; underscore prefix: mock bookkeeping, excluded from the idempotence snapshot (snapshotFamilies in apply-idempotence-proof.ts). */
   _pinned_position_counter: number;
+
+  /** Autolinks in GET shape, completed from AUTOLINKS_MOCK. */
   autolinks: Json[];
+
+  /** GET /actions/permissions body; GitHub's real default when unseeded, since the body carries required fields. */
   actions_permissions: Json;
+
+  /** GET /actions/permissions/selected-actions body. */
   selected_actions: Json;
+
+  /** GET /actions/permissions/workflow body. */
   workflow_permissions: Json;
+
+  /** GET /actions/permissions/access body. */
   actions_access: Json;
+
+  /** GET /actions/permissions/artifact-and-log-retention body. */
   actions_retention: Json;
+
+  /** GET /actions/cache/retention-limit body. */
   cache_retention_limit: Json;
+
+  /** GET /actions/cache/storage-limit body. */
   cache_storage_limit: Json;
+
+  /** GET /actions/oidc/customization/sub body. */
   oidc_customization_sub: Json;
+
+  /** GET /actions/permissions/fork-pr-contributor-approval body. */
   fork_pr_contributor_approval: Json;
+
+  /** GET /actions/permissions/fork-pr-workflows-private-repos body. */
   fork_pr_workflows_private_repos: Json;
+
   /** Actions secrets in GET shape ({name, created_at, updated_at}). */
   actions_secrets: Json[];
+
   /** Dependabot secrets, same GET shape as actions_secrets. */
   dependabot_secrets: Json[];
+
   /** Codespaces secrets, same GET shape as actions_secrets. */
   codespaces_secrets: Json[];
+
   /** Copilot agents secrets, same GET shape as actions_secrets. */
   agents_secrets: Json[];
+
   /** Per-environment Actions secrets (GET shape), keyed by environment name. */
   environment_secrets: Record<string, Json[]>;
-  /**
-   * Shared by EVERY secret family, feeding each write's deterministic updated_at. Underscore prefix: mock
-   * bookkeeping, excluded from the idempotence snapshot (snapshotFamilies in apply-idempotence-proof.ts).
-   */
+
+  /** Shared by EVERY secret family, feeding each write's deterministic updated_at; underscore prefix: mock bookkeeping, excluded from the idempotence snapshot (snapshotFamilies in apply-idempotence-proof.ts). */
   _secret_write_counter: number;
-  /**
-   * sha256 of each uploaded secret's UNSEALED value, never the plaintext and never served: a re-seal
-   * produces different ciphertext for the same plaintext, so only a plaintext-derived digest lets the
-   * state snapshot prove a second apply re-wrote the same value.
-   */
+
+  /** sha256 of each uploaded secret's UNSEALED value, never the plaintext and never served; a re-seal yields different ciphertext for the same plaintext, so only this digest lets the snapshot prove a second apply re-wrote the same value. */
   actions_secret_digests: Record<string, string>;
+
+  /** The Dependabot secrets' digests, as actions_secret_digests. */
   dependabot_secret_digests: Record<string, string>;
+
+  /** The Codespaces secrets' digests, as actions_secret_digests. */
   codespaces_secret_digests: Record<string, string>;
+
+  /** The Copilot agents secrets' digests, as actions_secret_digests. */
   agents_secret_digests: Record<string, string>;
+
+  /** The environment secrets' digests, keyed by environment name then secret name. */
   environment_secret_digests: Record<string, Record<string, string>>;
+
+  /** Workflows list items ({id, name, path, state}). */
   workflows: Json[];
+
+  /** GET /pages body, or null while Pages is not enabled. */
   pages: Json | null;
+
+  /** GET /code-scanning/default-setup body. */
   code_scanning: Json;
+
+  /** GET /code-quality/setup body; GitHub's fresh-repo default, nullable fields spelled out, when unseeded. */
   code_quality: Json;
+
+  /** Stored check suite preferences ({auto_trigger_checks}); write-only on the real API, the PATCH echoes them under a `preferences` wrapper. */
   check_suite_preferences: Json;
+
+  /** Direct collaborators in GET shape, role_name included. */
   collaborators: Json[];
+
   /** Pending repository invitations in the repository-invitation GET shape. */
   invitations: Json[];
+
+  /** Team access keyed by folded team slug; null means no access. */
   teams: Record<string, { role_name: string } | null>;
+
+  /** Milestones in GET shape, completed from MILESTONES_MOCK. */
   milestones: Json[];
+
   /** The active interaction limit, or null when none is set. */
   interaction_limits: Json | null;
+
+  /** When true an org- or user-level limit is in effect and the repo-level PUT/DELETE answer 409, matching GitHub. */
   interaction_limits_org_override: boolean;
+
   /** The pull request creation cap ({enabled, max_open_pull_requests}). */
   pull_creation_cap: Json;
+
+  /** When true both creation-cap endpoints answer GitHub's documented 405. */
   pull_creation_cap_unavailable: boolean;
+
   /** The creation-cap bypass list, simple-user objects in GET shape. */
   pull_bypass_list: Json[];
+
+  /** Actions repository variables in GET shape; GitHub stores names uppercased. */
   actions_variables: Json[];
+
   /** Copilot agents repository variables, same GET shape as actions_variables. */
   agents_variables: Json[];
+
   /** Repository webhooks; config.secret is stored real, GETs echo "********". */
   hooks: Json[];
+
   /** Deploy keys in GET shape; stored key material carries no comment. */
   deploy_keys: Json[];
+
   /** Report issues the private-report issue channel lists/creates/patches. */
   issues: Json[];
+
   /** Custom property values set on the repo ({property_name, value}). */
   custom_property_values: Json[];
+
   /** Secret scanning custom patterns in GET shape. */
   secret_scanning_patterns: Json[];
-  /**
-   * Feeds each create's and update's fresh custom_pattern_version, deterministic rather than a clock.
-   * Underscore prefix: mock bookkeeping, excluded from the idempotence snapshot (snapshotFamilies in
-   * apply-idempotence-proof.ts).
-   */
+
+  /** Feeds each create's and update's fresh custom_pattern_version, deterministic rather than a clock; underscore prefix: mock bookkeeping, excluded from the idempotence snapshot (snapshotFamilies in apply-idempotence-proof.ts). */
   _secret_scanning_version_counter: number;
+
+  /** The next minted resource id, started past every seeded id so a pinned seed id never collides with a minted one. */
   nextId: number;
 }
 
@@ -393,14 +467,13 @@ function stampNodeIds(state: MockState): void {
   }
 }
 
-/**
- * Repo fields only GraphQL serves, mirroring live GitHub: the issue creation policy is REST-blind in both
- * directions (the repo PATCH answers 200 and ignores it, no GET returns it) and the sponsor button has no
- * REST field. They live on state.repo so live_state.repo seeds them and the snapshot sees them; every
- * REST-served or REST-accepted repo body passes through restRepoSurface, which strips them.
- */
+/** Repo fields only GraphQL serves, kept on state.repo so live_state.repo seeds them and the snapshot sees them; restRepoSurface strips them from every REST-served or REST-accepted repo body. */
 const GRAPHQL_ONLY_REPO_FIELDS = ["has_sponsorships_enabled", "issue_creation_policy"] as const;
 
+/**
+ * The REST view of a repo body, mirroring live GitHub: the issue creation policy is REST-blind in both directions
+ * (the repo PATCH answers 200 and ignores it, no GET returns it) and the sponsor button has no REST field.
+ */
 export function restRepoSurface(repo: Json): Json {
   const view = { ...repo };
   for (const field of GRAPHQL_ONLY_REPO_FIELDS) {
@@ -461,11 +534,7 @@ function generateLabels(gen: LabelsGenerate): Json[] {
   }));
 }
 
-/**
- * The list collections buildState completes from the same spec their handlers create with, so a
- * seed is served exactly as a created item would be: the spec's defaults under the seed and the
- * server-owned fields minted over it (a seed may pin only its id). The state test pins the key set.
- */
+/** The specs buildState completes seeded list collections with, the same ones their handlers create with, so a seed is served exactly as a created item would be; state.test.ts pins the key set. */
 export const LIST_MOCKS = {
   labels: LABELS_MOCK,
   autolinks: AUTOLINKS_MOCK,
@@ -599,10 +668,7 @@ export function completeInvitation(seed: Json, id: number, repo: Json, slug: str
   return completed;
 }
 
-/**
- * The ONE source of protection-rule App slugs: the create handler resolves integration_id against it and
- * the fuzz generator draws declared slugs from it, so a generated rule can always be enabled.
- */
+/** The ONE source of protection-rule App slugs: the create handler resolves integration_id against it and the fuzz generator draws declared slugs from it, so a generated rule can always be enabled. */
 export const PROTECTION_RULE_APPS: readonly Json[] = [
   {
     id: 3515,
@@ -624,10 +690,7 @@ export const PROTECTION_RULE_APPS: readonly Json[] = [
   },
 ];
 
-/**
- * The ONE source of defined custom property names: the values PATCH answers 422 for a name outside it,
- * and the fuzz generator draws declared names (with type-appropriate values) from it.
- */
+/** The ONE source of defined custom property names: the values PATCH answers 422 for a name outside it, and the fuzz generator draws declared names (with type-appropriate values) from it. */
 export const CUSTOM_PROPERTY_DEFINITIONS: ReadonlyArray<{
   property_name: string;
   value_type: "string" | "true_false" | "multi_select";
@@ -640,6 +703,22 @@ export const CUSTOM_PROPERTY_DEFINITIONS: ReadonlyArray<{
   { property_name: "pilot", value_type: "true_false" },
   { property_name: "compliance", value_type: "multi_select", allowed_values: ["soc2", "hipaa"] },
 ];
+
+/** The family cloned, so a handler's in-place mutation never reaches the scenario's live_state, or its baseline when unseeded. */
+function seededOr<T, B>(seed: T | undefined, baseline: B): T | B {
+  return seed ? clone(seed) : baseline;
+}
+
+/** A labels seed is the explicit list or a generator; a missing family starts empty. */
+function seededLabels(seed: LiveState["labels"]): Json[] {
+  if (seed === undefined) {
+    return [];
+  }
+  if (Array.isArray(seed)) {
+    return clone(seed);
+  }
+  return generateLabels(seed.generate);
+}
 
 /**
  * `slug` (multi-repo targets) re-slugs the repo BEFORE any family completion runs, so bodies derived
@@ -674,13 +753,6 @@ export function buildState(
   }
   const stateSlug = slug ?? String(fullName);
 
-  const labels =
-    ls.labels === undefined
-      ? []
-      : Array.isArray(ls.labels)
-        ? clone(ls.labels)
-        : generateLabels(ls.labels.generate);
-
   const pinnedSeed = normalizePinnedSeed(ls.pinned_environments ?? []);
 
   const state: MockState = {
@@ -688,58 +760,50 @@ export function buildState(
     ownerKind,
     org: ownerKind === "user" ? null : clone(orgFixture as Json),
     repo,
-    labels,
-    rulesets: ls.rulesets ? clone(ls.rulesets) : [],
+    labels: seededLabels(ls.labels),
+    rulesets: seededOr(ls.rulesets, []),
     branch_protection: named(ls.branch_protection),
     branch_protection_graphql: named(ls.branch_protection_graphql),
     branch_protection_rules: (ls.branch_protection_rules ?? []).map((rule) =>
       completeRule(clone(rule)),
     ),
-    branches: ls.branches ? clone(ls.branches) : [],
+    branches: seededOr(ls.branches, []),
     environments: named(ls.environments),
     environment_variables: named(ls.environment_variables),
     environment_branch_policies: named(ls.environment_branch_policies),
     environment_protection_rules: named(ls.environment_protection_rules),
     pinned_environments: pinnedSeed,
     _pinned_position_counter: Math.max(0, ...pinnedSeed.map((pin) => pin.position)),
-    autolinks: ls.autolinks ? clone(ls.autolinks) : [],
-    // GitHub's real defaults, not {}: each body carries required fields, so
-    // an unseeded GET must still answer a spec-valid shape.
-    actions_permissions: ls.actions_permissions
-      ? clone(ls.actions_permissions)
-      : { enabled: true, allowed_actions: "all" },
-    selected_actions: ls.selected_actions ? clone(ls.selected_actions) : {},
-    workflow_permissions: ls.workflow_permissions
-      ? clone(ls.workflow_permissions)
-      : { default_workflow_permissions: "read", can_approve_pull_request_reviews: false },
-    actions_access: ls.actions_access ? clone(ls.actions_access) : { access_level: "none" },
-    actions_retention: ls.actions_retention
-      ? clone(ls.actions_retention)
-      : { days: 90, maximum_allowed_days: 400 },
-    cache_retention_limit: ls.cache_retention_limit
-      ? clone(ls.cache_retention_limit)
-      : { max_cache_retention_days: 7 },
-    cache_storage_limit: ls.cache_storage_limit
-      ? clone(ls.cache_storage_limit)
-      : { max_cache_size_gb: 10 },
-    oidc_customization_sub: ls.oidc_customization_sub
-      ? clone(ls.oidc_customization_sub)
-      : { use_default: true },
-    fork_pr_contributor_approval: ls.fork_pr_contributor_approval
-      ? clone(ls.fork_pr_contributor_approval)
-      : { approval_policy: "first_time_contributors_new_to_github" },
-    fork_pr_workflows_private_repos: ls.fork_pr_workflows_private_repos
-      ? clone(ls.fork_pr_workflows_private_repos)
-      : {
-          run_workflows_from_fork_pull_requests: false,
-          send_write_tokens_to_workflows: false,
-          send_secrets_and_variables: false,
-          require_approval_for_fork_pr_workflows: true,
-        },
-    actions_secrets: ls.actions_secrets ? clone(ls.actions_secrets) : [],
-    dependabot_secrets: ls.dependabot_secrets ? clone(ls.dependabot_secrets) : [],
-    codespaces_secrets: ls.codespaces_secrets ? clone(ls.codespaces_secrets) : [],
-    agents_secrets: ls.agents_secrets ? clone(ls.agents_secrets) : [],
+    autolinks: seededOr(ls.autolinks, []),
+    // GitHub's real defaults, not {}: each body carries required fields, so an unseeded GET must still answer a
+    // spec-valid shape.
+    actions_permissions: seededOr(ls.actions_permissions, {
+      enabled: true,
+      allowed_actions: "all",
+    }),
+    selected_actions: seededOr(ls.selected_actions, {}),
+    workflow_permissions: seededOr(ls.workflow_permissions, {
+      default_workflow_permissions: "read",
+      can_approve_pull_request_reviews: false,
+    }),
+    actions_access: seededOr(ls.actions_access, { access_level: "none" }),
+    actions_retention: seededOr(ls.actions_retention, { days: 90, maximum_allowed_days: 400 }),
+    cache_retention_limit: seededOr(ls.cache_retention_limit, { max_cache_retention_days: 7 }),
+    cache_storage_limit: seededOr(ls.cache_storage_limit, { max_cache_size_gb: 10 }),
+    oidc_customization_sub: seededOr(ls.oidc_customization_sub, { use_default: true }),
+    fork_pr_contributor_approval: seededOr(ls.fork_pr_contributor_approval, {
+      approval_policy: "first_time_contributors_new_to_github",
+    }),
+    fork_pr_workflows_private_repos: seededOr(ls.fork_pr_workflows_private_repos, {
+      run_workflows_from_fork_pull_requests: false,
+      send_write_tokens_to_workflows: false,
+      send_secrets_and_variables: false,
+      require_approval_for_fork_pr_workflows: true,
+    }),
+    actions_secrets: seededOr(ls.actions_secrets, []),
+    dependabot_secrets: seededOr(ls.dependabot_secrets, []),
+    codespaces_secrets: seededOr(ls.codespaces_secrets, []),
+    agents_secrets: seededOr(ls.agents_secrets, []),
     environment_secrets: named(ls.environment_secrets),
     _secret_write_counter: 0,
     actions_secret_digests: named(),
@@ -747,47 +811,44 @@ export function buildState(
     codespaces_secret_digests: named(),
     agents_secret_digests: named(),
     environment_secret_digests: named(),
-    workflows: ls.workflows ? clone(ls.workflows) : [],
-    pages: ls.pages !== undefined ? clone(ls.pages) : null,
-    code_scanning: ls.code_scanning ? clone(ls.code_scanning) : {},
-    // GitHub's fresh-repo default, not {}: the GET body's nullable fields
-    // are spelled out so an unseeded read answers a realistic shape.
-    code_quality: ls.code_quality
-      ? clone(ls.code_quality)
-      : {
-          state: "not-configured",
-          languages: [],
-          runner_type: null,
-          runner_label: null,
-          updated_at: null,
-          schedule: null,
-          ai_findings_option: null,
-        },
-    check_suite_preferences: ls.check_suite_preferences
-      ? clone(ls.check_suite_preferences)
-      : { auto_trigger_checks: [] },
-    collaborators: ls.collaborators ? clone(ls.collaborators) : [],
+    workflows: seededOr(ls.workflows, []),
+    pages: seededOr(ls.pages, null),
+    code_scanning: seededOr(ls.code_scanning, {}),
+    // GitHub's fresh-repo default, not {}: the GET body's nullable fields are spelled out so an unseeded read
+    // answers a realistic shape.
+    code_quality: seededOr(ls.code_quality, {
+      state: "not-configured",
+      languages: [],
+      runner_type: null,
+      runner_label: null,
+      updated_at: null,
+      schedule: null,
+      ai_findings_option: null,
+    }),
+    check_suite_preferences: seededOr(ls.check_suite_preferences, { auto_trigger_checks: [] }),
+    collaborators: seededOr(ls.collaborators, []),
     invitations: (ls.invitations ?? []).map((invitation) =>
       completeInvitation(clone(invitation), takeId(), repo, stateSlug),
     ),
     teams: named(foldedTeamSeed(ls.teams)),
-    milestones: ls.milestones ? clone(ls.milestones) : [],
-    interaction_limits: ls.interaction_limits ? clone(ls.interaction_limits) : null,
+    milestones: seededOr(ls.milestones, []),
+    interaction_limits: seededOr(ls.interaction_limits, null),
     interaction_limits_org_override: ls.interaction_limits_org_override ?? false,
-    // An unconfigured repo's cap is disabled; the spec requires
-    // max_open_pull_requests in every response, so the default carries one.
-    pull_creation_cap: ls.pull_creation_cap
-      ? clone(ls.pull_creation_cap)
-      : { enabled: false, max_open_pull_requests: 1 },
+    // An unconfigured repo's cap is disabled; the spec requires max_open_pull_requests in every response, so the
+    // default carries one.
+    pull_creation_cap: seededOr(ls.pull_creation_cap, {
+      enabled: false,
+      max_open_pull_requests: 1,
+    }),
     pull_creation_cap_unavailable: ls.pull_creation_cap_unavailable ?? false,
     pull_bypass_list: (ls.pull_bypass_list ?? []).map((user) => bypassUser(clone(user), takeId())),
-    actions_variables: ls.actions_variables ? clone(ls.actions_variables) : [],
-    agents_variables: ls.agents_variables ? clone(ls.agents_variables) : [],
+    actions_variables: seededOr(ls.actions_variables, []),
+    agents_variables: seededOr(ls.agents_variables, []),
     hooks: (ls.hooks ?? []).map((hook) => completeHook(clone(hook), takeId(), stateSlug)),
-    deploy_keys: ls.deploy_keys ? clone(ls.deploy_keys) : [],
-    issues: ls.issues ? clone(ls.issues) : [],
-    custom_property_values: ls.custom_property_values ? clone(ls.custom_property_values) : [],
-    secret_scanning_patterns: ls.secret_scanning_patterns ? clone(ls.secret_scanning_patterns) : [],
+    deploy_keys: seededOr(ls.deploy_keys, []),
+    issues: seededOr(ls.issues, []),
+    custom_property_values: seededOr(ls.custom_property_values, []),
+    secret_scanning_patterns: seededOr(ls.secret_scanning_patterns, []),
     _secret_scanning_version_counter: 0,
     nextId,
   };
@@ -803,12 +864,13 @@ export function buildState(
 // on; the pipeline resolves the slug from the request path and dispatches into the per-slug state.
 
 export interface MultiRepoSpec {
-  /**
-   * The settings.yml body the contents endpoint serves, or null for NO file (the contents 404 path: the
-   * defaults document applies, or the target is skipped without one).
-   */
+  /** The settings.yml body the contents endpoint serves, or null for NO file (the contents 404 path: the defaults document applies, or the target is skipped without one). */
   settingsYaml: string | null;
+
+  /** The slug's starting state; absent, the fixture baseline. */
   liveState?: LiveState;
+
+  /** The slug's mask, merged OVER the scenario's global mask; absent is {}, which inherits the global denials. */
   permissions?: PermissionMask;
 }
 
@@ -827,17 +889,17 @@ export interface DiscoveryRepoSpec {
 export interface MultiMockState {
   /** Per-target working state, keyed by "owner/name" slug. */
   repos: Map<string, MockState>;
+
   /** The raw settings.yml each slug serves (null = no file), keyed by slug. */
   settings: Map<string, string | null>;
+
   /** Per-slug permission mask, merged OVER the scenario's global mask (grading.ts), so {} inherits its denials. */
   permissions: Map<string, PermissionMask>;
+
   /** The repo objects `/user/repos` enumerates (discovery pool). */
   discoveryPool: Json[];
-  /**
-   * Shared state for the org-level endpoints (the `GET /orgs/{org}` probe), which are NOT repo-scoped;
-   * only its `org` field is read. Team-repo routes still resolve to the addressed repo's state via their
-   * {owner}/{repo} tail.
-   */
+
+  /** Shared state for the org-level endpoints (the `GET /orgs/{org}` probe), which are NOT repo-scoped; only its `org` field is read, and team-repo routes still resolve to the addressed repo's state via their {owner}/{repo} tail. */
   orgState: MockState;
 }
 
@@ -1038,10 +1100,7 @@ export function protectionFromPut(payload: Json): Json {
 /** The users a force_push_bypassers entry can name; the actor-user lookup answers NOT_FOUND for anything else. */
 export const BYPASS_ACTOR_USERS: readonly string[] = ["octocat", "release-bot"];
 
-/**
- * The org teams the actor-team lookup resolves; an unknown org answers NOT_FOUND, a known org with an
- * unknown team answers team: null (GitHub's nullable-field shape).
- */
+/** The org teams the actor-team lookup resolves; an unknown org answers NOT_FOUND, a known org with an unknown team answers team: null (GitHub's nullable-field shape). */
 export const BYPASS_ACTOR_TEAMS: readonly string[] = [
   `${ADMIN_OWNER}/platform`,
   `${ADMIN_OWNER}/release-guild`,
@@ -1250,6 +1309,50 @@ const STATUS_CLASSIC_BY_TWIN: Record<string, string> = Object.fromEntries(
   Object.entries(GRAPHQL_STATUS_CHECK_TWINS).map(([classic, twin]) => [twin, classic]),
 );
 
+/** A switched-off rule has no sub-object in the GET shape, so off deletes it; on creates an empty one where none exists, so the twin writes that follow have a home. */
+function toggleNestedRule(protection: Json, field: string, on: boolean, empty: Json): void {
+  if (!on) {
+    delete protection[field];
+    return;
+  }
+  if (!isPlainObject(protection[field])) {
+    protection[field] = empty;
+  }
+}
+
+/**
+ * A translated twin lands back on the stored REST GET shape under its classic key (a boolean twin as {enabled}, a
+ * review twin inside required_pull_request_reviews, a status-check twin inside required_status_checks); a field with
+ * no classic destination (a future twin) stays on the extras so a read-back echoes it.
+ */
+function applyTwinToLiteral(protection: Json, extras: Json, key: string, value: unknown): void {
+  const classicBoolean = CLASSIC_BY_TWIN[key];
+  if (classicBoolean !== undefined) {
+    protection[classicBoolean] = { enabled: value === true };
+    return;
+  }
+
+  const classicReview = REVIEW_CLASSIC_BY_TWIN[key];
+  if (classicReview !== undefined) {
+    if (!isPlainObject(protection.required_pull_request_reviews)) {
+      protection.required_pull_request_reviews = {};
+    }
+    (protection.required_pull_request_reviews as Json)[classicReview] = value;
+    return;
+  }
+
+  const classicStatus = STATUS_CLASSIC_BY_TWIN[key];
+  if (classicStatus !== undefined) {
+    if (!isPlainObject(protection.required_status_checks)) {
+      protection.required_status_checks = { strict: false, contexts: [] };
+    }
+    (protection.required_status_checks as Json)[classicStatus] = value;
+    return;
+  }
+
+  extras[key] = value;
+}
+
 /**
  * Translated twins land back on the stored REST GET shape and GraphQL-only fields on the extras family,
  * so both views keep agreeing: GitHub has one underlying rule.
@@ -1284,44 +1387,16 @@ export function applyRuleInputToLiteral(
         extras.requiredDeploymentEnvironments = dropMissingEnvironments(value, state);
         break;
       case "requiresStatusChecks":
-        if (value !== true) {
-          delete protection.required_status_checks;
-        } else if (!isPlainObject(protection.required_status_checks)) {
-          protection.required_status_checks = { strict: false, contexts: [] };
-        }
+        toggleNestedRule(protection, "required_status_checks", value === true, {
+          strict: false,
+          contexts: [],
+        });
         break;
       case "requiresApprovingReviews":
-        if (value !== true) {
-          delete protection.required_pull_request_reviews;
-        } else if (!isPlainObject(protection.required_pull_request_reviews)) {
-          protection.required_pull_request_reviews = {};
-        }
+        toggleNestedRule(protection, "required_pull_request_reviews", value === true, {});
         break;
-      default: {
-        const classicBoolean = CLASSIC_BY_TWIN[key];
-        if (classicBoolean !== undefined) {
-          protection[classicBoolean] = { enabled: value === true };
-          break;
-        }
-        const classicReview = REVIEW_CLASSIC_BY_TWIN[key];
-        if (classicReview !== undefined) {
-          if (!isPlainObject(protection.required_pull_request_reviews)) {
-            protection.required_pull_request_reviews = {};
-          }
-          (protection.required_pull_request_reviews as Json)[classicReview] = value;
-          break;
-        }
-        const classicStatus = STATUS_CLASSIC_BY_TWIN[key];
-        if (classicStatus !== undefined) {
-          if (!isPlainObject(protection.required_status_checks)) {
-            protection.required_status_checks = { strict: false, contexts: [] };
-          }
-          (protection.required_status_checks as Json)[classicStatus] = value;
-          break;
-        }
-        // A field with no classic destination (a future twin) stays on the extras so a read-back echoes it.
-        extras[key] = value;
-      }
+      default:
+        applyTwinToLiteral(protection, extras, key, value);
     }
   }
   return { ok: true };
@@ -1353,10 +1428,7 @@ export function environmentFromPut(payload: Json): Json {
   return { ...rest, protection_rules: rules };
 }
 
-/**
- * The team grant PUT's own vocabulary, which the team listing's `permission` also spells; the invitation PATCH
- * speaks the GET's instead.
- */
+/** The team grant PUT's own vocabulary, which the team listing's `permission` also spells; the invitation PATCH speaks the GET's instead. */
 export const GRANT_PERMISSIONS: ReadonlySet<string> = new Set([
   "pull",
   "triage",
@@ -1371,18 +1443,10 @@ const COLLABORATOR_GRANT_PERMISSIONS: ReadonlySet<string> = new Set([
   "triage_plus",
 ]);
 
-/**
- * The custom repository roles the mock's organization defines, so a grant naming one converges (the
- * snapshot round trips read them back) while any other spelling is refused the way GitHub refuses a
- * role the organization never defined.
- */
+/** The custom repository roles the mock's organization defines, so a grant naming one converges (the snapshot round trips read them back) while any other spelling is refused the way GitHub refuses a role the organization never defined. */
 const CUSTOM_REPOSITORY_ROLES: ReadonlySet<string> = new Set(["security-team", "security-auditor"]);
 
-/**
- * What a personal account's repository takes. The spec text calls the PUT's `permission` "only valid on
- * organization-owned repositories", but live GitHub honors these three there and 422s triage, maintain, and every
- * custom role name (an organization feature); the invitation PATCH narrows to their read vocabulary the same way.
- */
+/** The spec calls the PUT's `permission` org-only, but live GitHub honors these three on a personal account's repository and 422s triage, maintain, and every custom role; the invitation PATCH narrows to their read vocabulary the same way. */
 const PERSONAL_GRANT_PERMISSIONS: ReadonlySet<string> = new Set(["pull", "push", "admin"]);
 
 /**

@@ -45,10 +45,7 @@ export function decodeNodeId(
   };
 }
 
-/**
- * GitHub Apps are not repo-scoped, so their ids carry this sentinel and the pipeline's mutation-target
- * resolution skips the "app" family (GLOBAL_NODE_FAMILIES in routes.ts).
- */
+/** GitHub Apps are not repo-scoped, so their ids carry this sentinel and the pipeline's mutation-target resolution skips the "app" family (GLOBAL_NODE_FAMILIES in routes.ts). */
 const GLOBAL_NODE_SLUG = "-";
 
 export function mintAppNodeId(appSlug: string): string {

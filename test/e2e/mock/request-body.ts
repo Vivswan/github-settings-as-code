@@ -10,13 +10,9 @@ import type { Route } from "../../../src/sections/contract/endpoints.js";
 import { sharedValidator } from "../openapi/validate.js";
 import type { MockResponse } from "./support.js";
 
-/**
- * Fields GitHub accepts (verified live) that its descriptor omits, so the spec-derived allowlist would
- * wrongly drop them. Each entry retires when upstream documents the field; request-body.test.ts pins
- * that every entry is still absent from the spec.
- *   PATCH /repos/{owner}/{repo} has_discussions  -> src/sections/repository/index.ts, UndocumentedPatchField
- */
+/** Fields GitHub accepts (verified live) but its descriptor omits, so the spec-derived allowlist would wrongly drop them; request-body.test.ts pins each as still absent from the spec, and an entry retires once upstream documents it. */
 export const UNDOCUMENTED_BODY_FIELDS: ReadonlyMap<Route, readonly string[]> = new Map([
+  // has_discussions pairs with UndocumentedPatchField in src/sections/repository/schema.ts.
   ["PATCH /repos/{owner}/{repo}", ["has_discussions"]],
 ]);
 

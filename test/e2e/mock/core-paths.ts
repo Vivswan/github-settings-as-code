@@ -336,145 +336,193 @@ export type IssueReportOutcome =
       deniedBy?: never;
     };
 
+/** The request fields the issue-channel routes read; routes.ts passes its parsed request, the base prefix already stripped. */
+export interface IssueReportRequest {
+  method: string;
+  pathname: string;
+  query: Record<string, string>;
+  body: unknown;
+}
+
 /**
- * Null when the path is not an issue-channel route, so the caller falls through to section matching. `takeCoreFault` is
- * consulted per route after target resolution and before the permission gate and any state mutation, the section order.
- *   POST  /repos/{o}/{r}/labels (marker)   -> ensure-create (Issues: write)
+ * The run the issue-channel routes serve against. `state` is the single-repo state, read only when `multi` is absent;
+ * `takeCoreFault` is the pipeline's hook, consulted per route after target resolution and before the permission gate
+ * and any state mutation, the section order.
+ */
+export interface IssueReportRun {
+  scenario: Scenario;
+  multi: MultiMockState | undefined;
+  state: MockState | undefined;
+  faults: FaultOption[] | undefined;
+  takeCoreFault: (key: CoreFaultKey) => PipelineResult | null;
+}
+
+/** Target, fault hook, then grade, the section order; the state on admission, else the outcome to answer. */
+function admitIssueRoute(
+  request: IssueReportRequest,
+  run: IssueReportRun,
+  slug: string,
+  coreKey: CoreFaultKey | null,
+): { state: MockState } | IssueReportOutcome {
+  const resolved = resolveIssueTarget(request.method, request.pathname, slug, run.multi, run.state);
+  if (!("state" in resolved)) {
+    return resolved;
+  }
+  if (coreKey) {
+    const faulted = run.takeCoreFault(coreKey);
+    if (faulted) {
+      return { faulted };
+    }
+  }
+  const level = request.method === "GET" ? "read" : "write";
+  const denied = gradeIssueAccess(slug, level, run.scenario, run.multi);
+  if (denied) {
+    return denied;
+  }
+  return resolved;
+}
+
+/**
+ * The marker-label ensure-create writes even in check mode, so it is served here, before the check-mode barrier, but
+ * only for the marker name on a delivery target; any other marker POST falls through to the labels.create section
+ * route and its barrier.
+ */
+function serveMarkerLabelCreate(
+  request: IssueReportRequest,
+  run: IssueReportRun,
+): IssueReportOutcome | null {
+  const labelsMatch = request.pathname.match(/^\/repos\/([^/]+\/[^/]+)\/labels$/);
+  if (!labelsMatch || request.method !== "POST" || asObject(request.body).name !== MARKER_LABEL) {
+    return null;
+  }
+  const slug = decodeURIComponent(labelsMatch[1] ?? "");
+  if (!isReportDeliveryTarget(slug, run.scenario, run.multi, run.faults)) {
+    return null;
+  }
+  const coreKey = "core.reportLabelCreate" as const;
+  const admitted = admitIssueRoute(request, run, slug, coreKey);
+  if (!("state" in admitted)) {
+    return admitted;
+  }
+  if (findLabel(admitted.state, MARKER_LABEL)) {
+    return { response: { status: 422, body: { message: "Validation Failed" } }, coreKey };
+  }
+  const payload = asObject(request.body);
+  const label: Json = {
+    id: admitted.state.nextId++,
+    name: MARKER_LABEL,
+    color: payload.color ?? "ededed",
+    default: false,
+    description: payload.description ?? null,
+  };
+  admitted.state.labels.push(label);
+  return { response: { status: 201, body: label }, coreKey };
+}
+
+/** GitHub's default is newest first; the number stands in for created_at, which the seeded issues do not carry. */
+function listIssues(state: MockState, query: Record<string, string>): IssueReportOutcome {
+  if (query.sort !== undefined && query.sort !== "created") {
+    return coreViolation(`issues list sort "${query.sort}" is not modelled`);
+  }
+  const newestFirst = (query.direction ?? "desc") === "desc";
+  const matched = state.issues
+    .filter((issue) => issueMatchesQuery(issue, query))
+    .sort((a, b) => (newestFirst ? 1 : -1) * (Number(b.number) - Number(a.number)));
+  return { response: paged(matched, query), coreKey: "core.issuesList" };
+}
+
+function createIssue(state: MockState, slug: string, body: unknown): IssueReportOutcome {
+  const payload = asObject(body);
+  const number = nextNumber(state.issues);
+  const labels = Array.isArray(payload.labels)
+    ? payload.labels.map((l) => labelObject(String(l)))
+    : [];
+  const issue: Json = {
+    number,
+    title: payload.title ?? "",
+    body: payload.body ?? "",
+    state: "open",
+    labels,
+    user: { login: TOKEN_USER_LOGIN, id: 1, type: "User" },
+    html_url: issueUrl(slug, number),
+  };
+  state.issues.push(issue);
+  return { response: { status: 201, body: issue }, coreKey: "core.issueCreate" };
+}
+
+/** The marker-reattach PATCH sends label names; expanded as on create, so the repaired label set is observable. */
+function patchIssue(state: MockState, issueNumber: number, body: unknown): IssueReportOutcome {
+  const issue = state.issues.find((i) => Number(i.number) === issueNumber);
+  if (!issue) {
+    return {
+      response: { status: 404, body: { message: "Not Found" } },
+      coreKey: "core.issuePatch",
+    };
+  }
+  const payload = asObject(body);
+  if (payload.body !== undefined) {
+    issue.body = payload.body;
+  }
+  if (payload.state !== undefined) {
+    issue.state = payload.state;
+  }
+  if (Array.isArray(payload.labels)) {
+    issue.labels = payload.labels.map((l) => labelObject(String(l)));
+  }
+  return { response: ok(issue), coreKey: "core.issuePatch" };
+}
+
+/**
+ * The issue routes, null for any other path so the caller falls through to section matching; issue traffic to a
+ * non-delivery slug (an accidental delivery) falls through the same way, to a loud no-route violation.
  *   GET   /repos/{o}/{r}/issues            -> list (Issues: read)
  *   POST  /repos/{o}/{r}/issues            -> create (Issues: write)
  *   PATCH /repos/{o}/{r}/issues/{number}   -> update (Issues: write)
  */
-export function handleIssueReport(
-  method: string,
-  pathname: string,
-  query: Record<string, string>,
-  body: unknown,
-  scenario: Scenario,
-  multi: MultiMockState | undefined,
-  state: MockState | undefined,
-  faults: FaultOption[] | undefined,
-  takeCoreFault: (key: CoreFaultKey) => PipelineResult | null,
+function serveIssueRoute(
+  request: IssueReportRequest,
+  run: IssueReportRun,
 ): IssueReportOutcome | null {
-  // The marker-label ensure-create writes even in check mode, so it is served here, before the check-mode barrier, but
-  // only for the marker name on a delivery target; any other marker POST falls through to the labels.create section
-  // route and its barrier.
-  const labelsMatch = pathname.match(/^\/repos\/([^/]+\/[^/]+)\/labels$/);
-  if (labelsMatch && method === "POST" && asObject(body).name === MARKER_LABEL) {
-    const slug = decodeURIComponent(labelsMatch[1] ?? "");
-    if (!isReportDeliveryTarget(slug, scenario, multi, faults)) {
-      return null;
-    }
-    const resolved = resolveIssueTarget(method, pathname, slug, multi, state);
-    if (!("state" in resolved)) {
-      return resolved;
-    }
-    const faulted = takeCoreFault("core.reportLabelCreate");
-    if (faulted) {
-      return { faulted };
-    }
-    const denied = gradeIssueAccess(slug, "write", scenario, multi);
-    if (denied) {
-      return denied;
-    }
-    const coreKey = "core.reportLabelCreate" as const;
-    if (findLabel(resolved.state, MARKER_LABEL)) {
-      return { response: { status: 422, body: { message: "Validation Failed" } }, coreKey };
-    }
-    const payload = asObject(body);
-    const label: Json = {
-      id: resolved.state.nextId++,
-      name: MARKER_LABEL,
-      color: payload.color ?? "ededed",
-      default: false,
-      description: payload.description ?? null,
-    };
-    resolved.state.labels.push(label);
-    return { response: { status: 201, body: label }, coreKey };
-  }
-  const issuesMatch = pathname.match(/^\/repos\/([^/]+\/[^/]+)\/issues(?:\/(\d+))?$/);
+  const issuesMatch = request.pathname.match(/^\/repos\/([^/]+\/[^/]+)\/issues(?:\/(\d+))?$/);
   if (!issuesMatch) {
     return null;
   }
   const slug = decodeURIComponent(issuesMatch[1] ?? "");
-  // Issue traffic to a non-delivery slug (an accidental delivery) falls through to a loud no-route violation.
-  if (!isReportDeliveryTarget(slug, scenario, multi, faults)) {
+  if (!isReportDeliveryTarget(slug, run.scenario, run.multi, run.faults)) {
     return null;
   }
   const issueNumber = issuesMatch[2] ? Number(issuesMatch[2]) : undefined;
-  const level: "read" | "write" = method === "GET" ? "read" : "write";
-  const resolved = resolveIssueTarget(method, pathname, slug, multi, state);
-  if (!("state" in resolved)) {
-    return resolved;
+  const admitted = admitIssueRoute(request, run, slug, issueRouteKey(request.method, issueNumber));
+  if (!("state" in admitted)) {
+    return admitted;
   }
-  const coreKey = issueRouteKey(method, issueNumber);
-  if (coreKey) {
-    const faulted = takeCoreFault(coreKey);
-    if (faulted) {
-      return { faulted };
-    }
-  }
-  const denied = gradeIssueAccess(slug, level, scenario, multi);
-  if (denied) {
-    return denied;
-  }
-  const repoState = resolved.state;
+
+  const { method } = request;
   if (method === "GET" && issueNumber === undefined) {
-    if (query.sort !== undefined && query.sort !== "created") {
-      return coreViolation(`issues list sort "${query.sort}" is not modelled`);
-    }
-    // GitHub's default is newest first; the number stands in for created_at, which the seeded issues do not carry.
-    const newestFirst = (query.direction ?? "desc") === "desc";
-    const matched = repoState.issues
-      .filter((issue) => issueMatchesQuery(issue, query))
-      .sort((a, b) => (newestFirst ? 1 : -1) * (Number(b.number) - Number(a.number)));
-    return { response: paged(matched, query), coreKey: "core.issuesList" };
+    return listIssues(admitted.state, request.query);
   }
   if (method === "POST" && issueNumber === undefined) {
-    const payload = asObject(body);
-    const number = nextNumber(repoState.issues);
-    const labels = Array.isArray(payload.labels)
-      ? payload.labels.map((l) => labelObject(String(l)))
-      : [];
-    const issue: Json = {
-      number,
-      title: payload.title ?? "",
-      body: payload.body ?? "",
-      state: "open",
-      labels,
-      user: { login: TOKEN_USER_LOGIN, id: 1, type: "User" },
-      html_url: issueUrl(slug, number),
-    };
-    repoState.issues.push(issue);
-    return { response: { status: 201, body: issue }, coreKey: "core.issueCreate" };
+    return createIssue(admitted.state, slug, request.body);
   }
   if (method === "PATCH" && issueNumber !== undefined) {
-    const issue = repoState.issues.find((i) => Number(i.number) === issueNumber);
-    if (!issue) {
-      return {
-        response: { status: 404, body: { message: "Not Found" } },
-        coreKey: "core.issuePatch",
-      };
-    }
-    const payload = asObject(body);
-    if (payload.body !== undefined) {
-      issue.body = payload.body;
-    }
-    if (payload.state !== undefined) {
-      issue.state = payload.state;
-    }
-    // The marker-reattach PATCH sends label names; expanded as on create, so the repaired label set is observable.
-    if (Array.isArray(payload.labels)) {
-      issue.labels = payload.labels.map((l) => labelObject(String(l)));
-    }
-    return { response: ok(issue), coreKey: "core.issuePatch" };
+    return patchIssue(admitted.state, issueNumber, request.body);
   }
-  return coreViolation(`unexpected ${method} on ${pathname}`);
+  return coreViolation(`unexpected ${method} on ${request.pathname}`);
 }
 
 /**
- * Wire attempts the probe can make, from the client's own MAX_RETRIES. Once a slug's repository.get has faulted this many
- * times the probe has given up, so the next repository.get is not a probe retry and the exemption expires.
+ * Null when the path is not an issue-channel route, so the caller falls through to section matching.
+ *   POST /repos/{o}/{r}/labels (marker)   -> ensure-create (Issues: write)
+ *   .../issues                            -> the issue routes
  */
+export function handleIssueReport(
+  request: IssueReportRequest,
+  run: IssueReportRun,
+): IssueReportOutcome | null {
+  return serveMarkerLabelCreate(request, run) ?? serveIssueRoute(request, run);
+}
+
+/** Wire attempts the probe can make, from the client's own MAX_RETRIES; once a slug's repository.get has faulted this many times the probe has given up, so the next repository.get is not a probe retry and the exemption expires. */
 export const PROBE_RETRY_BUDGET = 1 + MAX_RETRIES;
 
 /**
