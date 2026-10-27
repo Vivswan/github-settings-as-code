@@ -4,15 +4,18 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { parseSync } from "oxc-parser";
+import { publint } from "publint";
+import { formatMessage } from "publint/utils";
 import { parse as parseYaml } from "yaml";
 import manifest from "../../.release-please-manifest.json";
 import pkg from "../../package.json";
 import tsdown from "../../tsdown.config.js";
 import { ROOT } from "../root.js";
 import { readSettingsSchema } from "../settings-schema.js";
+import { withTempDir } from "../temp-dir.js";
 
 /** The built lib/settings.schema.json, whose $id names the repository the package must point at. */
 const schema = readSettingsSchema();
@@ -20,14 +23,26 @@ const schema = readSettingsSchema();
 /** tsdown types its options loosely (a glob, a list, or a map); this config is the map form. */
 const build = tsdown as { entry: Record<string, string>; outDir: string };
 
-/** The export targets and the bin paths package.json names, each as a ./-relative path. */
-function manifestTargets(): string[] {
+/** The two fields the publish checks read, so a hand-made variant of `pkg` is a manifest too. */
+interface Manifest {
+  readonly exports: Readonly<Record<string, string | { types: string; default: string }>>;
+  readonly bin: Readonly<Record<string, string>>;
+}
+
+/** The export targets and the bin paths `manifest` names, each as a ./-relative path. */
+function manifestTargets(manifest: Manifest): string[] {
   return [
-    ...Object.values(pkg.exports).map((entry) =>
+    ...Object.values(manifest.exports).map((entry) =>
       typeof entry === "string" ? entry : entry.default,
     ),
-    ...Object.values(pkg.bin).map((bin) => `./${bin}`),
+    ...Object.values(manifest.bin).map((bin) => `./${bin}`),
   ];
+}
+
+function manifestDeclarations(manifest: Manifest): string[] {
+  return Object.values(manifest.exports).flatMap((entry) =>
+    typeof entry === "string" ? [] : [entry.types],
+  );
 }
 
 /** The import paths the library page's entry table names, plus the two its trailing sentence says ride along, sorted. */
@@ -49,11 +64,31 @@ function documentedBinNames(page: string): string[] {
   return [...sentence.matchAll(/`([^`]+)`/g)].map((match) => match[1] ?? "").sort();
 }
 
-/** Whether `files` packs `target`: an entry names a file or a directory, with or without a trailing slash. */
-function isPacked(target: string): boolean {
-  return pkg.files.some((entry) => {
-    const path = `./${entry.replace(/\/$/, "")}`;
-    return target === path || target.startsWith(`${path}/`);
+/**
+ * What publint reports for `manifest` once npm, the publisher, has packed it; warnings count as errors, as lint:package
+ * runs it. A scratch package holds the manifest and an empty stub at every file it points a consumer at (a bin stub
+ * carries the shebang publint requires), so the judgment is the manifest's shape and npm's pack list, not the build.
+ */
+async function manifestMessages(manifest: Manifest): Promise<string[]> {
+  return withTempDir("gsac-manifest-", async (dir) => {
+    const bins = Object.values(manifest.bin).map((bin) => `./${bin}`);
+    for (const file of [...manifestTargets(manifest), ...manifestDeclarations(manifest)]) {
+      if (file === "./package.json") {
+        continue;
+      }
+      mkdirSync(join(dir, dirname(file)), { recursive: true });
+      writeFileSync(join(dir, file), bins.includes(file) ? "#!/usr/bin/env node\n" : "");
+    }
+    writeFileSync(join(dir, "package.json"), JSON.stringify(manifest));
+    const { messages } = await publint({
+      pkgDir: dir,
+      pack: "npm",
+      level: "warning",
+      strict: true,
+    });
+    return messages.map(
+      (message) => formatMessage(message, manifest, { color: false }) ?? message.code,
+    );
   });
 }
 
@@ -104,7 +139,7 @@ describe("package.json as the npm manifest", () => {
 
   test("the exports map and the bins name exactly the library build, the schema, and the manifest", () => {
     const built = Object.keys(build.entry).map((name) => `./${build.outDir}/${name}.js`);
-    const targets = manifestTargets();
+    const targets = manifestTargets(pkg);
     expect(targets.filter((target) => !built.includes(target)).sort()).toEqual([
       "./lib/settings.schema.json",
       "./package.json",
@@ -131,18 +166,24 @@ describe("package.json as the npm manifest", () => {
         );
       }
     }
-    const declarations: string[] = [];
     for (const entry of Object.values(pkg.exports)) {
       if (typeof entry === "string") {
         continue;
       }
       expect(entry.types).toBe(entry.default.replace(/\.js$/, ".d.ts"));
-      declarations.push(entry.types);
     }
-    // npm packs `files` (and the manifest, always), so a target outside them installs as a dangling path.
-    for (const target of [...targets, ...declarations].filter((t) => t !== "./package.json")) {
-      expect(isPacked(target), target).toBe(true);
-    }
+  });
+
+  test("npm's pack list holds every file the manifest points at, and publint has nothing else to say", async () => {
+    // npm packs `files`, the manifest, README, LICENSE, and every bin, so a target outside them installs as a dangling path.
+    expect(await manifestMessages(pkg)).toEqual([]);
+  });
+
+  test("an export target outside `files` is reported as unpublished (negative control)", async () => {
+    const manifest = { ...pkg, exports: { ...pkg.exports, "./extra": "./dist/extra.js" } };
+    expect(await manifestMessages(manifest)).toEqual([
+      'pkg.exports["./extra"] is ./dist/extra.js but the file is not published. Is it specified in pkg.files?',
+    ]);
   });
 
   test("the runtime dependencies are exactly the packages the library entries import", () => {
