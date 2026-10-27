@@ -89,6 +89,12 @@ const MULTI_RESULT_ORDER = ["failed", "drift", "partial", "skipped", "applied", 
 /** The visibility filter values that narrow the pool; any other value keeps every repo, as the action does. */
 const VISIBILITY_FILTERS: ReadonlySet<string> = new Set(["public", "private", "internal"]);
 
+/** Every character an owner or repository name holds, "-" first so a rewritten class reads it as a literal. */
+const NAME_CHARACTERS = "-._0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+/** A glob class, its opener and members apart, or one letter outside a class. */
+const CLASS_OR_LETTER = /\[([!^]?)([^\]]*)\]|[a-z]/gi;
+
 /** Verbatim: the fold for every key GitHub matches exactly. */
 const same = (name: string): string => name;
 
@@ -736,53 +742,35 @@ export function predictMulti(meta: MultiScenarioMeta): MultiPrediction {
   return { repos, allowedExitCodes: multiExitCodes(repos), forbidden };
 }
 
-/** A pattern with "/" matches the full slug, otherwise the name portion, mirroring the repos-dir <name>.yml vs <owner>/<name>.yml split. */
-function globTarget(pattern: string, slug: string): string {
-  return (pattern.includes("/") ? slug : (slug.split("/")[1] ?? slug)).toLowerCase();
-}
-
-/** Whether one pattern unit takes the target character under it: a literal match, or a wildcard. */
-function globUnitMatches(unit: string | undefined, char: string | undefined): boolean {
-  return unit !== undefined && (unit === char || unit === "*" || unit === "?");
+/**
+ * GitHub compares names case-insensitively and Bun.Glob has no mode for it, so the pattern is widened to admit
+ * either case the way the action's nocase regex does: a letter outside a class becomes "[xX]", and a class
+ * becomes the name characters it admits in either case. Folding the target instead would misread a range that
+ * spans the cases: lowercased, "[0-Z]" is "[0-z]" and gains "_".
+ */
+function eitherCase(pattern: string): string {
+  return pattern.replace(CLASS_OR_LETTER, (unit, opener: string, members: string | undefined) => {
+    if (members === undefined) {
+      return `[${unit.toLowerCase()}${unit.toUpperCase()}]`;
+    }
+    const admits = new Bun.Glob(`[${members}]`);
+    const twin = (char: string): string =>
+      char === char.toLowerCase() ? char.toUpperCase() : char.toLowerCase();
+    const admitted = [...NAME_CHARACTERS].filter(
+      (char) => admits.match(char) || admits.match(twin(char)),
+    );
+    return `[${opener}${admitted.join("")}]`;
+  });
 }
 
 /**
- * An INDEPENDENT glob matcher, deliberately not src's compileExcludePattern (a picomatch compile), so a bug in
- * either surfaces as a disagreement; it covers the forms the scenarios write ("*", "?", a leading "!"), not
- * the whole picomatch grammar.
+ * The runtime's glob, not src's compileExcludePattern (a picomatch compile), so a bug in either surfaces as a
+ * disagreement. A pattern with "/" matches the full slug, otherwise the name portion, mirroring the repos-dir
+ * <name>.yml vs <owner>/<name>.yml split.
  */
 function globMatches(pattern: string, slug: string): boolean {
-  if (pattern.startsWith("!")) {
-    return !globMatches(pattern.slice(1), slug);
-  }
-  const target = globTarget(pattern, slug);
-  const pat = pattern.toLowerCase();
-  let p = 0;
-  let t = 0;
-  let star = -1;
-  let mark = 0;
-  while (t < target.length) {
-    if (globUnitMatches(pat[p], target[t])) {
-      if (pat[p] === "*") {
-        star = p;
-        mark = t;
-        p++;
-      } else {
-        p++;
-        t++;
-      }
-    } else if (star === -1) {
-      return false;
-    } else {
-      p = star + 1;
-      mark++;
-      t = mark;
-    }
-  }
-  while (p < pat.length && pat[p] === "*") {
-    p++;
-  }
-  return p === pat.length;
+  const target = pattern.includes("/") ? slug : (slug.split("/")[1] ?? slug);
+  return new Bun.Glob(eitherCase(pattern)).match(target);
 }
 
 /** The action's documented filter rules over one pool repo, in the engine's attribution order. */

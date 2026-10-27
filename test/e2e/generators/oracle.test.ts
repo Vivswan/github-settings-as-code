@@ -1162,6 +1162,24 @@ describe("predictDiscovery filter rules", () => {
       { exclude: "uPPer" },
       ["e2e-owner/svc-a", "e2e-owner/svc-b", "e2e-owner/legacy-x"],
     ],
+    [
+      "exclude globs: a character class reads as the action's matcher reads it, not literally",
+      globPool,
+      { exclude: "svc-[ab]" },
+      ["e2e-owner/legacy-x", "e2e-owner/UPPER"],
+    ],
+    [
+      "exclude globs: a class range spanning the cases admits a letter of either case and not the gap between them",
+      [{ slug: "e2e-owner/svc-_" }, { slug: "e2e-owner/svc-a" }, { slug: "e2e-owner/svc-Q" }],
+      { exclude: "svc-[0-Z]" },
+      ["e2e-owner/svc-_"],
+    ],
+    [
+      'exclude globs: a leading "!" negates, so only the matches stay',
+      globPool,
+      { exclude: "!svc-*" },
+      ["e2e-owner/svc-a", "e2e-owner/svc-b"],
+    ],
   ])("%s", (_label, repos, filters, kept) => {
     expect(predictDiscovery(repos, filters)).toEqual(kept);
   });
