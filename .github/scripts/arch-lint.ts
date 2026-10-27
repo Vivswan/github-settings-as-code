@@ -11,8 +11,9 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { inspect } from "node:util";
+import { type Node as ESTreeNode, walk } from "estree-walker";
 import { err, ok, Result } from "neverthrow";
-import { type Node, parseSync } from "oxc-parser";
+import { type Node, type Program, parseSync } from "oxc-parser";
 import { parseDocument } from "yaml";
 import { z } from "zod";
 import { countNoun, quote } from "../../src/text.js";
@@ -133,19 +134,10 @@ function layerOf(arch: Architecture, path: string): string | undefined {
   )?.[0];
 }
 
-function* nodesOf(value: unknown): Generator<Node> {
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      yield* nodesOf(item);
-    }
-  } else if (typeof value === "object" && value !== null) {
-    if ("type" in value && typeof value.type === "string") {
-      yield value as Node;
-    }
-    for (const child of Object.values(value)) {
-      yield* nodesOf(child);
-    }
-  }
+/** `visit` on every node of `program`, preorder. estree-walker finds the children by the fields carrying a `type`,
+ * so oxc's TypeScript nodes walk like the ESTree ones; only its signature is typed to ESTree, hence the casts. */
+function eachNode(program: Program, visit: (node: Node) => void): void {
+  walk(program as unknown as ESTreeNode, { enter: (node) => visit(node as unknown as Node) });
 }
 
 /** The expression under the wrappers parentheses and TypeScript add: `(require)(x)`, `require!(x)`,
@@ -222,9 +214,9 @@ export function importSpecifiers(text: string, file: string): string[] {
     );
   }
   const specifiers = new Set<string>();
-  for (const node of nodesOf(program)) {
+  eachNode(program, (node) => {
     if (!isModuleLoad(node)) {
-      continue;
+      return;
     }
     const specifier = literalModuleRequest(node);
     if (specifier === undefined) {
@@ -233,7 +225,7 @@ export function importSpecifiers(text: string, file: string): string[] {
       );
     }
     specifiers.add(specifier);
-  }
+  });
   return [...specifiers].filter((specifier) => /^\.\.?\//.test(specifier));
 }
 
