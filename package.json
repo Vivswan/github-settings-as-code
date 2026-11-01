@@ -107,7 +107,7 @@
     "micromark-extension-gfm-table": "2.1.2",
     "oxc-parser": "0.152.0",
     "publint": "0.3.25",
-    "tsdown": "0.23.0",
+    "tsdown": "0.23.2",
     "typescript": "7.0.2",
     "unist-util-visit-parents": "6.0.2"
   }
