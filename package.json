@@ -83,7 +83,7 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
-    "@actions/artifact": "6.2.1",
+    "@actions/artifact": "6.3.1",
     "@actions/core": "3.0.1",
     "@actions/expressions": "0.3.61",
     "@arethetypeswrong/cli": "0.18.5",
@@ -92,7 +92,7 @@
     "@octokit/openapi": "24.0.0",
     "@octokit/openapi-webhooks": "12.1.0",
     "@types/bun": "1.4.2",
-    "@types/node": "26.6.4",
+    "@types/node": "26.6.5",
     "@types/picomatch": "4.0.3",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
@@ -105,9 +105,9 @@
     "mdast-util-from-markdown": "2.1.0",
     "mdast-util-gfm-table": "2.0.0",
     "micromark-extension-gfm-table": "2.1.2",
-    "oxc-parser": "0.152.0",
+    "oxc-parser": "0.155.0",
     "publint": "0.3.25",
-    "tsdown": "0.23.0",
+    "tsdown": "0.23.2",
     "typescript": "7.0.2",
     "unist-util-visit-parents": "6.0.2"
   }
