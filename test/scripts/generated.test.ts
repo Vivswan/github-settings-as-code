@@ -141,12 +141,12 @@ describe("the build:check runner", () => {
         // A stale byte each region generator repairs (the region shapes hold), and one in a wholesale file.
         const table = join(dir, "docs/reference/sections.md");
         const page = readFileSync(table, "utf8");
-        expect(page).toContain("| `labels` |");
-        writeFileSync(table, page.replace("| `labels` |", "| `labelz` |"));
+        expect(page).toMatch(/^\| `labels` +\|/m);
+        writeFileSync(table, page.replace(/^\| `labels`( +)\|/m, "| `labelz`$1|"));
         const inputs = join(dir, "docs/reference/inputs.md");
         const inputsPage = readFileSync(inputs, "utf8");
-        expect(inputsPage).toContain("| `token` |");
-        writeFileSync(inputs, inputsPage.replace("| `token` |", "| `tokem` |"));
+        expect(inputsPage).toMatch(/^\| `token` +\|/m);
+        writeFileSync(inputs, inputsPage.replace(/^\| `token`( +)\|/m, "| `tokem`$1|"));
         const manifest = join(dir, "action.yml");
         const yml = readFileSync(manifest, "utf8");
         expect(yml).toContain('    default: ""\n');

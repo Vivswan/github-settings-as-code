@@ -6,11 +6,11 @@ order: 360
 
 A repository secret is readable from any workflow that anyone with push access can edit, so on a fleet admin repository the write token deserves a higher bar than push. Split the trust in three tiers:
 
-| Tier | Job | Credential |
-|---|---|---|
-| Render | Fold each repository's layers into its rendered document | None: `mode: render` reads local files only |
-| Preview | `mode: check` over the rendered documents on pull requests, as in [Preview the blast radius](preview-blast-radius.md) | A read-only PAT stored as a repository secret |
-| Apply | `mode: apply` over the same rendered documents on `main` | The write PAT stored as an environment secret, released only after a human approves the run |
+| Tier    | Job                                                                                                                   | Credential                                                                                  |
+| ------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Render  | Fold each repository's layers into its rendered document                                                              | None: `mode: render` reads local files only                                                 |
+| Preview | `mode: check` over the rendered documents on pull requests, as in [Preview the blast radius](preview-blast-radius.md) | A read-only PAT stored as a repository secret                                               |
+| Apply   | `mode: apply` over the same rendered documents on `main`                                                              | The write PAT stored as an environment secret, released only after a human approves the run |
 
 The apply workflow: `plan` lists the files in the flat `.github/repos/` directory, the render job runs outside the gated environment, and the apply job inside it. The write token therefore only materializes after approval and never sits in a job that also computes anything.
 

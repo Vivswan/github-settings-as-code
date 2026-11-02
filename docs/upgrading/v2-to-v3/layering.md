@@ -13,11 +13,11 @@ If a v2 setup relied on the defaults merge for anything beyond "no file, use the
 
 The fold is not the v2 merge. Three differences to audit when you rebuild an old overlay:
 
-| In v2's defaults merge | In a `mode: render` fold |
-|---|---|
-| Lists always replaced: a target's `labels` replaced the defaults' | Every list section unions by its key under the default `layering: deep` ([section 28](#28-_layering-takes-replace-shallow-or-deep)); set `layering: replace` (or `_layering: replace` on the section) to keep the old replacement |
-| A nested `null` in the target survived as a value (`pages.cname: null` removed the domain) | The same: `null` wins and is written as the value, the empty or off state on GitHub. A key with no empty state refuses it at validation ([section 31](#31-null-wins-and-means-empty-and-_remove-drops-an-entry)) |
-| A `null` section in the target opted out of the defaults' section | Only `pages: null` and `interaction_limits: null` are legal, and they turn the site or the limit off rather than opting out; any other whole-section `null` fails validation. To drop a lower entry, write `_remove: true` on it |
+| In v2's defaults merge                                                                     | In a `mode: render` fold                                                                                                                                                                                                          |
+| ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Lists always replaced: a target's `labels` replaced the defaults'                          | Every list section unions by its key under the default `layering: deep` ([section 28](#28-_layering-takes-replace-shallow-or-deep)); set `layering: replace` (or `_layering: replace` on the section) to keep the old replacement |
+| A nested `null` in the target survived as a value (`pages.cname: null` removed the domain) | The same: `null` wins and is written as the value, the empty or off state on GitHub. A key with no empty state refuses it at validation ([section 31](#31-null-wins-and-means-empty-and-_remove-drops-an-entry))                  |
+| A `null` section in the target opted out of the defaults' section                          | Only `pages: null` and `interaction_limits: null` are legal, and they turn the site or the limit off rather than opting out; any other whole-section `null` fails validation. To drop a lower entry, write `_remove: true` on it  |
 
 ## 24. The rendered file is the fold in the canonical order
 
@@ -102,14 +102,14 @@ v3            with:
                 rendered-file: rendered.yml
 ```
 
-| Face | Pre-release | v3 |
-|---|---|---|
-| The mode | `mode: merge` | `mode: render` |
-| The output input | `merged-file` | `rendered-file` |
-| The CLI subcommand | `gsac merge` | `gsac render` |
-| The result word (`result` output, `--json`, `RUN_RESULTS`) | `merged` | `rendered` |
-| Problem codes | `input-merge-only`, `input-rejected-in-merge`, `input-merged-file-missing`, `merged-file-is-layer`, `merged-file-unwritable` | `input-render-only`, `input-rejected-in-render`, `input-rendered-file-missing`, `rendered-file-is-layer`, `rendered-file-unwritable` |
-| The library flow | `runMerge`, `MergeConfig`, `FinishedMerge`, `concludeMerge` | `runRender`, `RenderConfig`, `FinishedRender`, `concludeRender` |
+| Face                                                       | Pre-release                                                                                                                  | v3                                                                                                                                   |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| The mode                                                   | `mode: merge`                                                                                                                | `mode: render`                                                                                                                       |
+| The output input                                           | `merged-file`                                                                                                                | `rendered-file`                                                                                                                      |
+| The CLI subcommand                                         | `gsac merge`                                                                                                                 | `gsac render`                                                                                                                        |
+| The result word (`result` output, `--json`, `RUN_RESULTS`) | `merged`                                                                                                                     | `rendered`                                                                                                                           |
+| Problem codes                                              | `input-merge-only`, `input-rejected-in-merge`, `input-merged-file-missing`, `merged-file-is-layer`, `merged-file-unwritable` | `input-render-only`, `input-rejected-in-render`, `input-rendered-file-missing`, `rendered-file-is-layer`, `rendered-file-unwritable` |
+| The library flow                                           | `runMerge`, `MergeConfig`, `FinishedMerge`, `concludeMerge`                                                                  | `runRender`, `RenderConfig`, `FinishedRender`, `concludeRender`                                                                      |
 
 `mode: merge` fails as an unsupported mode value, naming the four modes. There is no alias: rename the mode, the input, and the subcommand together, and a step that branches on `result == 'merged'` tests `rendered`. The library keeps `mergeSettings`, `MergeOptions`, and `MergeReport`, which name the fold, not the mode.
 

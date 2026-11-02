@@ -37,7 +37,7 @@ expect:
         - name: readers
           permission: pull
   summary_contains:
-    - "teams[pushy]: left out of the snapshot - the live role \"push\" has no declaration that plans as itself (\"push\" in a settings file means the \"write\" role)"
+    - 'teams[pushy]: left out of the snapshot - the live role "push" has no declaration that plans as itself ("push" in a settings file means the "write" role)'
   never:
     - POST /
     - PATCH /

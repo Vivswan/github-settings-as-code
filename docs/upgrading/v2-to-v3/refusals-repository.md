@@ -20,13 +20,13 @@ v3   repository.has_downloads: has_downloads is reported by GitHub but cannot be
      repository.topics[1]: ... points at topics: [] as the one spelling of the clear
 ```
 
-| Declared | v2 | v3 |
-|---|---|---|
-| A GET-only key (`has_downloads`, `has_pages`, `custom_properties`, ids, urls, counts) | Drift on every run | Refused naming the key; `custom_properties` and `has_pages` point at their sections |
-| An unknown `security_and_analysis` sub-key, a status outside `enabled` and `disabled`, an untyped bypass reviewer | 422 at apply | Refused; `dependabot_security_updates` points at `enable_automated_security_fixes` |
-| A squash or merge commit message without its title, or an illegal squash title and message pair | 422 at apply | Refused naming the legal squash pairs; merge takes any pair once the title is declared beside the message |
-| A topic outside `^[a-z0-9][a-z0-9-]{0,49}$` after lowercasing, or more than 20 | 422 from the topics PUT | Refused naming the topic |
-| An empty topic (`topics: [""]`, `topics: ""`, `ci,,tooling`) | Dropped silently, so `[""]` cleared every topic | Refused by index |
+| Declared                                                                                                          | v2                                              | v3                                                                                                        |
+| ----------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| A GET-only key (`has_downloads`, `has_pages`, `custom_properties`, ids, urls, counts)                             | Drift on every run                              | Refused naming the key; `custom_properties` and `has_pages` point at their sections                       |
+| An unknown `security_and_analysis` sub-key, a status outside `enabled` and `disabled`, an untyped bypass reviewer | 422 at apply                                    | Refused; `dependabot_security_updates` points at `enable_automated_security_fixes`                        |
+| A squash or merge commit message without its title, or an illegal squash title and message pair                   | 422 at apply                                    | Refused naming the legal squash pairs; merge takes any pair once the title is declared beside the message |
+| A topic outside `^[a-z0-9][a-z0-9-]{0,49}$` after lowercasing, or more than 20                                    | 422 from the topics PUT                         | Refused naming the topic                                                                                  |
+| An empty topic (`topics: [""]`, `topics: ""`, `ci,,tooling`)                                                      | Dropped silently, so `[""]` cleared every topic | Refused by index                                                                                          |
 
 For `@vivswan/github-settings-as-code` consumers, the commit-message keys under `SectionInput<"repository">` (and so `SettingsFile`) are enums and `security_and_analysis` is a closed shape, once `unknown`; a `string` or an unknown sub-key stops compiling.
 
@@ -67,13 +67,13 @@ v3   actions.artifact_and_log_retention.maximum_allowed_days: maximum_allowed_da
      actions.selected_actions: Unrecognized key: "pattern_allowed" ...
 ```
 
-| Declared | v3 |
-|---|---|
-| `selected_actions_url`, `artifact_and_log_retention.maximum_allowed_days`, `oidc_customization_sub.sub_claim_prefix` | Refused naming the key |
-| A `selected_actions` key outside `github_owned_allowed`, `verified_allowed`, `patterns_allowed`, or a mistyped value (`github_owned_allowed: "true"`) | Refused: the object is closed and typed |
-| `sha_pinning_required: "true"` | Refused: a known boolean key of the permissions PUT, no longer an unrecognized passthrough |
-| An `approval_policy` outside GitHub's three; a malformed or repeated OIDC claim key; `include_claim_keys` beside `use_default: true` | Refused naming the key |
-| A fractional or non-positive retention or cache limit | Refused: positive integers |
+| Declared                                                                                                                                              | v3                                                                                         |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `selected_actions_url`, `artifact_and_log_retention.maximum_allowed_days`, `oidc_customization_sub.sub_claim_prefix`                                  | Refused naming the key                                                                     |
+| A `selected_actions` key outside `github_owned_allowed`, `verified_allowed`, `patterns_allowed`, or a mistyped value (`github_owned_allowed: "true"`) | Refused: the object is closed and typed                                                    |
+| `sha_pinning_required: "true"`                                                                                                                        | Refused: a known boolean key of the permissions PUT, no longer an unrecognized passthrough |
+| An `approval_policy` outside GitHub's three; a malformed or repeated OIDC claim key; `include_claim_keys` beside `use_default: true`                  | Refused naming the key                                                                     |
+| A fractional or non-positive retention or cache limit                                                                                                 | Refused: positive integers                                                                 |
 
 For `@vivswan/github-settings-as-code` consumers, in `SectionInput<"actions">` (and so `SettingsFile`) `approval_policy` is an enum, once `string`, and `selected_actions` is closed, once an open mapping; a `string` or an unknown key there stops compiling.
 

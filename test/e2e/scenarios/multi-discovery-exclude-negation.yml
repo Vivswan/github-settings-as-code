@@ -8,10 +8,10 @@ discovery:
   inputs:
     exclude: "!svc-*"
   pool:
-    - {slug: e2e-owner/svc-a}
-    - {slug: e2e-owner/svc-b}
-    - {slug: e2e-owner/tooling}
-    - {slug: e2e-owner/website}
+    - { slug: e2e-owner/svc-a }
+    - { slug: e2e-owner/svc-b }
+    - { slug: e2e-owner/tooling }
+    - { slug: e2e-owner/website }
 repos:
   e2e-owner/svc-a:
     settings:

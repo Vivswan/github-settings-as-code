@@ -35,6 +35,6 @@ expect:
   never:
     - "POST /repos/{repo}/milestones"
   stdout_contains:
-    - "updated milestone \"v1.0\""
-    - "updated milestone \"v2.0\""
+    - 'updated milestone "v1.0"'
+    - 'updated milestone "v2.0"'
   fixpoint: converges

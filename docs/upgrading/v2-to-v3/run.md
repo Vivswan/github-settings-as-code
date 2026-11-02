@@ -41,11 +41,11 @@ A step that read `fromJSON(steps.settings.outputs.repos-result)['o/r'].skippedSe
 
 ## 6. The three outputs are always set
 
-| Output | v2 | v3 |
-|---|---|---|
-| `result` | Every mode | Every mode |
-| `skipped-sections` | Apply, check, snapshot; the pre-release `merge` mode set it to `""` | Every mode, `""` when none |
-| `repos-result` | Multi-repo runs and `snapshot-dir` only; unset elsewhere | Every mode; `{}` for a run over one repository or a render |
+| Output             | v2                                                                  | v3                                                         |
+| ------------------ | ------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `result`           | Every mode                                                          | Every mode                                                 |
+| `skipped-sections` | Apply, check, snapshot; the pre-release `merge` mode set it to `""` | Every mode, `""` when none                                 |
+| `repos-result`     | Multi-repo runs and `snapshot-dir` only; unset elsewhere            | Every mode; `{}` for a run over one repository or a render |
 
 A step that used an unset `repos-result` to tell a single-repo run from a fleet run must test `repos-result == '{}'` instead. The exit rule did not move: 1 exactly when `result` is `failed`, or `drift` in `mode: check`.
 
@@ -53,13 +53,13 @@ A step that used an unset `repos-result` to tell a single-repo run from a fleet 
 
 Every `gsac` subcommand prints one object under `--json`, `result` first:
 
-| Command | v2 | v3 |
-|---|---|---|
-| `check`, `apply`, `render`, `snapshot` | `{"skipped-sections": "", "result": "clean"}` | `{"result": "clean", "skipped-sections": [], "repos-result": {}}`: the list is a list, the map a map |
-| `validate` | `{"file": ..., "valid": true, "sections": [...]}` | `{"result": "valid", "file": ..., "sections": [...]}` |
-| `permissions` | `{"labels": "<grant>", ...}` | `{"result": "valid", "file": ..., "grant": {"labels": "<grant>", ...}}` |
-| `init` | `{"file", "repository", "result", "skippedSections", "failedSections", "grant"}` | `{"result", "file", "repository", "skipped-sections", "grant"}`; `failedSections` is gone, since a failed section now fails init |
-| any failure | `{"file", "valid": false, "problem"}` or `{"result": "failed", "problem"}`; a mode command's fatal problem and a parser error printed no `problem` | `{"result": "failed", "file"?: ..., "problem": ...}`; a mode command that fails before any target runs prints `problem` beside its three outputs, a parser error or a crash prints it alone. A target that fails while running has no `problem`: its errors are on stderr and its row in `repos-result` |
+| Command                                | v2                                                                                                                                                 | v3                                                                                                                                                                                                                                                                                                      |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `check`, `apply`, `render`, `snapshot` | `{"skipped-sections": "", "result": "clean"}`                                                                                                      | `{"result": "clean", "skipped-sections": [], "repos-result": {}}`: the list is a list, the map a map                                                                                                                                                                                                    |
+| `validate`                             | `{"file": ..., "valid": true, "sections": [...]}`                                                                                                  | `{"result": "valid", "file": ..., "sections": [...]}`                                                                                                                                                                                                                                                   |
+| `permissions`                          | `{"labels": "<grant>", ...}`                                                                                                                       | `{"result": "valid", "file": ..., "grant": {"labels": "<grant>", ...}}`                                                                                                                                                                                                                                 |
+| `init`                                 | `{"file", "repository", "result", "skippedSections", "failedSections", "grant"}`                                                                   | `{"result", "file", "repository", "skipped-sections", "grant"}`; `failedSections` is gone, since a failed section now fails init                                                                                                                                                                        |
+| any failure                            | `{"file", "valid": false, "problem"}` or `{"result": "failed", "problem"}`; a mode command's fatal problem and a parser error printed no `problem` | `{"result": "failed", "file"?: ..., "problem": ...}`; a mode command that fails before any target runs prints `problem` beside its three outputs, a parser error or a crash prints it alone. A target that fails while running has no `problem`: its errors are on stderr and its row in `repos-result` |
 
 ## 8. A failed snapshot section fails the target
 
@@ -89,17 +89,17 @@ Anything that greps the check output for these lines needs the new spelling. Two
 - the cannot-verify line: the webhook secret, the write-only `check_suite_preferences` note, `interaction_limits.expiry`, and the repository toggles GitHub cannot read back (`enable_git_lfs`);
 - the left-out line: rulesets, webhooks, the teams and collaborators snapshot notes, an inherited interaction limit, and the secondary snapshot reads (actions, environments, repository) a denied grant skips under `on-missing-permission: warn`; a denied primary read still says `skipped`.
 
-| Line | v2 | v3 |
-|---|---|---|
-| A webhook's label | `webhooks["https://ci.example.com/hook"].active` | `webhooks[https://ci.example.com/hook].active` |
-| A field mismatch (milestones, rulesets, collaborators, teams, every list section) | `milestones[v1].state: "closed" != "open"` and `teams[platform]: live role "read" != declared "write"` | `milestones[v1].state: declared "closed" != live "open"; apply will set the declared value` |
-| A webhook's events | `... declared [...] != live [...] (compared order-insensitively)` | one line per element: `webhooks[<url>].events: missing "release"` |
-| A value check mode cannot compare | `... so the declared value cannot be verified; apply re-sends it on every run so rotations propagate` | `<label>: <why>, so check mode cannot verify <what>; apply <re-sends it> on every run` |
-| A resource a snapshot reads but does not declare | `rulesets[x]: inherited from the organization ..., so it is not part of the repository's snapshot` and `teams[x]: ...; not declared` | `<label>: left out of the snapshot - <reason>` |
-| An email invitation in a collaborators snapshot | `invitation 502 was sent by email, so no username can declare it; not declared, and apply leaves it untouched` | `collaborators[invitation 502]: left out of the snapshot - sent by email, so no username can declare it; apply leaves it untouched` |
-| A personal account under `teams` or `custom_properties` | `teams: owner "o" is a personal account, not an organization, so team access does not apply` and `custom_properties: owner "o" is a personal account, and custom properties require an organization-owned repository` | `<section>: owner "o" is a personal account, not an organization, so this section does not apply` |
-| A ruleset update's change line | `updated ruleset "main" (id 42)` | `updated ruleset "main"` |
-| A milestone delete's change line | `DELETED undeclared milestone "v0.9" (detached from every issue that carried it)` | `DELETED undeclared milestone "v0.9"` (the drift line beside it still names the detaching) |
+| Line                                                                              | v2                                                                                                                                                                                                                    | v3                                                                                                                                  |
+| --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| A webhook's label                                                                 | `webhooks["https://ci.example.com/hook"].active`                                                                                                                                                                      | `webhooks[https://ci.example.com/hook].active`                                                                                      |
+| A field mismatch (milestones, rulesets, collaborators, teams, every list section) | `milestones[v1].state: "closed" != "open"` and `teams[platform]: live role "read" != declared "write"`                                                                                                                | `milestones[v1].state: declared "closed" != live "open"; apply will set the declared value`                                         |
+| A webhook's events                                                                | `... declared [...] != live [...] (compared order-insensitively)`                                                                                                                                                     | one line per element: `webhooks[<url>].events: missing "release"`                                                                   |
+| A value check mode cannot compare                                                 | `... so the declared value cannot be verified; apply re-sends it on every run so rotations propagate`                                                                                                                 | `<label>: <why>, so check mode cannot verify <what>; apply <re-sends it> on every run`                                              |
+| A resource a snapshot reads but does not declare                                  | `rulesets[x]: inherited from the organization ..., so it is not part of the repository's snapshot` and `teams[x]: ...; not declared`                                                                                  | `<label>: left out of the snapshot - <reason>`                                                                                      |
+| An email invitation in a collaborators snapshot                                   | `invitation 502 was sent by email, so no username can declare it; not declared, and apply leaves it untouched`                                                                                                        | `collaborators[invitation 502]: left out of the snapshot - sent by email, so no username can declare it; apply leaves it untouched` |
+| A personal account under `teams` or `custom_properties`                           | `teams: owner "o" is a personal account, not an organization, so team access does not apply` and `custom_properties: owner "o" is a personal account, and custom properties require an organization-owned repository` | `<section>: owner "o" is a personal account, not an organization, so this section does not apply`                                   |
+| A ruleset update's change line                                                    | `updated ruleset "main" (id 42)`                                                                                                                                                                                      | `updated ruleset "main"`                                                                                                            |
+| A milestone delete's change line                                                  | `DELETED undeclared milestone "v0.9" (detached from every issue that carried it)`                                                                                                                                     | `DELETED undeclared milestone "v0.9"` (the drift line beside it still names the detaching)                                          |
 
 ## 18. GSAC_RETRY_BASE_MS
 
@@ -109,15 +109,15 @@ The one environment variable of the tool's own, the retry-timing test knob, is `
 
 The action and the command line print the same line for the same problem; the remedy names the input and, where one exists, its flag.
 
-| Problem | v2 (action) | v2 (command line) | v3 (both) |
-|---|---|---|---|
-| No token | `Set the "token" input on the action step (or export GITHUB_TOKEN)` | `Pass --token, or export GITHUB_TOKEN` | `Set the "token" input (--token on the command line), or export GITHUB_TOKEN` |
-| No repository | `Set the "repository" input (or GITHUB_REPOSITORY) to a value like "octocat/hello-world"` | `Pass --repository owner/name (inside GitHub Actions, GITHUB_REPOSITORY supplies it)` | `Set the "repository" input (--repository on the command line) to a value like "octocat/hello-world"; inside GitHub Actions, GITHUB_REPOSITORY supplies it` |
-| Unknown section in `sections` | `Fix the name in the workflow's input list` | same | `Fix the section name` |
-| A transient API failure | `... re-run the workflow, and retry later if it persists` | same | `... re-run, and retry later if it persists` (the report channels say `Re-run, or set private-report: none if it persists`) |
+| Problem                                   | v2 (action)                                                                                                                           | v2 (command line)                                                                                                     | v3 (both)                                                                                                                                                                                                                |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| No token                                  | `Set the "token" input on the action step (or export GITHUB_TOKEN)`                                                                   | `Pass --token, or export GITHUB_TOKEN`                                                                                | `Set the "token" input (--token on the command line), or export GITHUB_TOKEN`                                                                                                                                            |
+| No repository                             | `Set the "repository" input (or GITHUB_REPOSITORY) to a value like "octocat/hello-world"`                                             | `Pass --repository owner/name (inside GitHub Actions, GITHUB_REPOSITORY supplies it)`                                 | `Set the "repository" input (--repository on the command line) to a value like "octocat/hello-world"; inside GitHub Actions, GITHUB_REPOSITORY supplies it`                                                              |
+| Unknown section in `sections`             | `Fix the name in the workflow's input list`                                                                                           | same                                                                                                                  | `Fix the section name`                                                                                                                                                                                                   |
+| A transient API failure                   | `... re-run the workflow, and retry later if it persists`                                                                             | same                                                                                                                  | `... re-run, and retry later if it persists` (the report channels say `Re-run, or set private-report: none if it persists`)                                                                                              |
 | `private-report: artifact` off the runner | accepted at the parse (the action has the upload; a library caller without an uploader failed later with `artifact-uploader-missing`) | `the "private-report" input is "artifact", which is not a supported private-report channel from the command line ...` | `private-report: artifact uploads the reports as a workflow artifact, which only the GitHub Actions runner can do, and this run has no artifact upload ... Set private-report to "issue", "issue-on-failure", or "none"` |
-| `gsac init --settings-file a,b` | `the --settings-file value "a,b" contains a comma or a newline, which check and apply read as a list separator ...` | | `the "settings-file" input is "a,b", which contains a list separator: init writes exactly one settings file ... Name one file` |
-| An unreadable `repos-dir` file | `cannot read settings from <path>: ... Fix the file, or delete it to stop managing this repository` | | `cannot read the central settings file <path>: ... Fix the file, or delete it to stop managing this repository` (a YAML syntax error in it reads the same way, where v2 said `cannot parse`) |
+| `gsac init --settings-file a,b`           | `the --settings-file value "a,b" contains a comma or a newline, which check and apply read as a list separator ...`                   |                                                                                                                       | `the "settings-file" input is "a,b", which contains a list separator: init writes exactly one settings file ... Name one file`                                                                                           |
+| An unreadable `repos-dir` file            | `cannot read settings from <path>: ... Fix the file, or delete it to stop managing this repository`                                   |                                                                                                                       | `cannot read the central settings file <path>: ... Fix the file, or delete it to stop managing this repository` (a YAML syntax error in it reads the same way, where v2 said `cannot parse`)                             |
 
 For `@vivswan/github-settings-as-code` consumers: `parseConfig` takes a third argument, the face's `RunCapabilities`, and refuses `private-report: artifact` there (`input-artifact-unsupported`); a two-argument call stops compiling.
 
@@ -165,16 +165,16 @@ The moment moves to the run: one `notice: snapshot taken 2026-09-11T06:17:00.000
 
 The canonical order, the same for the snapshot and the rendered file:
 
-| Node | Order |
-|---|---|
-| The top level | The sections in the order the action applies them (`SECTION_KEYS`), then `_layering`, then any other key by code point |
-| A mapping the schema declares | Its properties as the schema (and the published JSON schema) lists them; keys the schema does not declare follow by code point (an integer-like key such as `"10"` leads, in numeric order, as JavaScript enumerates it) |
-| A mapping the schema leaves open (a rule's `parameters`, a bypass actor) | Keys by code point |
-| A list of entries with an identity (labels by `name`, webhooks by `config.url`, milestones by `title`, collaborators by `username`, `rules` by `type`, and so on) | Sorted by the identity, ties by the entry's canonical JSON |
-| `environments` | The `pinned: true` entries first in their written order, since that order is the pin rank; the rest by `name` |
-| `branches` | As written: GitHub applies overlapping wildcard rules in creation order, and apply creates them in file order; the fold unions them by name in that order |
-| Any other list (`topics`, `include` patterns, `bypass_actors`, `reviewers`) | As written |
-| Each section's header notes | By code point within the section |
+| Node                                                                                                                                                              | Order                                                                                                                                                                                                                    |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| The top level                                                                                                                                                     | The sections in the order the action applies them (`SECTION_KEYS`), then `_layering`, then any other key by code point                                                                                                   |
+| A mapping the schema declares                                                                                                                                     | Its properties as the schema (and the published JSON schema) lists them; keys the schema does not declare follow by code point (an integer-like key such as `"10"` leads, in numeric order, as JavaScript enumerates it) |
+| A mapping the schema leaves open (a rule's `parameters`, a bypass actor)                                                                                          | Keys by code point                                                                                                                                                                                                       |
+| A list of entries with an identity (labels by `name`, webhooks by `config.url`, milestones by `title`, collaborators by `username`, `rules` by `type`, and so on) | Sorted by the identity, ties by the entry's canonical JSON                                                                                                                                                               |
+| `environments`                                                                                                                                                    | The `pinned: true` entries first in their written order, since that order is the pin rank; the rest by `name`                                                                                                            |
+| `branches`                                                                                                                                                        | As written: GitHub applies overlapping wildcard rules in creation order, and apply creates them in file order; the fold unions them by name in that order                                                                |
+| Any other list (`topics`, `include` patterns, `bypass_actors`, `reviewers`)                                                                                       | As written                                                                                                                                                                                                               |
+| Each section's header notes                                                                                                                                       | By code point within the section                                                                                                                                                                                         |
 
 The snapshot's notes are sorted the same way, in the file header and in the annotations. A snapshot committed under v2 reorders once.
 
@@ -222,14 +222,14 @@ For every `repos: "*"` workflow that sets `exclude`, and for `@vivswan/github-se
 
 In v3 the pattern is a glob matched by picomatch inside a grammar the input boundary owns. The scope rule is unchanged: a pattern with `/` matches `owner/name`, any other the name alone, case-insensitively.
 
-| In the pattern | Matches |
-|---|---|
-| `*` | any run of characters |
-| `?` | one character |
-| `[abc]` | one of a set |
-| `[!abc]` or `[^abc]` | one outside it |
-| one leading `!` | negates the whole pattern |
-| anything else | name characters only (letters, digits, `.`, `-`, `_`), with at most one `/` |
+| In the pattern       | Matches                                                                     |
+| -------------------- | --------------------------------------------------------------------------- |
+| `*`                  | any run of characters                                                       |
+| `?`                  | one character                                                               |
+| `[abc]`              | one of a set                                                                |
+| `[!abc]` or `[^abc]` | one outside it                                                              |
+| one leading `!`      | negates the whole pattern                                                   |
+| anything else        | name characters only (letters, digits, `.`, `-`, `_`), with at most one `/` |
 
 A pattern that gains glob meaning matched nothing in v2 and matches now: `exclude: "!svc-*"` discovered every repository, and now excludes every one whose name is not `svc-*`:
 

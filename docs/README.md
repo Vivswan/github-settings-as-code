@@ -8,27 +8,27 @@ The documentation for GitHub Settings as Code, in five groups. Start here if the
 
 ## Pick by goal
 
-| Goal | Read |
-|---|---|
-| Get one repository under management | [start/getting-started.md](start/getting-started.md) |
-| Replace the Probot Settings app | [start/migrating-from-probot.md](start/migrating-from-probot.md) |
-| Copy a settings.yml shape | [start/examples.md](start/examples.md) |
-| Look up what a section manages and deletes | [reference/sections.md](reference/sections.md) |
-| Look up every call a section makes, and what has no API | [reference/coverage.md](reference/coverage.md) |
-| Look up an input or output | [reference/inputs.md](reference/inputs.md) |
-| Scope the token | [reference/permissions.md](reference/permissions.md) |
-| Predict what an apply or a check will do | [reference/semantics.md](reference/semantics.md) |
-| See how the action works, module by module | [reference/architecture.md](reference/architecture.md) |
-| Use the engine from your own code | [reference/library.md](reference/library.md) |
-| Run check, apply, or validate from a terminal | [start/cli.md](start/cli.md) |
-| Detect drift on a schedule | [operate/check-mode.md](operate/check-mode.md) |
-| Write a repository's live settings to a file | [operate/snapshot.md](operate/snapshot.md) |
-| Fold several settings files into one | [operate/layering.md](operate/layering.md) |
-| Manage a fleet from one repository | [operate/multi-repo.md](operate/multi-repo.md) |
-| Keep private targets out of public logs | [operate/private-repositories.md](operate/private-repositories.md) |
-| Read a failing run | [operate/troubleshooting.md](operate/troubleshooting.md) |
-| Adapt a complete platform-team workflow | [playbooks/README.md](playbooks/README.md) |
-| Move to a new major version | [upgrading/README.md](upgrading/README.md) |
+| Goal                                                    | Read                                                               |
+| ------------------------------------------------------- | ------------------------------------------------------------------ |
+| Get one repository under management                     | [start/getting-started.md](start/getting-started.md)               |
+| Replace the Probot Settings app                         | [start/migrating-from-probot.md](start/migrating-from-probot.md)   |
+| Copy a settings.yml shape                               | [start/examples.md](start/examples.md)                             |
+| Look up what a section manages and deletes              | [reference/sections.md](reference/sections.md)                     |
+| Look up every call a section makes, and what has no API | [reference/coverage.md](reference/coverage.md)                     |
+| Look up an input or output                              | [reference/inputs.md](reference/inputs.md)                         |
+| Scope the token                                         | [reference/permissions.md](reference/permissions.md)               |
+| Predict what an apply or a check will do                | [reference/semantics.md](reference/semantics.md)                   |
+| See how the action works, module by module              | [reference/architecture.md](reference/architecture.md)             |
+| Use the engine from your own code                       | [reference/library.md](reference/library.md)                       |
+| Run check, apply, or validate from a terminal           | [start/cli.md](start/cli.md)                                       |
+| Detect drift on a schedule                              | [operate/check-mode.md](operate/check-mode.md)                     |
+| Write a repository's live settings to a file            | [operate/snapshot.md](operate/snapshot.md)                         |
+| Fold several settings files into one                    | [operate/layering.md](operate/layering.md)                         |
+| Manage a fleet from one repository                      | [operate/multi-repo.md](operate/multi-repo.md)                     |
+| Keep private targets out of public logs                 | [operate/private-repositories.md](operate/private-repositories.md) |
+| Read a failing run                                      | [operate/troubleshooting.md](operate/troubleshooting.md)           |
+| Adapt a complete platform-team workflow                 | [playbooks/README.md](playbooks/README.md)                         |
+| Move to a new major version                             | [upgrading/README.md](upgrading/README.md)                         |
 
 ## start: getting a repository under management
 

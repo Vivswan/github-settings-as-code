@@ -23,6 +23,6 @@ expect:
     - "PUT /repos/{repo}/collaborators/e2e-new"
     - "PUT /repos/{repo}/collaborators/e2e-existing"
   stdout_contains:
-    - "invited collaborator \"e2e-new\""
-    - "updated collaborator \"e2e-existing\""
+    - 'invited collaborator "e2e-new"'
+    - 'updated collaborator "e2e-existing"'
   fixpoint: converges

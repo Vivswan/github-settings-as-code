@@ -1,7 +1,7 @@
 // The marker grammar every generator splices through: `BEGIN GENERATED: <name> (hint)` to
 // `END GENERATED: <name>`, each written in the comment syntax of the file's own language, and
 // the two checks each region passes before its splice: its placement, and the parse-render round
-// trip over its body that GeneratedRegion.of() is the one way to declare.
+// trip over its body that GeneratedRegion.of() and GeneratedRegion.markdown() are the two ways to declare.
 
 import { extname } from "node:path";
 import { fromMarkdown } from "mdast-util-from-markdown";
@@ -10,6 +10,8 @@ import { gfmTable } from "micromark-extension-gfm-table";
 import { err, ok, type Result } from "neverthrow";
 import { visitParents } from "unist-util-visit-parents";
 import { Parser } from "yaml";
+import { tableRow } from "../../../src/report/markdown.js";
+import { formatted } from "./biome-format.js";
 
 /** Which comment syntax a file's markers use: a complete `<!-- -->` comment, or a whole-line YAML `#` comment. */
 export type MarkerSyntax = "html" | "yaml";
@@ -37,6 +39,15 @@ const REGION_NAME_CLASS = "[a-z0-9-]+";
 
 // A whole name, as regionBounds() admits it.
 const REGION_NAME = new RegExp(`^${REGION_NAME_CLASS}$`);
+
+/** A docs path for biome's markdown formatter: it picks the language and the config's overrides from the path, which need not exist. */
+const MARKDOWN_PATH = "docs/generated-region.md";
+
+/** A table row with its outer pipes, the one shape biome pads: one line, so a bare CR is never swallowed, while the two Unicode separators cellFault() admits may sit inside a cell. */
+const TABLE_LINE = /^\|[^\r\n]*\|$/;
+
+/** A delimiter cell: dashes, each side optionally a colon. */
+const DELIMITER_CELL = /^:?-+:?$/;
 
 function markerText(kind: "BEGIN" | "END", name: string): string {
   const hint = kind === "BEGIN" ? String.raw`(?: \([^)\n]*\))?` : "";
@@ -197,10 +208,44 @@ function roundTrip<Data>(decl: RegionDeclaration<Data>): (body: string) => strin
         );
 }
 
+/** The body of a block region: `render`'s text on the lines between the markers, each marker owning its line. */
+export function block<Data>(render: (data: Data) => string): (data: Data) => string {
+  return (data) => `\n${render(data)}\n`;
+}
+
+/** `text` as biome formats a markdown page, without the final newline biome adds, so the markers keep their lines. */
+function formattedMarkdown(text: string): string {
+  return formatted(MARKDOWN_PATH, text).replace(/\n$/, "");
+}
+
+/** One table line respelled as tableRow() writes it; a delimiter row becomes `|---|` per column. Only spaces go: biome pads with spaces, and any other character at a cell's edge is content the parse judges. */
+function respelledRow(line: string): string {
+  const cells = line
+    .slice(1, -1)
+    .split(/(?<!\\)\|/)
+    .map((cell) => cell.replace(/^ +| +$/g, ""));
+  return cells.every((cell) => DELIMITER_CELL.test(cell))
+    ? `|${cells.map(() => "---").join("|")}|`
+    : tableRow(cells);
+}
+
 /**
- * A region as the generators hand it to regenerateRegions(). Only of() mints one: the constructor is
- * private and the class nominal, so a region's body check is always its own declaration's round trip
- * and no region can carry a grammar written beside its renderer.
+ * `text` with every table line respelled as tableRow() writes it: one space around each cell and a `|---|`
+ * delimiter. biome pads a committed table to its column widths, so a parser written against the renderer's
+ * spelling reads the page through this. Lines map one to one, so a refusal still numbers the committed line.
+ */
+export function unpadTables(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => (TABLE_LINE.test(line) ? respelledRow(line) : line))
+    .join("\n");
+}
+
+/**
+ * A region as the generators hand it to regenerateRegions(). Only of() and markdown() mint one: the
+ * constructor is private and the class nominal, so a region's body check is always its own declaration's
+ * round trip (over the body's tables respelled, for markdown()) and no region can carry a grammar written
+ * beside its renderer.
  */
 export class GeneratedRegion {
   private constructor(
@@ -216,6 +261,22 @@ export class GeneratedRegion {
     );
   }
 
+  /**
+   * A markdown block region: the body written is `render`'s text as biome formats it, between the markers, since
+   * the lint judges a committed page like hand-written markdown; the body check reads tables in the renderer's
+   * spelling whatever their padding, so the guard judges content and biome judges format. A region in a YAML file
+   * stays with of() and block(): its body is formatted in the file's context, never alone.
+   */
+  static markdown<Data>(decl: RegionDeclaration<Data>): GeneratedRegion {
+    const check = roundTrip({ ...decl, render: block(decl.render) });
+    return new GeneratedRegion(
+      decl.name,
+      decl.placement,
+      (body) => check(unpadTables(body)),
+      () => `\n${formattedMarkdown(decl.render(decl.data()))}\n`,
+    );
+  }
+
   /** Why `body` is not one the renderer wrote, or undefined for a body it could have written. */
   bodyRefusal(body: string): string | undefined {
     return this.check(body);
@@ -225,11 +286,6 @@ export class GeneratedRegion {
   render(): string {
     return this.body();
   }
-}
-
-/** The body of a block region: `render`'s text on the lines between the markers, each marker owning its line. */
-export function block<Data>(render: (data: Data) => string): (data: Data) => string {
-  return (data) => `\n${render(data)}\n`;
 }
 
 /** A block region's body as its lines, the first being line 1; or why the markers do not own their lines. */

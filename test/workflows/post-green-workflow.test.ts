@@ -20,6 +20,7 @@ import {
 } from "../../.github/scripts/post-green-steps.js";
 import { STEP_OUTPUTS as RELEASE_PIPELINE_OUTPUTS } from "../../.github/scripts/release-pipeline/draft.js";
 import { COMMANDS as RELEASE_PIPELINE_COMMANDS } from "../../.github/scripts/release-pipeline.js";
+import { tableRows } from "../docs/markdown.js";
 import { ROOT } from "../root.js";
 import { runStep } from "../scripts/step-fixture.js";
 import { withTempDir } from "../temp-dir.js";
@@ -316,10 +317,11 @@ const runsSubcommand = (workflow: Workflow, subcommand: string): boolean =>
 /** The library page's claims about what publishes when, against the steps the hooks run. */
 function claimProblems(page: string): string[] {
   const problems: string[] = [];
-  const rows = [...page.matchAll(/^\| `(next|latest)` \| ([^|]+) \|/gm)];
+  const rows = tableRows(page).filter(([span]) => span === "`next`" || span === "`latest`");
   if (rows.length !== 2)
     problems.push("the dist-tag table no longer has a next row and a latest row");
-  for (const [, tag = "", publishesOn = ""] of rows) {
+  for (const [span = "", publishesOn = ""] of rows) {
+    const tag = span.slice(1, -1);
     const channel = tag === "latest" ? "stable" : tag;
     const { file, workflow } = hookFor(publishesOn);
     if (!runsSubcommand(workflow, `npm-publish ${channel}`)) {
@@ -369,7 +371,7 @@ describe("the library page's publishing claims", () => {
     expect(runsSubcommand(workflow, "npm-publish stable")).toBe(false);
     expect(
       claimProblems(
-        page.replace(/^\| `next` \| [^|]+ \|/m, "| `next` | Every green push to `main` |"),
+        page.replace(/^\| `next` +\| [^|]+\|/m, "| `next` | Every green push to `main` |"),
       ),
     ).toEqual([
       'the page says next publishes on "Every green push to `main`", but post-green.yml runs no npm-publish next',
@@ -385,7 +387,7 @@ describe("the library page's publishing claims", () => {
     expect(
       claimProblems(
         page.replace(
-          "| `latest` | Every release cut |",
+          /^\| `latest` +\| Every release cut +\|/m,
           "| `latest` | Every green push to `main` |",
         ),
       ),

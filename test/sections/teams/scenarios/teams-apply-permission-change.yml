@@ -23,5 +23,5 @@ expect:
   never:
     - "DELETE /orgs/e2e-owner/teams/platform/repos/{repo}"
   stdout_contains:
-    - "granted team \"platform\" maintain"
+    - 'granted team "platform" maintain'
   fixpoint: converges

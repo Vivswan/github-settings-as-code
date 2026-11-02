@@ -51,7 +51,7 @@ expect:
     - "DELETE /repos/{repo}/labels"
     - "DELETE /repos/{repo}/environments/production/variables"
   stdout_contains:
-    - "kept under \"_undeclared: keep\""
+    - 'kept under "_undeclared: keep"'
     - wontfix
     - LEGACY
   fixpoint: converges

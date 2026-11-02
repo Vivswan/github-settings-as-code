@@ -13,6 +13,7 @@ import { parse as parseYaml } from "yaml";
 import manifest from "../../.release-please-manifest.json";
 import pkg from "../../package.json";
 import tsdown from "../../tsdown.config.js";
+import { tableRows } from "../docs/markdown.js";
 import { ROOT } from "../root.js";
 import { readSettingsSchema } from "../settings-schema.js";
 import { withTempDir } from "../temp-dir.js";
@@ -48,9 +49,10 @@ function manifestDeclarations(manifest: Manifest): string[] {
 /** The import paths the library page's entry table names, plus the two its trailing sentence says ride along, sorted. */
 function documentedExportPaths(page: string): string[] {
   const entries = page.match(/^## The two entries\n([\s\S]*?)^## /m)?.[1] ?? "";
-  const importPaths = [
-    ...entries.matchAll(/^\| `@vivswan\/github-settings-as-code(\/[^`]+)?` \|/gm),
-  ].map((match) => `.${match[1] ?? ""}`);
+  const importPaths = tableRows(entries).flatMap(([cell = ""]) => {
+    const path = /^`@vivswan\/github-settings-as-code(\/[^`]+)?`$/.exec(cell);
+    return path === null ? [] : [`.${path[1] ?? ""}`];
+  });
   const rideAlong = entries.match(/Two more paths ride along: (.+)$/m)?.[1] ?? "";
   return [
     ...importPaths,

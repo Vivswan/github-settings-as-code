@@ -27,7 +27,7 @@ import { listLayering, SECTIONS } from "../../src/sections/registry.js";
 import { STALE_VERSION_HINT } from "../../src/sections/secret_scanning_custom_patterns/index.js";
 import { ROOT } from "../root.js";
 import { deleteEnumerationProblems } from "./claims.js";
-import { fencedBlocks, sectionLines } from "./markdown.js";
+import { fencedBlocks, sectionLines, tableRows } from "./markdown.js";
 import { assertValidSettingsExample } from "./settings-examples.js";
 import { stalePins } from "./version-pins.js";
 
@@ -715,10 +715,12 @@ describe("docs/ guide pages", () => {
     // would leave the page claiming a fold the engine no longer performs.
     const markdown = readFileSync(join(DOCS, "operate", "layering.md"), "utf8");
     const section = sectionLines(markdown, "The rules", "docs/operate/layering.md");
-    const rows = section.filter((line) => /^\| `[a-z_]+`(, `[a-z_]+`)* \| `/.test(line));
+    const rows = tableRows(section.join("\n")).filter(
+      ([sections = "", keyCell = ""]) =>
+        /^`[a-z_]+`(, `[a-z_]+`)*$/.test(sections) && keyCell.startsWith("`"),
+    );
     const documented = new Map<string, string>();
-    for (const row of rows) {
-      const [sections, keyCell] = row.split("|").slice(1, 3) as [string, string];
+    for (const [sections = "", keyCell = ""] of rows) {
       const keyField = keyCell.match(/`([a-z_.]+)`/)?.[1];
       for (const key of sections.matchAll(/`([a-z_]+)`/g)) {
         documented.set(key[1] as string, keyField ?? "");

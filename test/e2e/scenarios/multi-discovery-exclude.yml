@@ -10,11 +10,11 @@ discovery:
   inputs:
     exclude: "tmp-?,E2E-Owner/legacy-*"
   pool:
-    - {slug: e2e-owner/svc-a}
-    - {slug: e2e-owner/svc-b}
-    - {slug: e2e-owner/tmp-1}
-    - {slug: e2e-owner/tmp-20}
-    - {slug: e2e-owner/legacy-old}
+    - { slug: e2e-owner/svc-a }
+    - { slug: e2e-owner/svc-b }
+    - { slug: e2e-owner/tmp-1 }
+    - { slug: e2e-owner/tmp-20 }
+    - { slug: e2e-owner/legacy-old }
 repos:
   e2e-owner/svc-a:
     settings:

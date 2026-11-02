@@ -15,5 +15,5 @@ expect:
   mutations:
     - "PUT /orgs/e2e-owner/teams/platform/repos/{repo}"
   stdout_contains:
-    - "granted team \"platform\" push"
+    - 'granted team "platform" push'
   fixpoint: converges

@@ -33,6 +33,6 @@ expect:
     - "PATCH /repos/{repo}/invitations/"
     - "DELETE /repos/{repo}/invitations/"
   stdout_contains:
-    - "invitation for \"e2e-uninvited\" is pending but not declared"
+    - 'invitation for "e2e-uninvited" is pending but not declared'
     - "invitation 603 was sent by email"
   fixpoint: converges

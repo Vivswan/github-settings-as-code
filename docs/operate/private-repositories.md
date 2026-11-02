@@ -16,13 +16,13 @@ To stop the leak, `private-repos: redact` (the default) hides every private or i
 
 The decision comes down to the policy and what the visibility probe finds:
 
-| Condition | Redacted? |
-|---|---|
-| `private-repos: show` | no, everything is revealed |
-| target is `GITHUB_REPOSITORY` (self) | no, the carve-out applies |
-| probe proves the target public | no |
-| probe proves the target private or internal | yes |
-| probe cannot determine visibility | yes, redaction fails closed |
+| Condition                                   | Redacted?                   |
+| ------------------------------------------- | --------------------------- |
+| `private-repos: show`                       | no, everything is revealed  |
+| target is `GITHUB_REPOSITORY` (self)        | no, the carve-out applies   |
+| probe proves the target public              | no                          |
+| probe proves the target private or internal | yes                         |
+| probe cannot determine visibility           | yes, redaction fails closed |
 
 The self carve-out exists because a repository acting on itself discloses nothing new. Set `private-repos: show` only when the run's own logs are already private.
 
@@ -39,12 +39,12 @@ These are closed enumerations and numeric codes, safe to show, and enough to tel
 
 Every target ends the same way, whichever mode ran it: its lines and its end state go through one channel, which closes open for a shown target and sealed for a hidden one. Only the seal's projections open it, and they render the public view alone. No mode has a redaction path of its own.
 
-| Mode | What the seal holds | What the public view shows |
-|---|---|---|
-| `repository:` apply or check (one target) | the slug, section detail, the transcript | `private repository #1`, section statuses, the one-line result |
-| `repos` / `repos-dir` apply or check | the same, per target | `private repository #N` in target order |
-| `snapshot-file` (one target) | the slug, the notes (a secret's name, a webhook's URL), the file path, the transcript | `private repository #1`, section statuses; the document reaches only the file |
-| `snapshot-dir` | the same, per target | `private repository #N`; the File column reads `hidden (private repository)` |
+| Mode                                      | What the seal holds                                                                   | What the public view shows                                                    |
+| ----------------------------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `repository:` apply or check (one target) | the slug, section detail, the transcript                                              | `private repository #1`, section statuses, the one-line result                |
+| `repos` / `repos-dir` apply or check      | the same, per target                                                                  | `private repository #N` in target order                                       |
+| `snapshot-file` (one target)              | the slug, the notes (a secret's name, a webhook's URL), the file path, the transcript | `private repository #1`, section statuses; the document reaches only the file |
+| `snapshot-dir`                            | the same, per target                                                                  | `private repository #N`; the File column reads `hidden (private repository)`  |
 
 Two consequences of the shared path:
 
@@ -131,11 +131,11 @@ One caveat weighs against this channel: the ciphertext is downloadable by anyone
 
 Redaction protects the target's live state and its errors. It does not retroactively hide a name you already published. In a public admin repo, the names in the `repos` input and the paths and contents of `repos-dir` files are already public, so redaction there is limited:
 
-| Target source | What is public regardless | What redaction protects |
-|---|---|---|
-| `repos` explicit list | the target name | live state, desired state, errors |
-| `repos-dir` central file | the target name and the desired settings in the committed file | live state, errors |
-| `repos: "*"` discovery | nothing | the name, live state, desired state, and errors |
+| Target source            | What is public regardless                                      | What redaction protects                         |
+| ------------------------ | -------------------------------------------------------------- | ----------------------------------------------- |
+| `repos` explicit list    | the target name                                                | live state, desired state, errors               |
+| `repos-dir` central file | the target name and the desired settings in the committed file | live state, errors                              |
+| `repos: "*"` discovery   | nothing                                                        | the name, live state, desired state, and errors |
 
 Only `repos: "*"` discovery gives a target true non-disclosure, because its name never appears in a committed file or input. For the other two sources, the name is self-disclosed the moment you commit the workflow.
 

@@ -27,5 +27,5 @@ expect:
     - "DELETE /repos/{repo}/collaborators/e2e-owner"
     - "PUT /repos/{repo}/collaborators/e2e-keeper"
   stdout_contains:
-    - "REMOVED undeclared collaborator \"e2e-stale\""
+    - 'REMOVED undeclared collaborator "e2e-stale"'
   fixpoint: converges

@@ -17,7 +17,7 @@ import {
   type SectionsTableRow,
   sectionsCells,
 } from "../../.github/scripts/gen-docs.js";
-import type { GeneratedRegion } from "../../.github/scripts/lib/generated-regions.js";
+import { type GeneratedRegion, unpadTables } from "../../.github/scripts/lib/generated-regions.js";
 import { regenerateFile } from "../../.github/scripts/lib/region-driver.js";
 import { tableFault, tableRow } from "../../src/report/markdown.js";
 import type { SectionDocs } from "../../src/sections/contract/docs.js";
@@ -711,7 +711,7 @@ describe("the committed pages", () => {
       "the Sections table markers around the column table",
       "docs/reference/sections.md",
       (page) => {
-        const columnTable = page.match(/\| Value \| Meaning \|\n[\s\S]*?\n\n/)?.[0] ?? "";
+        const columnTable = page.match(/\| Value +\| Meaning +\|\n[\s\S]*?\n\n/)?.[0] ?? "";
         expect(columnTable).not.toBe("");
         return page.replace(
           /(<!-- BEGIN GENERATED: sections-table[^\n]*\n)[\s\S]*?(<!-- END GENERATED: sections-table -->)/,
@@ -776,7 +776,8 @@ describe("the architecture map guard", () => {
 });
 
 describe("the committed coverage page", () => {
-  const coverage = readFileSync(join(ROOT, "docs/reference/coverage.md"), "utf8");
+  // In the renderers' spelling: the committed page is biome's padded output, and every anchor below is the renderers'.
+  const coverage = unpadTables(readFileSync(join(ROOT, "docs/reference/coverage.md"), "utf8"));
 
   test("must keep the region spanning everything below the title", () => {
     // Prose left outside the region would drift from the generator's while regeneration stayed a no-op.

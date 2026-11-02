@@ -31,17 +31,17 @@ Under `private-repos: redact` the multi-repo flow reads and validates the shared
 
 The field GitHub reports but cannot set is the case that motivated the rule:
 
-| | `repository.has_downloads: false` in the file |
-| --- | --- |
-| Before | The GET reports `has_downloads`, the PATCH cannot set it, so every check saw drift and every apply re-sent it without converging. |
-| Now | The parse refuses the file with an error naming `repository.has_downloads` and telling you to remove the key. No section reads or writes the repository. |
+|        | `repository.has_downloads: false` in the file                                                                                                            |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Before | The GET reports `has_downloads`, the PATCH cannot set it, so every check saw drift and every apply re-sent it without converging.                        |
+| Now    | The parse refuses the file with an error naming `repository.has_downloads` and telling you to remove the key. No section reads or writes the repository. |
 
 An unknown key has two fates, decided by the shape it sits in:
 
-| Shape | Unknown key | What you see |
-| --- | --- | --- |
-| Closed: the write carries only the fields the shape names, so an extra key has nowhere to go | refused at parse | the error names the key and the shape it sits in |
-| Open passthrough: extra fields ride into the write verbatim, so a field GitHub ships tomorrow works today | kept and sent | on the sections that already print it, a check-time note when GitHub does not echo the key: if GitHub ignores it, every apply re-sends it without converging |
+| Shape                                                                                                     | Unknown key      | What you see                                                                                                                                                 |
+| --------------------------------------------------------------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Closed: the write carries only the fields the shape names, so an extra key has nowhere to go              | refused at parse | the error names the key and the shape it sits in                                                                                                             |
+| Open passthrough: extra fields ride into the write verbatim, so a field GitHub ships tomorrow works today | kept and sent    | on the sections that already print it, a check-time note when GitHub does not echo the key: if GitHub ignores it, every apply re-sends it without converging |
 
 The [forward compatibility page](forward-compatibility.md#the-closed-sections) lists which sections and nested shapes are closed.
 

@@ -28,15 +28,15 @@ The package needs Node 22.14 or newer; `bunx` fetches it the same way and honors
 
 ## Commands
 
-| Command | Does | Needs a token |
-|---|---|---|
-| `check` | Report drift between a settings file and the live repository; exits 1 on any drift | yes |
-| `apply` | Apply a settings file to the repository | yes |
-| `render` | Fold an ordered list of settings files into one rendered document | no |
-| `snapshot` | Write a repository's live settings as a settings file, or one file per multi-repo target | yes |
-| `init` | Write a repository's live settings to `.github/settings.yml` and print the PAT grant that file needs | yes |
-| `validate <file>` | Validate a settings file against the schema | no |
-| `permissions <file>` | Print the PAT grant each section the file declares needs | no |
+| Command              | Does                                                                                                 | Needs a token |
+| -------------------- | ---------------------------------------------------------------------------------------------------- | ------------- |
+| `check`              | Report drift between a settings file and the live repository; exits 1 on any drift                   | yes           |
+| `apply`              | Apply a settings file to the repository                                                              | yes           |
+| `render`             | Fold an ordered list of settings files into one rendered document                                    | no            |
+| `snapshot`           | Write a repository's live settings as a settings file, or one file per multi-repo target             | yes           |
+| `init`               | Write a repository's live settings to `.github/settings.yml` and print the PAT grant that file needs | yes           |
+| `validate <file>`    | Validate a settings file against the schema                                                          | no            |
+| `permissions <file>` | Print the PAT grant each section the file declares needs                                             | no            |
 
 ### check
 
@@ -103,12 +103,12 @@ The write follows four rules:
 
 With `--json`, stdout is one object, the envelope every subcommand prints (`result` first, then the command's own fields). After a write:
 
-| Field | Holds |
-|---|---|
-| `result` | `snapshot`, or `partial` when a section was skipped |
-| `file`, `repository` | The written path and the `owner/name` it was read from |
-| `skipped-sections` | Sections skipped under `--on-missing-permission warn`, as a list; the file omits them |
-| `grant` | One entry per declared section: its key and the grant line printed above |
+| Field                | Holds                                                                                 |
+| -------------------- | ------------------------------------------------------------------------------------- |
+| `result`             | `snapshot`, or `partial` when a section was skipped                                   |
+| `file`, `repository` | The written path and the `owner/name` it was read from                                |
+| `skipped-sections`   | Sections skipped under `--on-missing-permission warn`, as a list; the file omits them |
+| `grant`              | One entry per declared section: its key and the grant line printed above              |
 
 A refusal or a failure exits 1 with `{"result":"failed","file":"<the settings file>","problem":"<the line stderr carries>"}` instead; a section that fails on its own fails the whole snapshot, so no file is written.
 
@@ -140,12 +140,12 @@ Two inputs have no command-line form: `--private-report artifact` is refused (th
 
 Four flags are the command line's own, and `init` has one more, `--force` (replace an existing settings file):
 
-| Flag | Does |
-|---|---|
-| `--token <value>` | The token; `GITHUB_TOKEN` when absent |
-| `--json` | Print the outputs as one JSON object on stdout; log lines move to stderr |
+| Flag               | Does                                                                                                                                                                                  |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--token <value>`  | The token; `GITHUB_TOKEN` when absent                                                                                                                                                 |
+| `--json`           | Print the outputs as one JSON object on stdout; log lines move to stderr                                                                                                              |
 | `--summary <file>` | Append the run's markdown summary (the action's step summary) to this file; under GitHub Actions the step summary itself when absent; `init`, `validate`, and `permissions` have none |
-| `--verbose` | Show the debug trace on stderr |
+| `--verbose`        | Show the debug trace on stderr                                                                                                                                                        |
 
 ## Output and exit codes
 
@@ -177,13 +177,13 @@ A run that fails before any target runs (a missing input, a value the mode refus
 
 The exit codes are the action's:
 
-| Command | Exits 1 when |
-|---|---|
-| `check` | drift, or a failure |
-| `apply`, `render`, `snapshot` | a failure |
-| `init` | a failure, a document that would declare no section, or a settings file it refuses to replace |
-| `validate` | the file is invalid |
-| `permissions` | never for a valid file |
+| Command                       | Exits 1 when                                                                                  |
+| ----------------------------- | --------------------------------------------------------------------------------------------- |
+| `check`                       | drift, or a failure                                                                           |
+| `apply`, `render`, `snapshot` | a failure                                                                                     |
+| `init`                        | a failure, a document that would declare no section, or a settings file it refuses to replace |
+| `validate`                    | the file is invalid                                                                           |
+| `permissions`                 | never for a valid file                                                                        |
 
 A flag the mode does not read is unknown to that subcommand and exits 1 with the parser's message, where the action rejects the same input by name. A value the mode refuses (a filter without `--repos "*"`, a `--repository` that is not a slug) fails with the action's own message, reworded where the action's remedy names the workflow step.
 
