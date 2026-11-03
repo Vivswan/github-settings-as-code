@@ -48,12 +48,6 @@
       "quoteStyle": "double"
     }
   },
-  // The docs carry YAML frontmatter; unparsed, biome reads `---\norder: 1\n---` as a setext heading.
-  "markdown": {
-    "parser": {
-      "frontmatter": true
-    }
-  },
   "overrides": [
     {
       "includes": ["src/generated/upstream-gaps.ts"],
