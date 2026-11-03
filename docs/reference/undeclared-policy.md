@@ -70,24 +70,24 @@ Before v3 the policy key was spelled `undeclared`. A file still writing it fails
 ## Defaults per section
 
 <!-- BEGIN GENERATED: policy-defaults-table (bun run build:action-docs; edit .github/scripts/gen-action-docs.ts) -->
-| Section | Default | The override buys you |
-|---|---|---|
-| `labels` | delete (Probot parity) | `keep`: manage a core set without deleting ad-hoc labels |
-| `autolinks` | delete | `keep`: declare some references, tolerate the rest |
-| `collaborators` | delete (owner always exempt) | `keep`: manage listed people without removing others |
-| `actions_variables` | delete | `keep`: declare the managed variables, tolerate the rest |
-| `agents_variables` | delete | `keep`: declare the managed variables, tolerate the rest |
-| `rulesets` | keep | `delete`: make the file the complete ruleset inventory |
-| `actions_secrets` | keep | `delete`: prune stale secrets - a deleted secret's value is unrecoverable |
-| `dependabot_secrets` | keep | `delete`: prune stale secrets - a deleted secret's value is unrecoverable |
-| `codespaces_secrets` | keep | `delete`: prune stale secrets - a deleted secret's value is unrecoverable |
-| `agents_secrets` | keep | `delete`: prune stale secrets - a deleted secret's value is unrecoverable |
-| `teams` | keep (a grant made at the organization level is never touched) | `delete`: make the file the complete inventory of direct team grants, revoking the rest |
-| `milestones` | keep | `delete`: prune stale milestones, with the caveat below |
-| `webhooks` | keep (integrations create their own hooks) | `delete`: make the file the complete hook inventory |
-| `custom_properties` | keep (an unset can revert to an org default the file does not model) | `delete`: make the file the complete property-value inventory, unsetting the rest |
-| `deploy_keys` | keep (deployment tooling installs its own keys, and deleting a live key breaks whatever authenticates with it) | `delete`: make the file the complete key inventory |
-| `secret_scanning_custom_patterns` | keep | `delete`: prune stale patterns - the pattern's alerts are resolved (never deleted), keeping the audit trail |
+| Section                           | Default                                                                                                        | The override buys you                                                                                       |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `labels`                          | delete (Probot parity)                                                                                         | `keep`: manage a core set without deleting ad-hoc labels                                                    |
+| `autolinks`                       | delete                                                                                                         | `keep`: declare some references, tolerate the rest                                                          |
+| `collaborators`                   | delete (owner always exempt)                                                                                   | `keep`: manage listed people without removing others                                                        |
+| `actions_variables`               | delete                                                                                                         | `keep`: declare the managed variables, tolerate the rest                                                    |
+| `agents_variables`                | delete                                                                                                         | `keep`: declare the managed variables, tolerate the rest                                                    |
+| `rulesets`                        | keep                                                                                                           | `delete`: make the file the complete ruleset inventory                                                      |
+| `actions_secrets`                 | keep                                                                                                           | `delete`: prune stale secrets - a deleted secret's value is unrecoverable                                   |
+| `dependabot_secrets`              | keep                                                                                                           | `delete`: prune stale secrets - a deleted secret's value is unrecoverable                                   |
+| `codespaces_secrets`              | keep                                                                                                           | `delete`: prune stale secrets - a deleted secret's value is unrecoverable                                   |
+| `agents_secrets`                  | keep                                                                                                           | `delete`: prune stale secrets - a deleted secret's value is unrecoverable                                   |
+| `teams`                           | keep (a grant made at the organization level is never touched)                                                 | `delete`: make the file the complete inventory of direct team grants, revoking the rest                     |
+| `milestones`                      | keep                                                                                                           | `delete`: prune stale milestones, with the caveat below                                                     |
+| `webhooks`                        | keep (integrations create their own hooks)                                                                     | `delete`: make the file the complete hook inventory                                                         |
+| `custom_properties`               | keep (an unset can revert to an org default the file does not model)                                           | `delete`: make the file the complete property-value inventory, unsetting the rest                           |
+| `deploy_keys`                     | keep (deployment tooling installs its own keys, and deleting a live key breaks whatever authenticates with it) | `delete`: make the file the complete key inventory                                                          |
+| `secret_scanning_custom_patterns` | keep                                                                                                           | `delete`: prune stale patterns - the pattern's alerts are resolved (never deleted), keeping the audit trail |
 <!-- END GENERATED: policy-defaults-table -->
 
 The owner exemption for collaborators does not move with the knob: under `_undeclared: delete` (the default) every undeclared direct collaborator is removed except the repository owner.
@@ -96,12 +96,12 @@ The owner exemption for collaborators does not move with the knob: under `_undec
 
 Four lists carry the same wrapped form WITHOUT being top-level sections. Each environment entry's list accepts the plain array or `{_undeclared, entries}`, with its own fixed default:
 
-| Nested list | Default | Why |
-|---|---|---|
-| `environments[].variables` | delete | The file is that environment's variable inventory |
-| `environments[].deployment_branch_policies` | delete | Patterns are readable, recreatable configuration |
-| `environments[].secrets` | keep | Matches the top-level secret sections: a deleted secret's value is unrecoverable, so deletion stays opt-in |
-| `environments[].deployment_protection_rules` | keep | GitHub Apps can enable themselves as deployment gates; silently disabling a gate the file never named would weaken a protection nobody asked to weaken, so `_undeclared: delete` opts in |
+| Nested list                                  | Default | Why                                                                                                                                                                                      |
+| -------------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `environments[].variables`                   | delete  | The file is that environment's variable inventory                                                                                                                                        |
+| `environments[].deployment_branch_policies`  | delete  | Patterns are readable, recreatable configuration                                                                                                                                         |
+| `environments[].secrets`                     | keep    | Matches the top-level secret sections: a deleted secret's value is unrecoverable, so deletion stays opt-in                                                                               |
+| `environments[].deployment_protection_rules` | keep    | GitHub Apps can enable themselves as deployment gates; silently disabling a gate the file never named would weaken a protection nobody asked to weaken, so `_undeclared: delete` opts in |
 
 Each nested list resolves its policy [the same way a section does](#where-a-lists-policy-comes-from), its fixed default last, so a nested wrapper's own `keep` is the one way to hold a single gate list back from a file-wide `delete`.
 

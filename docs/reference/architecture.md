@@ -124,7 +124,7 @@ One rule decides what belongs here: what the settings file alone shows wrong is 
 
 The phase runs in check and apply before the first request to that repository's sections, and in render mode on every layer and on the fold. A layer of the fold is judged as its standalone view, the document minus the directives the fold consumes (`_layering`, the file-wide `_undeclared`, and the `_remove` entries); the fold itself is judged whole.
 
- In a multi-repo run the `defaults-file` document is validated before target resolution, so an invalid default stops the run before any write; a target's file is validated once fetched, so an earlier target's writes precede a later target's refusal. Three kinds of check take part:
+In a multi-repo run the `defaults-file` document is validated before target resolution, so an invalid default stops the run before any write; a target's file is validated once fetched, so an earlier target's writes precede a later target's refusal. Three kinds of check take part:
 
 - The zod shape of each section, with its cross-field rules. A rule still runs beside a sibling that failed, so one run reports the bad enum and the contradictory pair together.
 - The section's `validate` hook, required on every list section: duplicates by the section's key, a rename that collides, a nested list's own duplicates. Its issues carry paths under the section key, like the shape's.
@@ -171,16 +171,16 @@ flowchart TD
 The fold is a cascade: the higher layer's value wins at every depth, and `null` is a value. Every list section is keyed by what its planner matches entries by, so a fleet `Bug` and a repository `bug` are one label. Three directives say how a keyed list meets the list below it; here the highest layer, in a run with `layering: replace`:
 
 ```yaml layer
-_layering: shallow          # every list section of this file, unless it says otherwise
+_layering: shallow # every list section of this file, unless it says otherwise
 labels:
-  _layering: deep           # this section only
+  _layering: deep # this section only
   entries:
     - name: bug
-      color: d73a4a         # merged field by field into the fleet's bug
+      color: d73a4a # merged field by field into the fleet's bug
     - name: wontfix
-      _remove: true         # drops the fleet's wontfix; the marker never reaches the file
+      _remove: true # drops the fleet's wontfix; the marker never reaches the file
 rulesets:
-  - name: main              # swaps the fleet's main whole, under the file's shallow
+  - name: main # swaps the fleet's main whole, under the file's shallow
     enforcement: active
 ```
 

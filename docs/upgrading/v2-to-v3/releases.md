@@ -13,12 +13,12 @@ The `build` branch was deleted on 2026-09-13. A `Vivswan/github-settings-as-code
 
 Every green push to `main` now mints one packaged commit, the main commit's child carrying the built action and library, under the tag `build/<position>.<sha7>` (the position is the commit's first-parent count on `main`). Each green push then prunes those tags to the ten newest: a tag goes once ten newer commits have been packaged, and GitHub may then collect its commit.
 
-| You pin | Lifetime | Do |
-|---|---|---|
-| `@v3` or `@latest` | Moves forward only, never deleted | Nothing |
-| A release tag or its commit sha (`git rev-parse v3.0.0`) | Permanent | Nothing |
-| A sha from the `build` branch | Unreachable since the branch was deleted on 2026-09-13; GitHub may collect the commit at any time | Repin to `@v3` or a release tag's commit now |
-| A sha from a `build/*` tag | Until ten newer commits are packaged (the next merge, for an old tag) | Pin the release tag's commit or an npm version instead |
+| You pin                                                  | Lifetime                                                                                          | Do                                                     |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `@v3` or `@latest`                                       | Moves forward only, never deleted                                                                 | Nothing                                                |
+| A release tag or its commit sha (`git rev-parse v3.0.0`) | Permanent                                                                                         | Nothing                                                |
+| A sha from the `build` branch                            | Unreachable since the branch was deleted on 2026-09-13; GitHub may collect the commit at any time | Repin to `@v3` or a release tag's commit now           |
+| A sha from a `build/*` tag                               | Until ten newer commits are packaged (the next merge, for an old tag)                             | Pin the release tag's commit or an npm version instead |
 
 ## 59. `next` publishes on a release-PR refresh
 

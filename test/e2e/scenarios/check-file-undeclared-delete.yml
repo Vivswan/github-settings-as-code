@@ -59,7 +59,7 @@ expect:
     - "deployment_protection_rules[change-window]: undeclared"
   stdout_contains:
     - '"_undeclared: delete" is set, so apply will DISABLE it'
-    - "kept under \"_undeclared: keep\""
+    - 'kept under "_undeclared: keep"'
     - wontfix
   never:
     - "PUT /repos/{repo}/environments"

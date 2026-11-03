@@ -9,15 +9,14 @@ import { err, ok, type Result } from "neverthrow";
 import { INPUT_DECLS, type InputDecl } from "../../src/flows/inputs.js";
 import { renderTable, tableBody, tableFault } from "../../src/report/markdown.js";
 import { runMain } from "./lib/entry.js";
-import { block, GeneratedRegion } from "./lib/generated-regions.js";
+import { GeneratedRegion } from "./lib/generated-regions.js";
 import { type GeneratedFiles, regenerateFiles } from "./lib/region-driver.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 
 export const INPUTS_PAGE_PATH = "docs/reference/inputs.md";
 
-const INPUTS_TABLE_HEADER =
-  "| name | description | required | default |\n| --- | --- | --- | --- |";
+const INPUTS_TABLE_HEADER = "| name | description | required | default |\n|---|---|---|---|";
 
 /** The declarations the table renders from, by input name. */
 type Inputs = Readonly<Record<string, Pick<InputDecl, "description" | "default">>>;
@@ -90,11 +89,11 @@ const parseInputsTable = tableBody(INPUTS_TABLE_HEADER, "cells", inputRow);
 export const INPUTS_PAGES: GeneratedFiles = {
   [INPUTS_PAGE_PATH]: {
     regions: [
-      GeneratedRegion.of<Inputs>({
+      GeneratedRegion.markdown<Inputs>({
         name: "inputs-table",
         placement: { kind: "under-heading", heading: "## Inputs" },
         data: () => INPUT_DECLS,
-        render: block(renderInputsTable),
+        render: renderInputsTable,
         parse: (body) => parseInputsTable(body).map((rows) => Object.fromEntries(rows)),
       }),
     ],

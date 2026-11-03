@@ -23,13 +23,7 @@ import { type Architecture, readArchitecture, renderArchitectureMermaid } from "
 import { COVERAGE_DATA, type CoverageData } from "./coverage-data.js";
 import { ENDPOINT_ANCHORS, type EndpointAnchors } from "./endpoint-docs.js";
 import { runMain } from "./lib/entry.js";
-import {
-  block,
-  blockLine,
-  blockLines,
-  GeneratedRegion,
-  regionBounds,
-} from "./lib/generated-regions.js";
+import { blockLine, blockLines, GeneratedRegion, regionBounds } from "./lib/generated-regions.js";
 import { type GeneratedFile, type GeneratedFiles, regenerateFiles } from "./lib/region-driver.js";
 
 /** The repository root, two levels above this script. */
@@ -756,11 +750,11 @@ function sectionsRow(cells: readonly string[]): Result<readonly string[], string
 }
 
 function sectionsTableRegion(name: string, heading: string): GeneratedRegion {
-  return GeneratedRegion.of({
+  return GeneratedRegion.markdown({
     name,
     placement: { kind: "under-heading", heading },
     data: () => sectionsCells(SECTIONS, DOCS),
-    render: block(renderSectionsRows),
+    render: renderSectionsRows,
     parse: tableBody(SECTIONS_TABLE_HEADER, "keyed", sectionsRow),
   });
 }
@@ -779,11 +773,11 @@ const PAT_FORM_DEFINITION = new RegExp(String.raw`^\[${RegExp.escape(PAT_FORM_LA
 
 /** The page's `[...][pat-form]` reference resolves through this tail definition. */
 function patUrlRegion(name: string): GeneratedRegion {
-  return GeneratedRegion.of({
+  return GeneratedRegion.markdown({
     name,
     placement: { kind: "tail" },
     data: patFormUrl,
-    render: block((url: string) => `[${PAT_FORM_LABEL}]: ${url}`),
+    render: (url: string) => `[${PAT_FORM_LABEL}]: ${url}`,
     parse: (body) =>
       blockLine(body).andThen((line) => {
         const url = PAT_FORM_DEFINITION.exec(line)?.[1];
@@ -850,13 +844,12 @@ function parseArchitectureMap(body: string): Result<ArchitectureMap, string> {
 
 // Rendered from architecture.yml, which the lint keeps equal to the tree.
 function architectureMapRegion(name: string, heading: string): GeneratedRegion {
-  return GeneratedRegion.of<ArchitectureMap>({
+  return GeneratedRegion.markdown<ArchitectureMap>({
     name,
     placement: { kind: "under-heading", heading },
     data: () => readArchitecture(ROOT),
-    render: block(
-      (map) => `${MERMAID_OPEN}\n${renderArchitectureMermaid({ ...map, exclude: [] })}\n${FENCE}`,
-    ),
+    render: (map) =>
+      `${MERMAID_OPEN}\n${renderArchitectureMermaid({ ...map, exclude: [] })}\n${FENCE}`,
     parse: parseArchitectureMap,
   });
 }
@@ -904,11 +897,11 @@ export const PAGES: GeneratedFiles = {
     // The one region closes the file and holds everything below the title (or an empty body between fresh
     // markers), so a marker moved over authored prose fails instead of erasing it.
     regions: [
-      GeneratedRegion.of({
+      GeneratedRegion.markdown({
         name: "coverage",
         placement: { kind: "tail" },
         data: () => coveragePage(SECTIONS, DOCS, COVERAGE_DATA, ENDPOINT_ANCHORS),
-        render: block(renderCoveragePage),
+        render: renderCoveragePage,
         parse: parseCoveragePage,
       }),
     ],

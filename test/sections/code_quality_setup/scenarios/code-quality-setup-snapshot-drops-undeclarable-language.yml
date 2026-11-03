@@ -25,7 +25,7 @@ expect:
       languages:
         - python
   stdout_contains:
-    - "code_quality_setup.languages: left out of the snapshot - GitHub reports \"rust\", which the PATCH's languages vocabulary has no value for, so it stays as GitHub detected it"
+    - 'code_quality_setup.languages: left out of the snapshot - GitHub reports "rust", which the PATCH''s languages vocabulary has no value for, so it stays as GitHub detected it'
   never:
     - POST /
     - PATCH /

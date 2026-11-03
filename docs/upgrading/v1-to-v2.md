@@ -8,8 +8,8 @@ Four breaks, all listed in the [2.0.0 changelog entry](https://github.com/Vivswa
 
 ## 1. The repository moved
 
-| v1 | v2 |
-|---|---|
+| v1                                 | v2                                   |
+| ---------------------------------- | ------------------------------------ |
 | `Vivswan/repo-settings-as-code@v1` | `Vivswan/github-settings-as-code@v2` |
 
 A workflow still naming the old repository fails with "repository not found". Update every `uses:` line, then move the pin.
@@ -18,11 +18,11 @@ A workflow still naming the old repository fails with "repository not found". Up
 
 On v1 these keys were accepted and silently ignored (a notice said so, or check mode showed permanent drift). On v2 they act on the first apply.
 
-| Key | v1 | v2 | Audit for |
-|---|---|---|---|
-| `branches[].protection.required_signatures` | Rode the protection PUT, where GitHub dropped it | Toggles the signed-commit requirement | A stale `required_signatures: false` REMOVES a hand-enabled requirement |
-| `actions.fork_pr_contributor_approval`, `actions.fork_pr_workflows_private_repos` | Fell through to the base permissions PUT, ignored | Apply the fork pull request policies | Values copied in without intent |
-| `actions.oidc_customization_sub` | Fell through to the base permissions PUT, ignored | Customizes the OIDC subject claim template | A template that no longer matches your cloud trust policy |
+| Key                                                                               | v1                                                | v2                                         | Audit for                                                               |
+| --------------------------------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------ | ----------------------------------------------------------------------- |
+| `branches[].protection.required_signatures`                                       | Rode the protection PUT, where GitHub dropped it  | Toggles the signed-commit requirement      | A stale `required_signatures: false` REMOVES a hand-enabled requirement |
+| `actions.fork_pr_contributor_approval`, `actions.fork_pr_workflows_private_repos` | Fell through to the base permissions PUT, ignored | Apply the fork pull request policies       | Values copied in without intent                                         |
+| `actions.oidc_customization_sub`                                                  | Fell through to the base permissions PUT, ignored | Customizes the OIDC subject claim template | A template that no longer matches your cloud trust policy               |
 
 The changelog footers carry the full wording: [required_signatures](https://github.com/Vivswan/github-settings-as-code/blob/main/CHANGELOG.md#200-2026-08-11), [the fork PR keys](https://github.com/Vivswan/github-settings-as-code/blob/main/CHANGELOG.md#200-2026-08-11), and [oidc_customization_sub](https://github.com/Vivswan/github-settings-as-code/blob/main/CHANGELOG.md#200-2026-08-11).
 

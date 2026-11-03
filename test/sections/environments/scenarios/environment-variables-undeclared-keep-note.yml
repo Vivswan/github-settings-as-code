@@ -39,6 +39,6 @@ expect:
   never:
     - "DELETE /repos/{repo}/environments/production/variables"
   stdout_contains:
-    - "kept under \"_undeclared: keep\""
+    - 'kept under "_undeclared: keep"'
     - LEGACY
   fixpoint: converges

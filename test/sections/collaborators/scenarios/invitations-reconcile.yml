@@ -29,6 +29,6 @@ expect:
   never:
     - "PUT /repos/{repo}/collaborators/"
   stdout_contains:
-    - "updated pending invitation for \"e2e-pending\" (admin)"
-    - "CANCELLED undeclared invitation for \"e2e-uninvited\""
+    - 'updated pending invitation for "e2e-pending" (admin)'
+    - 'CANCELLED undeclared invitation for "e2e-uninvited"'
   fixpoint: apply_idempotent

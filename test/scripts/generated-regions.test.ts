@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { err, ok } from "neverthrow";
+import { formatted } from "../../.github/scripts/lib/biome-format.js";
 import {
   assertRegionPlacement,
   block,
@@ -705,5 +706,75 @@ describe("regenerateRegions", () => {
     expect(() =>
       regenerateRegions(PAGE, [TABLE, tableRegion(UNDER_INPUTS, [["y", 2]])], "doc.md"),
     ).toThrow("the table region of doc.md is declared twice");
+  });
+});
+
+describe("GeneratedRegion.markdown", () => {
+  const rows: ReadonlyArray<readonly [string, number]> = [
+    ["x", 1],
+    ["long_key", 22],
+  ];
+  const region = GeneratedRegion.markdown<ReadonlyArray<readonly [string, number]>>({
+    name: "table",
+    placement: UNDER_INPUTS,
+    data: () => rows,
+    render: (rows) =>
+      renderTable(
+        TABLE_HEADER,
+        rows.map(([key, n]) => [`\`${key}\``, String(n)]),
+      ),
+    parse: tableBody(TABLE_HEADER, "keyed", (cells, key) =>
+      /^\d+$/.test(cells[1] ?? "")
+        ? ok([key, Number(cells[1])] as const)
+        : err("has no number in its second cell"),
+    ),
+  });
+  const written = region.render();
+  const spelled = block(() =>
+    renderTable(TABLE_HEADER, [
+      ["`x`", "1"],
+      ["`long_key`", "22"],
+    ]),
+  )(undefined);
+
+  test("writes the body as biome formats it, which biome then leaves unchanged", () => {
+    // The lint runs biome over the committed page, so the body must already be biome's own output: a cell padded to
+    // its column, a delimiter as wide as the column; a body biome would still change fails the gate on every push.
+    expect(written).not.toBe(spelled);
+    expect(written.split("\n")[2]).toBe("| ---------- | --- |");
+    expect(formatted("docs/x.md", written)).toBe(written.slice(1));
+  });
+
+  test("the guard reads the renderer's spelling under any padding, and still refuses what the parse refuses", () => {
+    expect(region.bodyRefusal(written)).toBeUndefined();
+    expect(region.bodyRefusal(spelled)).toBeUndefined();
+    expect(region.bodyRefusal(written.replace("22", "two"))).toMatch(
+      /line 4 has no number in its second cell/,
+    );
+  });
+
+  test("a cell holding a Unicode line separator, which cellFault() admits, still round-trips", () => {
+    // biome keeps U+2028 inside the cell, and the respelling must see the row as one line: a `.` without dotAll
+    // skipped it, and the generator then refused its own formatted output.
+    const prose = GeneratedRegion.markdown<readonly string[]>({
+      name: "table",
+      placement: UNDER_INPUTS,
+      data: () => ["y\u2028z"],
+      render: (cells) =>
+        renderTable(
+          TABLE_HEADER,
+          cells.map((cell) => ["`k`", cell]),
+        ),
+      parse: tableBody(TABLE_HEADER, "cells", (cells) => ok(cells[1] ?? "")),
+    });
+    expect(prose.bodyRefusal(prose.render())).toBeUndefined();
+  });
+
+  test("a bare carriage return inside a cell is still refused, not trimmed away", () => {
+    // A respelling that trimmed every whitespace erased the CR and admitted the row; regeneration then rewrote the
+    // page without it, silently.
+    expect(region.bodyRefusal(written.replace("`x`", "`x`\r"))).toMatch(
+      /line 3 cell 1 is blank or contains "\|" or a line break/,
+    );
   });
 });

@@ -28,9 +28,9 @@ To build the package from a checkout instead, `bun install && bun run build:sche
 
 ## The two entries
 
-| Import path | What it holds | Promise |
-|---|---|---|
-| `@vivswan/github-settings-as-code` | The documented library: every name in [the API by group](#the-api-by-group), and nothing else | Semver: a rename or a removal is a major, listed in the [upgrading guide](../upgrading/README.md) |
+| Import path                                 | What it holds                                                                                                                                                         | Promise                                                                                           |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `@vivswan/github-settings-as-code`          | The documented library: every name in [the API by group](#the-api-by-group), and nothing else                                                                         | Semver: a rename or a removal is a major, listed in the [upgrading guide](../upgrading/README.md) |
 | `@vivswan/github-settings-as-code/internal` | What the action, the CLI, and this repository's tests import beyond the library (the input declarations, the engine's per-repository run, the redaction helpers, ...) | None: a name here may move or go in any release. Nothing outside this repository should import it |
 
 Two more paths ride along: the built settings.yml JSON Schema (`./settings.schema.json`) and the package's own manifest (`./package.json`).
@@ -49,40 +49,44 @@ How a call reports failure depends on its group:
 
 Every verb takes its inputs positionally and one options object of the same knobs, each defaulted as the action's input of the same name:
 
-| Knob | Default | On |
-|---|---|---|
-| `sections` | `SectionSelection.ALL`: every declared section, none required | validate, check, apply, snapshot |
-| `onMissingPermission` | `"fail"` | check, apply, snapshot |
-| `source` | `"the settings document"`, or `"the rendered settings document"` for a merge | validate, merge |
-| `layering` | `"deep"` | merge |
-| `io` | A collector: the lines the call prints come back as the report's `log`, a `CollectedLine[]` (the annotation level beside each line); with your own `Io` the log is empty | every verb |
+| Knob                  | Default                                                                                                                                                                  | On                               |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------- |
+| `sections`            | `SectionSelection.ALL`: every declared section, none required                                                                                                            | validate, check, apply, snapshot |
+| `onMissingPermission` | `"fail"`                                                                                                                                                                 | check, apply, snapshot           |
+| `source`              | `"the settings document"`, or `"the rendered settings document"` for a merge                                                                                             | validate, merge                  |
+| `layering`            | `"deep"`                                                                                                                                                                 | merge                            |
+| `io`                  | A collector: the lines the call prints come back as the report's `log`, a `CollectedLine[]` (the annotation level beside each line); with your own `Io` the log is empty | every verb                       |
 
 The examples continue from one another and form one program (the docs tests compile them in page order): each name is imported once, in the first example that uses it, and later examples reuse it, as they do `settings` (the Validate group's validated document), `client` (the Client group's `GitHubApi`), `repo` (the Check group's parsed slug), and `config` in the Io example (a `SingleConfig`, the action's parsed inputs, declared there).
 
 ### Validate and merge
 
-| Name | Kind | Says |
-|---|---|---|
-| `validateSettings` | function | Validate a parsed document into the branded `ValidatedSettings` every other verb takes; a `null` is a declared value, refused where the key has no empty state |
-| `ValidateOptions` | type | `source`, `sections`, `io`, `undeclared` (the action's input of that name: the fallback policy below a list's wrapper and the file's top-level `_undeclared`), `secretSource` (who authored the document: `operator`, the default, honors `$NAME` secret references; `target` refuses them) |
-| `ValidateReport` | type | `settings` and `log` |
-| `ValidatedSettings` | type | The document as zod parsed it, branded by validation, every knobbed list in `{_undeclared, entries}` form with its policy resolved; `validateSettings`, `mergeSettings`, and a snapshot that did not fail hand one out |
-| `mergeSettings` | function | Fold an ordered list of `Layer`s into one validated document, as `mode: render` does: each layer validated alone, folded, validated again; its `yaml` is byte for byte the file `mode: render` writes, the fold in the canonical order every rendered document shares (sections in execution order, keys as the schema declares them, the entries of every list section by identity; `branches`, `bypass_actors`, `reviewers`, and scalar lists as written), so no layer's key order reaches the file |
-| `MergeOptions` | type | `source`, `layering` (`"deep"` unless set), `undeclared` (unset unless given), `io` |
-| `MergeReport` | type | `settings`, `notices` (one per `_remove: true` entry that dropped a lower entry), `yaml` (the file text `mode: render` writes, byte for byte), and `log` (the lines the fold printed) |
-| `Layer` | type | One layer: its `name` (a path, usually) and its parsed `doc` |
-| `Layering` | type | `"replace"`, `"shallow"`, or `"deep"`: how every list section's entries fold across layers, by the section's key |
-| `RemovalNotice` | type | A `_remove: true` entry that dropped what a lower layer declared: the layer and the entry's path |
-| `describeRemoval` | function | One notice as the line the action prints |
-| `readLayerFiles` | function | Read paths into `Layer`s in order; the first unreadable file is the problem |
-| `readSettingsFile` | function | Read and parse one YAML file, given its role (`settings-file`, `defaults-file`, `layer`, `central-file`), so the problem's advice fits |
-| `SettingsFileRole` | type | The four roles |
-| `parseSettingsDoc` | function | Parse YAML text into an unknown document |
-| `Problem` | type | Every typed failure a call can return, keyed by `code` |
-| `describeProblem` | function | A `Problem` as the message the action prints |
+| Name                | Kind     | Says                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `validateSettings`  | function | Validate a parsed document into the branded `ValidatedSettings` every other verb takes; a `null` is a declared value, refused where the key has no empty state                                                                                                                                                                                                                                                                                                                                        |
+| `ValidateOptions`   | type     | `source`, `sections`, `io`, `undeclared` (the action's input of that name: the fallback policy below a list's wrapper and the file's top-level `_undeclared`), `secretSource` (who authored the document: `operator`, the default, honors `$NAME` secret references; `target` refuses them)                                                                                                                                                                                                           |
+| `ValidateReport`    | type     | `settings` and `log`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `ValidatedSettings` | type     | The document as zod parsed it, branded by validation, every knobbed list in `{_undeclared, entries}` form with its policy resolved; `validateSettings`, `mergeSettings`, and a snapshot that did not fail hand one out                                                                                                                                                                                                                                                                                |
+| `mergeSettings`     | function | Fold an ordered list of `Layer`s into one validated document, as `mode: render` does: each layer validated alone, folded, validated again; its `yaml` is byte for byte the file `mode: render` writes, the fold in the canonical order every rendered document shares (sections in execution order, keys as the schema declares them, the entries of every list section by identity; `branches`, `bypass_actors`, `reviewers`, and scalar lists as written), so no layer's key order reaches the file |
+| `MergeOptions`      | type     | `source`, `layering` (`"deep"` unless set), `undeclared` (unset unless given), `io`                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `MergeReport`       | type     | `settings`, `notices` (one per `_remove: true` entry that dropped a lower entry), `yaml` (the file text `mode: render` writes, byte for byte), and `log` (the lines the fold printed)                                                                                                                                                                                                                                                                                                                 |
+| `Layer`             | type     | One layer: its `name` (a path, usually) and its parsed `doc`                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `Layering`          | type     | `"replace"`, `"shallow"`, or `"deep"`: how every list section's entries fold across layers, by the section's key                                                                                                                                                                                                                                                                                                                                                                                      |
+| `RemovalNotice`     | type     | A `_remove: true` entry that dropped what a lower layer declared: the layer and the entry's path                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `describeRemoval`   | function | One notice as the line the action prints                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `readLayerFiles`    | function | Read paths into `Layer`s in order; the first unreadable file is the problem                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `readSettingsFile`  | function | Read and parse one YAML file, given its role (`settings-file`, `defaults-file`, `layer`, `central-file`), so the problem's advice fits                                                                                                                                                                                                                                                                                                                                                                |
+| `SettingsFileRole`  | type     | The four roles                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `parseSettingsDoc`  | function | Parse YAML text into an unknown document                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `Problem`           | type     | Every typed failure a call can return, keyed by `code`                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `describeProblem`   | function | A `Problem` as the message the action prints                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
 ```ts
-import { describeProblem, readSettingsFile, validateSettings } from "@vivswan/github-settings-as-code";
+import {
+  describeProblem,
+  readSettingsFile,
+  validateSettings,
+} from "@vivswan/github-settings-as-code";
 
 const validated = readSettingsFile(".github/settings.yml", "settings-file").andThen((doc) =>
   validateSettings(doc, { source: ".github/settings.yml" }),
@@ -102,13 +106,13 @@ console.log(merged.value.yaml, merged.value.notices.length);
 
 ### Schema
 
-| Name | Kind | Says |
-|---|---|---|
-| `SettingsFile` | const | The zod schema of the whole document, and its inferred type |
-| `SECTION_KEYS` | const | Every section key in execution order |
-| `SectionKey` | type | One of them |
+| Name                         | Kind  | Says                                                                                                                                                                                                                               |
+| ---------------------------- | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SettingsFile`               | const | The zod schema of the whole document, and its inferred type                                                                                                                                                                        |
+| `SECTION_KEYS`               | const | Every section key in execution order                                                                                                                                                                                               |
+| `SectionKey`                 | type  | One of them                                                                                                                                                                                                                        |
 | `UNDECLARED_POLICY_SECTIONS` | const | The list sections whose wrapper takes `_undeclared` beside `_layering`; `environments`, `branches`, and `workflows` layer by key too, through a `{_layering, entries}` wrapper of their own (`LIST_SECTIONS` in the schema module) |
-| `UndeclaredPolicySection` | type | One of them |
+| `UndeclaredPolicySection`    | type  | One of them                                                                                                                                                                                                                        |
 
 The schema subpath serves the built JSON Schema. Inside a section, `SettingsFile` parses as the action does: an undeclared key survives the parse, and a key a section rule refuses fails it with the key named. The root strips an unknown top-level key, so a caller who wants the action's whole judgment, unknown sections included, calls `validateSettings`.
 
@@ -122,22 +126,22 @@ console.log(parsed.success, SECTION_KEYS.length, schema.$schema);
 
 ### Client
 
-| Name | Kind | Says |
-|---|---|---|
-| `GitHubApi` | class | The REST and GraphQL client the action uses: retries, throttling, the pinned API version, trace redaction |
-| `GitHubApiOptions` | type | Its constructor's options: `token` required; `io` (the trace sink), `baseUrl`, `apiVersion`, `retryBaseMs` (real milliseconds per plugin second), `scheduler` (the throttling limiter), `userAgent` optional |
-| `GitHubClient` | type | The port every verb reads and writes through, and the interface a test double implements: `tryRequest` for one request, `tryList` for one paginated GET, `tryGraphql` for one operation; it answers, never rejects |
-| `ClientAnswer` | type | What one request ends in: `data`, an `error` (GitHub's answer, an `ApiError`), or `failed` (the whole line for a request with no HTTP answer: not sent, the transport failed, a GraphQL body off the wire contract) |
-| `DEFAULT_API_VERSION` | const | The `X-GitHub-Api-Version` the action pins |
-| `ApiError` | type | A failed request as the port returns it: `status`, `message`, `body` |
-| `GraphqlOp` | type | A GraphQL operation as the port takes it |
-| `RequestMark` | type | The per-request options; `carriesSecret` marks a payload holding a resolved secret |
-| `ListOptions` | type | What `tryList` takes beside the path: `perPage` (the page size, `PAGE_SIZE` when omitted) and `until` (ends the walk after the first page it accepts) |
-| `PAGE_SIZE` | const | The page size a list walk asks for unless the endpoint caps lower: 100, GitHub's maximum |
-| `classifyApiError` | function | Which `ApiErrorKind` an `ApiError` is, the one judgment the two predicates below read |
-| `ApiErrorKind` | type | `"rate-limit"`, `"permission"` (any other 403, and every 404: a fine-grained token answers 404 for a resource it denies, so an absent one lands here too), or `"other"` |
-| `isPermissionError` | function | Whether an `ApiError` is a denial |
-| `isRateLimitError` | function | Whether an `ApiError` is the rate limit |
+| Name                  | Kind     | Says                                                                                                                                                                                                                |
+| --------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GitHubApi`           | class    | The REST and GraphQL client the action uses: retries, throttling, the pinned API version, trace redaction                                                                                                           |
+| `GitHubApiOptions`    | type     | Its constructor's options: `token` required; `io` (the trace sink), `baseUrl`, `apiVersion`, `retryBaseMs` (real milliseconds per plugin second), `scheduler` (the throttling limiter), `userAgent` optional        |
+| `GitHubClient`        | type     | The port every verb reads and writes through, and the interface a test double implements: `tryRequest` for one request, `tryList` for one paginated GET, `tryGraphql` for one operation; it answers, never rejects  |
+| `ClientAnswer`        | type     | What one request ends in: `data`, an `error` (GitHub's answer, an `ApiError`), or `failed` (the whole line for a request with no HTTP answer: not sent, the transport failed, a GraphQL body off the wire contract) |
+| `DEFAULT_API_VERSION` | const    | The `X-GitHub-Api-Version` the action pins                                                                                                                                                                          |
+| `ApiError`            | type     | A failed request as the port returns it: `status`, `message`, `body`                                                                                                                                                |
+| `GraphqlOp`           | type     | A GraphQL operation as the port takes it                                                                                                                                                                            |
+| `RequestMark`         | type     | The per-request options; `carriesSecret` marks a payload holding a resolved secret                                                                                                                                  |
+| `ListOptions`         | type     | What `tryList` takes beside the path: `perPage` (the page size, `PAGE_SIZE` when omitted) and `until` (ends the walk after the first page it accepts)                                                               |
+| `PAGE_SIZE`           | const    | The page size a list walk asks for unless the endpoint caps lower: 100, GitHub's maximum                                                                                                                            |
+| `classifyApiError`    | function | Which `ApiErrorKind` an `ApiError` is, the one judgment the two predicates below read                                                                                                                               |
+| `ApiErrorKind`        | type     | `"rate-limit"`, `"permission"` (any other 403, and every 404: a fine-grained token answers 404 for a resource it denies, so an absent one lands here too), or `"other"`                                             |
+| `isPermissionError`   | function | Whether an `ApiError` is a denial                                                                                                                                                                                   |
+| `isRateLimitError`    | function | Whether an `ApiError` is the rate limit                                                                                                                                                                             |
 
 A request whose payload holds a resolved secret reaches the client marked `carriesSecret`, and whatever error that client returns or throws for it is withheld on the engine's side of the port, so an echoed value never reaches an outcome, the log, or a report, whichever client is in use.
 
@@ -149,19 +153,19 @@ const client = new GitHubApi({ token: process.env.GITHUB_TOKEN ?? "" });
 
 ### Check and apply
 
-| Name | Kind | Says |
-|---|---|---|
-| `checkRepository` | function | Plan and diff every active section without writing |
-| `CheckOptions` | type | `sections`, `onMissingPermission`, `io`, and `secretEnv`, the environment `applyRepository` resolves the secret references from; check mode reads none |
-| `CheckReport` | type | `repo`, `result`, `outcomes` (one `SectionOutcome` per section), `preflightDenied`, `log` |
-| `applyRepository` | function | Execute the plan: the repository converges on the document |
-| `ApplyOptions` | type | The same knobs as `CheckOptions` |
-| `ApplyReport` | type | The same shape as `CheckReport` |
-| `parseRepoSlug` | function | `owner/name` into a `RepoRef`, or the problem naming what is wrong with it |
-| `RepoRef` | type | A parsed slug: `owner`, `name`, `slug` |
-| `SectionSelection` | class | Which sections run (`only`) and which must fully apply (`required`); `SectionSelection.of(...)` is the one constructor, `SectionSelection.ALL` the default |
-| `OnMissingPermission` | type | `"fail"` or `"warn"`: how a read the token is denied classifies |
-| `SectionOutcome` | type | One section's end state: `key`, `status`, `detail`, and the denial's `httpStatus` when there was one |
+| Name                  | Kind     | Says                                                                                                                                                       |
+| --------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `checkRepository`     | function | Plan and diff every active section without writing                                                                                                         |
+| `CheckOptions`        | type     | `sections`, `onMissingPermission`, `io`, and `secretEnv`, the environment `applyRepository` resolves the secret references from; check mode reads none     |
+| `CheckReport`         | type     | `repo`, `result`, `outcomes` (one `SectionOutcome` per section), `preflightDenied`, `log`                                                                  |
+| `applyRepository`     | function | Execute the plan: the repository converges on the document                                                                                                 |
+| `ApplyOptions`        | type     | The same knobs as `CheckOptions`                                                                                                                           |
+| `ApplyReport`         | type     | The same shape as `CheckReport`                                                                                                                            |
+| `parseRepoSlug`       | function | `owner/name` into a `RepoRef`, or the problem naming what is wrong with it                                                                                 |
+| `RepoRef`             | type     | A parsed slug: `owner`, `name`, `slug`                                                                                                                     |
+| `SectionSelection`    | class    | Which sections run (`only`) and which must fully apply (`required`); `SectionSelection.of(...)` is the one constructor, `SectionSelection.ALL` the default |
+| `OnMissingPermission` | type     | `"fail"` or `"warn"`: how a read the token is denied classifies                                                                                            |
+| `SectionOutcome`      | type     | One section's end state: `key`, `status`, `detail`, and the denial's `httpStatus` when there was one                                                       |
 
 ```ts
 import { checkRepository, parseRepoSlug, SectionSelection } from "@vivswan/github-settings-as-code";
@@ -172,18 +176,22 @@ const report = await checkRepository(client, repo.value, settings, {
   onMissingPermission: "warn",
   sections: SectionSelection.ALL,
 });
-console.log(report.result, report.outcomes.map((o) => `${o.key}: ${o.status}`), report.log);
+console.log(
+  report.result,
+  report.outcomes.map((o) => `${o.key}: ${o.status}`),
+  report.log,
+);
 ```
 
 ### Snapshot
 
-| Name | Kind | Says |
-|---|---|---|
-| `snapshotRepository` | function | Read one repository's supported sections back as a settings document |
-| `snapshotRepositories` | function | The same over several repositories in order; a failed target never stops the rest |
-| `SnapshotOptions` | type | `sections`, `onMissingPermission`, `io` |
-| `SnapshotReport` | type | `repo`, `result`, `outcomes`, `takenAt` (the moment the reads began; the report states it, since the file carries no date), `log`, and on any result but `failed` the `settings` and the `yaml` `mode: snapshot` writes: the schema pin, one comment per note, then the document in the canonical order, with no timestamp, so two snapshots of an unchanged repository are the same bytes |
-| `SectionSnapshotOutcome` | type | One section's end state: `snapshot`, `skipped`, `unsupported`, or `failed`, with its `detail` |
+| Name                     | Kind     | Says                                                                                                                                                                                                                                                                                                                                                                                       |
+| ------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `snapshotRepository`     | function | Read one repository's supported sections back as a settings document                                                                                                                                                                                                                                                                                                                       |
+| `snapshotRepositories`   | function | The same over several repositories in order; a failed target never stops the rest                                                                                                                                                                                                                                                                                                          |
+| `SnapshotOptions`        | type     | `sections`, `onMissingPermission`, `io`                                                                                                                                                                                                                                                                                                                                                    |
+| `SnapshotReport`         | type     | `repo`, `result`, `outcomes`, `takenAt` (the moment the reads began; the report states it, since the file carries no date), `log`, and on any result but `failed` the `settings` and the `yaml` `mode: snapshot` writes: the schema pin, one comment per note, then the document in the canonical order, with no timestamp, so two snapshots of an unchanged repository are the same bytes |
+| `SectionSnapshotOutcome` | type     | One section's end state: `snapshot`, `skipped`, `unsupported`, or `failed`, with its `detail`                                                                                                                                                                                                                                                                                              |
 
 ```ts
 import { snapshotRepository } from "@vivswan/github-settings-as-code";
@@ -194,35 +202,35 @@ console.log(snapshot.result, snapshot.yaml ?? "(failed: no document)");
 
 ### Flows
 
-| Name | Kind | Says |
-|---|---|---|
-| `executeRun` | function | The executor the action and the CLI share: a `RunConfig` plus a face's `RunDeps` runs to its `RunEnd` |
-| `RunDeps` | type | What a face hands in: the `io`, the client factory, and the artifact `uploader` only the Actions runner has |
-| `RunEnd` | type | How the run ended: its `exitCode`, and the fatal `Problem` when it never reached a target |
-| `RunConfig` | type | The action's parsed inputs: a `SingleConfig`, `MultiConfig`, `RenderConfig`, or `SnapshotConfig`, discriminated by `kind` |
-| `parseConfig` | function | Build a `RunConfig` from an input reader, the environment, and the face's `RunCapabilities`, the way the action does; a face without an artifact upload is refused `private-report: artifact` here |
-| `RunCapabilities` | type | What the face can do: `artifactUpload`, whether it hands the run a workflow-artifact uploader |
-| `InputReader` | type | `(name) => string`: how `parseConfig` reads an input |
-| `ConfigEnv` | type | The environment `parseConfig` reads |
-| `runSingle` | function | One repository from a local settings file, in check or apply |
-| `SingleConfig` | type | Its config |
-| `SingleOutcome` | type | Its result: the target's `result`, `outcomes`, and detail |
-| `runMulti` | function | The fleet: repos-dir files, the `repos` list, discovery, the defaults fallback |
-| `MultiConfig` | type | Its config |
-| `TargetOutcome` | type | One fleet target's result, with its `source` |
-| `runRender` | function | Fold settings files into `rendered-file`; no token, no API call |
-| `RenderConfig` | type | Its config: `settingsFiles`, `renderedFile`, `layering`, `undeclared` |
-| `FinishedRender` | type | Its result: the layers and the written file |
-| `runSnapshot` | function | The live settings of one repository to a file, or of every fleet target to a directory |
-| `SnapshotConfig` | type | Its config, in the `file` or the `dir` form |
-| `FinishedSnapshot` | type | Its result: every target's public view |
-| `concludeRun` | function | A finished single or multi run into the outputs, the summary, and the exit code |
-| `concludeRender` | function | The same for a finished render |
-| `concludeSnapshot` | function | The same for a finished snapshot |
-| `failRun` | function | A fatal `Problem` into the failed outputs and exit 1 |
-| `RunOutcome` | type | Every result word of every mode |
-| `RUN_RESULTS` | const | Those words ranked worst first |
-| `worstOf` | function | The worst result across a run's targets |
+| Name               | Kind     | Says                                                                                                                                                                                               |
+| ------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `executeRun`       | function | The executor the action and the CLI share: a `RunConfig` plus a face's `RunDeps` runs to its `RunEnd`                                                                                              |
+| `RunDeps`          | type     | What a face hands in: the `io`, the client factory, and the artifact `uploader` only the Actions runner has                                                                                        |
+| `RunEnd`           | type     | How the run ended: its `exitCode`, and the fatal `Problem` when it never reached a target                                                                                                          |
+| `RunConfig`        | type     | The action's parsed inputs: a `SingleConfig`, `MultiConfig`, `RenderConfig`, or `SnapshotConfig`, discriminated by `kind`                                                                          |
+| `parseConfig`      | function | Build a `RunConfig` from an input reader, the environment, and the face's `RunCapabilities`, the way the action does; a face without an artifact upload is refused `private-report: artifact` here |
+| `RunCapabilities`  | type     | What the face can do: `artifactUpload`, whether it hands the run a workflow-artifact uploader                                                                                                      |
+| `InputReader`      | type     | `(name) => string`: how `parseConfig` reads an input                                                                                                                                               |
+| `ConfigEnv`        | type     | The environment `parseConfig` reads                                                                                                                                                                |
+| `runSingle`        | function | One repository from a local settings file, in check or apply                                                                                                                                       |
+| `SingleConfig`     | type     | Its config                                                                                                                                                                                         |
+| `SingleOutcome`    | type     | Its result: the target's `result`, `outcomes`, and detail                                                                                                                                          |
+| `runMulti`         | function | The fleet: repos-dir files, the `repos` list, discovery, the defaults fallback                                                                                                                     |
+| `MultiConfig`      | type     | Its config                                                                                                                                                                                         |
+| `TargetOutcome`    | type     | One fleet target's result, with its `source`                                                                                                                                                       |
+| `runRender`        | function | Fold settings files into `rendered-file`; no token, no API call                                                                                                                                    |
+| `RenderConfig`     | type     | Its config: `settingsFiles`, `renderedFile`, `layering`, `undeclared`                                                                                                                              |
+| `FinishedRender`   | type     | Its result: the layers and the written file                                                                                                                                                        |
+| `runSnapshot`      | function | The live settings of one repository to a file, or of every fleet target to a directory                                                                                                             |
+| `SnapshotConfig`   | type     | Its config, in the `file` or the `dir` form                                                                                                                                                        |
+| `FinishedSnapshot` | type     | Its result: every target's public view                                                                                                                                                             |
+| `concludeRun`      | function | A finished single or multi run into the outputs, the summary, and the exit code                                                                                                                    |
+| `concludeRender`   | function | The same for a finished render                                                                                                                                                                     |
+| `concludeSnapshot` | function | The same for a finished snapshot                                                                                                                                                                   |
+| `failRun`          | function | A fatal `Problem` into the failed outputs and exit 1                                                                                                                                               |
+| `RunOutcome`       | type     | Every result word of every mode                                                                                                                                                                    |
+| `RUN_RESULTS`      | const    | Those words ranked worst first                                                                                                                                                                     |
+| `worstOf`          | function | The worst result across a run's targets                                                                                                                                                            |
 
 All four flows conclude alike: the three outputs (`result`, `skipped-sections`, `repos-result`) are always set, the result is `worstOf` the targets, and the exit code is 1 exactly when it is `failed`, or `drift` in check mode.
 
@@ -241,19 +249,19 @@ const renderExitCode = runRender(
 
 ### Discovery
 
-| Name | Kind | Says |
-|---|---|---|
-| `discoverRepos` | function | The repositories a token can see, filtered |
-| `DiscoveryFilters` | type | The filters: `visibility`, `archived`, `forks`, `affiliation`, `topics`, `exclude` |
-| `DEFAULT_DISCOVERY_FILTERS` | const | The action's defaults |
-| `compileExcludePattern` | function | One `exclude` glob compiled once, or the problem naming why it is unusable and the fix |
-| `ExcludePattern` | type | A compiled `exclude` entry: the operator's text, the scope its slash chose, and the regex |
-| `parseReposInput` | function | The `repos` input form: the listed repositories as `RepoRef`s, or `"*"` for discovery |
-| `resolveCentralTargets` | function | The `<owner>/<name>.yml` files of a repos-dir as targets, with warnings for the files it skipped |
-| `dedupeTargets` | function | Merge the central and the remote targets, central first; a remote target whose slug a central one already names is dropped with a notice |
-| `Target` | type | A `CentralTarget` or a `RemoteTarget` |
-| `CentralTarget` | type | A target with a settings file in the repos-dir |
-| `RemoteTarget` | type | A target whose settings file is fetched from the repository itself |
+| Name                        | Kind     | Says                                                                                                                                     |
+| --------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `discoverRepos`             | function | The repositories a token can see, filtered                                                                                               |
+| `DiscoveryFilters`          | type     | The filters: `visibility`, `archived`, `forks`, `affiliation`, `topics`, `exclude`                                                       |
+| `DEFAULT_DISCOVERY_FILTERS` | const    | The action's defaults                                                                                                                    |
+| `compileExcludePattern`     | function | One `exclude` glob compiled once, or the problem naming why it is unusable and the fix                                                   |
+| `ExcludePattern`            | type     | A compiled `exclude` entry: the operator's text, the scope its slash chose, and the regex                                                |
+| `parseReposInput`           | function | The `repos` input form: the listed repositories as `RepoRef`s, or `"*"` for discovery                                                    |
+| `resolveCentralTargets`     | function | The `<owner>/<name>.yml` files of a repos-dir as targets, with warnings for the files it skipped                                         |
+| `dedupeTargets`             | function | Merge the central and the remote targets, central first; a remote target whose slug a central one already names is dropped with a notice |
+| `Target`                    | type     | A `CentralTarget` or a `RemoteTarget`                                                                                                    |
+| `CentralTarget`             | type     | A target with a settings file in the repos-dir                                                                                           |
+| `RemoteTarget`              | type     | A target whose settings file is fetched from the repository itself                                                                       |
 
 ```ts
 import { DEFAULT_DISCOVERY_FILTERS, discoverRepos } from "@vivswan/github-settings-as-code";
@@ -265,16 +273,16 @@ console.log(found.value.repos.map((r) => r.slug));
 
 ### Report
 
-| Name | Kind | Says |
-|---|---|---|
-| `composeReport` | function | The private, unredacted markdown report for one target |
-| `ReportInput` | type | What it renders: the target, the admin repository, the run URL, the mode and result, the outcomes, the transcript |
-| `encryptReport` | function | Seal a report to an age recipient |
-| `parseRecipient` | function | Validate an age recipient before sealing to it |
-| `openReportChannel` | function | The issue or artifact channel the action delivers through |
-| `PrivateReportChannel` | type | `none`, `issue`, `issue-on-failure`, or `artifact` |
-| `deliverArtifactReport` | function | The artifact half, behind an uploader you supply; never throws |
-| `ArtifactUploader` | type | `upload(name, file)`: the port the Actions runner implements; it resolves to `{ uploaded: true }` or `{ failed }` with the reason |
+| Name                    | Kind     | Says                                                                                                                              |
+| ----------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `composeReport`         | function | The private, unredacted markdown report for one target                                                                            |
+| `ReportInput`           | type     | What it renders: the target, the admin repository, the run URL, the mode and result, the outcomes, the transcript                 |
+| `encryptReport`         | function | Seal a report to an age recipient                                                                                                 |
+| `parseRecipient`        | function | Validate an age recipient before sealing to it                                                                                    |
+| `openReportChannel`     | function | The issue or artifact channel the action delivers through                                                                         |
+| `PrivateReportChannel`  | type     | `none`, `issue`, `issue-on-failure`, or `artifact`                                                                                |
+| `deliverArtifactReport` | function | The artifact half, behind an uploader you supply; never throws                                                                    |
+| `ArtifactUploader`      | type     | `upload(name, file)`: the port the Actions runner implements; it resolves to `{ uploaded: true }` or `{ failed }` with the reason |
 
 ```ts
 import { encryptReport, parseRecipient } from "@vivswan/github-settings-as-code";
@@ -287,35 +295,40 @@ const sealed = await encryptReport(recipient, "# report");
 
 ### Sections
 
-| Name | Kind | Says |
-|---|---|---|
-| `SECTIONS` | const | Every section module in execution order |
-| `sectionModule` | function | One module by key |
-| `SectionModule` | type | A module: its `key`, `endpoints`, `permission`, `plan()`, `snapshot()` when it has one, and `validate()` on a list section (its file-only checks, run by document validation) |
-| `ValidatedInput` | type | What `plan()` takes: one section's value read off a `ValidatedSettings` document (`settings.labels`); only validation mints it, so a hand-built entry list does not compile |
-| `ValidatedBrand` | type | The mark a `ValidatedInput` carries: a type-level property holding the section key the value was validated as, with no runtime field; a declaration spells a planner's input as `PlainTyped<` the section's value `> & ValidatedBrand<"labels">` |
-| `PlainTyped` | type | The section's value as a `ValidatedInput` reads it: a leaf the schema left `unknown` (a passthrough key) is plain JSON data, since validation walked it, so a request body built from declared values needs no second check |
-| `SectionInput` | type | The section's value without the brand, as the schema types it; what a list module's `validate()` hook takes, since it runs inside validation |
-| `sectionGrant` | function | The PAT grant a section needs, as prose |
-| `allEndpoints` | function | Every declared REST route, tagged with its owner |
-| `allGraphqlOps` | function | Every declared GraphQL operation, tagged with its owner |
-| `TaggedEndpoint` | type | A route beside the section that declares it |
-| `endpointMethod` | function | The method half of a `Route` |
-| `endpointPath` | function | The path half of a `Route` |
-| `Route` | type | `"GET /repos/{owner}/{repo}/labels"` and its kin |
-| `EndpointDecl` | type | A REST endpoint as a section declares it: the route, the statuses it tolerates, the permission |
-| `GraphqlOpDecl` | type | A GraphQL operation as a section declares it |
-| `planContext` | function | The context `plan()` reads through, from your client and a `RepoRef` |
-| `PlanContext` | type | That context |
-| `snapshotContext` | function | The context `snapshot()` reads through: the plan context plus the denial policy |
-| `SnapshotContext` | type | That context |
-| `DenialPolicy` | type | The policy as `snapshot()` sees it; only `snapshotContext` mints one |
-| `SectionPlan` | type | What `plan()` resolves to on `Ok`: the operations, notes, and drift |
-| `SectionSnapshot` | type | What `snapshot()` resolves to on `Ok`: the section's value and notes |
-| `SectionFailure` | type | What `plan()` or `snapshot()` resolves to on `Err`: the whole line as `message`, and a `kind` for policy (`"permission-denied"` also carries the section, the detail, and the HTTP status) |
+| Name              | Kind     | Says                                                                                                                                                                                                                                             |
+| ----------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `SECTIONS`        | const    | Every section module in execution order                                                                                                                                                                                                          |
+| `sectionModule`   | function | One module by key                                                                                                                                                                                                                                |
+| `SectionModule`   | type     | A module: its `key`, `endpoints`, `permission`, `plan()`, `snapshot()` when it has one, and `validate()` on a list section (its file-only checks, run by document validation)                                                                    |
+| `ValidatedInput`  | type     | What `plan()` takes: one section's value read off a `ValidatedSettings` document (`settings.labels`); only validation mints it, so a hand-built entry list does not compile                                                                      |
+| `ValidatedBrand`  | type     | The mark a `ValidatedInput` carries: a type-level property holding the section key the value was validated as, with no runtime field; a declaration spells a planner's input as `PlainTyped<` the section's value `> & ValidatedBrand<"labels">` |
+| `PlainTyped`      | type     | The section's value as a `ValidatedInput` reads it: a leaf the schema left `unknown` (a passthrough key) is plain JSON data, since validation walked it, so a request body built from declared values needs no second check                      |
+| `SectionInput`    | type     | The section's value without the brand, as the schema types it; what a list module's `validate()` hook takes, since it runs inside validation                                                                                                     |
+| `sectionGrant`    | function | The PAT grant a section needs, as prose                                                                                                                                                                                                          |
+| `allEndpoints`    | function | Every declared REST route, tagged with its owner                                                                                                                                                                                                 |
+| `allGraphqlOps`   | function | Every declared GraphQL operation, tagged with its owner                                                                                                                                                                                          |
+| `TaggedEndpoint`  | type     | A route beside the section that declares it                                                                                                                                                                                                      |
+| `endpointMethod`  | function | The method half of a `Route`                                                                                                                                                                                                                     |
+| `endpointPath`    | function | The path half of a `Route`                                                                                                                                                                                                                       |
+| `Route`           | type     | `"GET /repos/{owner}/{repo}/labels"` and its kin                                                                                                                                                                                                 |
+| `EndpointDecl`    | type     | A REST endpoint as a section declares it: the route, the statuses it tolerates, the permission                                                                                                                                                   |
+| `GraphqlOpDecl`   | type     | A GraphQL operation as a section declares it                                                                                                                                                                                                     |
+| `planContext`     | function | The context `plan()` reads through, from your client and a `RepoRef`                                                                                                                                                                             |
+| `PlanContext`     | type     | That context                                                                                                                                                                                                                                     |
+| `snapshotContext` | function | The context `snapshot()` reads through: the plan context plus the denial policy                                                                                                                                                                  |
+| `SnapshotContext` | type     | That context                                                                                                                                                                                                                                     |
+| `DenialPolicy`    | type     | The policy as `snapshot()` sees it; only `snapshotContext` mints one                                                                                                                                                                             |
+| `SectionPlan`     | type     | What `plan()` resolves to on `Ok`: the operations, notes, and drift                                                                                                                                                                              |
+| `SectionSnapshot` | type     | What `snapshot()` resolves to on `Ok`: the section's value and notes                                                                                                                                                                             |
+| `SectionFailure`  | type     | What `plan()` or `snapshot()` resolves to on `Err`: the whole line as `message`, and a `kind` for policy (`"permission-denied"` also carries the section, the detail, and the HTTP status)                                                       |
 
 ```ts
-import { planContext, sectionGrant, sectionModule, snapshotContext } from "@vivswan/github-settings-as-code";
+import {
+  planContext,
+  sectionGrant,
+  sectionModule,
+  snapshotContext,
+} from "@vivswan/github-settings-as-code";
 
 const labels = sectionModule("labels");
 console.log(labels.key, Object.keys(labels.endpoints), sectionGrant(labels));
@@ -335,7 +348,12 @@ A module's `plan()` and `snapshot()` are callable directly, each over a context 
 Prefer `checkRepository()` and `snapshotRepository()` for the whole document: one run over every selected section, permission failures classified per section, and one report or rendered file at the end.
 
 ```ts
-import type { SectionFailure, SectionPlan, SectionSnapshot, ValidatedInput } from "@vivswan/github-settings-as-code";
+import type {
+  SectionFailure,
+  SectionPlan,
+  SectionSnapshot,
+  ValidatedInput,
+} from "@vivswan/github-settings-as-code";
 
 const declaredLabels: ValidatedInput<"labels"> | undefined = settings.labels;
 if (declaredLabels === undefined) throw new Error("the document declares no labels");
@@ -356,21 +374,26 @@ console.log(labelsPlan.ops.length, labelsSnapshot?.value, labelsSnapshot?.notes)
 
 ### Io
 
-| Name | Kind | Says |
-|---|---|---|
-| `Io` | type | The output port every flow writes to: `log`, `debug`, `annotate`, `summary`, `output`, and the mask pair |
-| `collectingIo` | function | An `Io` that records lines, outputs, and summary blocks, masked as the action's log is |
-| `CollectedLine` | type | One recorded line and, for an annotation, its `level` |
-| `silentIo` | function | An `Io` that drops everything |
-| `prefixedIo` | function | An `Io` that attributes every line to a target |
-| `maskRegistry` | function | The mask pair an `Io` implementation needs, over a sink such as `core.setSecret` |
-| `MaskPair` | type | `mask(value)` and the `masked` set |
-| `redactRanges` | function | The one redactor: every registered value in a text becomes `***`, overlapping occurrences as one |
-| `AnnotationLevel` | type | `notice`, `warning`, or `error` |
-| `OutputName` | type | `result`, `skipped-sections`, or `repos-result` |
+| Name              | Kind     | Says                                                                                                     |
+| ----------------- | -------- | -------------------------------------------------------------------------------------------------------- |
+| `Io`              | type     | The output port every flow writes to: `log`, `debug`, `annotate`, `summary`, `output`, and the mask pair |
+| `collectingIo`    | function | An `Io` that records lines, outputs, and summary blocks, masked as the action's log is                   |
+| `CollectedLine`   | type     | One recorded line and, for an annotation, its `level`                                                    |
+| `silentIo`        | function | An `Io` that drops everything                                                                            |
+| `prefixedIo`      | function | An `Io` that attributes every line to a target                                                           |
+| `maskRegistry`    | function | The mask pair an `Io` implementation needs, over a sink such as `core.setSecret`                         |
+| `MaskPair`        | type     | `mask(value)` and the `masked` set                                                                       |
+| `redactRanges`    | function | The one redactor: every registered value in a text becomes `***`, overlapping occurrences as one         |
+| `AnnotationLevel` | type     | `notice`, `warning`, or `error`                                                                          |
+| `OutputName`      | type     | `result`, `skipped-sections`, or `repos-result`                                                          |
 
 ```ts
-import { collectingIo, concludeRun, runSingle, type SingleConfig } from "@vivswan/github-settings-as-code";
+import {
+  collectingIo,
+  concludeRun,
+  runSingle,
+  type SingleConfig,
+} from "@vivswan/github-settings-as-code";
 
 declare const config: SingleConfig;
 const collected = collectingIo();
@@ -378,7 +401,11 @@ const exitCode = await runSingle(client, config, collected.io).match(
   (target) => concludeRun(collected.io, { kind: "single", mode: config.mode, target }),
   (problem) => failRun(collected.io, problem),
 );
-console.log(exitCode, collected.outputs.result, collected.lines.map((entry) => entry.line));
+console.log(
+  exitCode,
+  collected.outputs.result,
+  collected.lines.map((entry) => entry.line),
+);
 ```
 
 ## CLI
@@ -390,11 +417,11 @@ The package's `bin` entries, `github-settings-as-code` and `gsac`, run the same 
 
 The package and the action share one version, the one in `.release-please-manifest.json` (release-please rewrites `package.json` from it), so a settings file that validates on the library validates on the action of the same version. An added name is a minor (a `feat` commit), and a rename or a removal is a major, listed in the [upgrading guide](../upgrading/README.md).
 
-| npm dist-tag | Publishes on | Version | Install |
-|---|---|---|---|
-| `next` | Every refresh of the release PR: release-please creates or refreshes it when a releasable commit (feat, fix, perf, revert, or a breaking marker) lands on `main` | The manifest's next patch, then `-main.<count>.<date>.g<sha7>`: `2.0.1-main.446.20260913.g95d081d` | `npm install @vivswan/github-settings-as-code@next` |
-| `latest` | Every release cut | The released version: `2.1.0`. Until the first stable release it names the `0.0.0` placeholder that reserved the package name: a packument always carries `latest` (npm/registry REGISTRY-API.md, "dist-tags: an object with at least one key, latest"), so the first publish took it, and the first stable release moves it; ask for `@next` until then | `npm install @vivswan/github-settings-as-code` |
-| none | Every green push to `main` (`build/<position>.<sha7>`, the ten newest kept) and every release tag | The commit itself | `npm install github:Vivswan/github-settings-as-code#<packaged sha>` |
+| npm dist-tag | Publishes on                                                                                                                                                     | Version                                                                                                                                                                                                                                                                                                                                                  | Install                                                             |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `next`       | Every refresh of the release PR: release-please creates or refreshes it when a releasable commit (feat, fix, perf, revert, or a breaking marker) lands on `main` | The manifest's next patch, then `-main.<count>.<date>.g<sha7>`: `2.0.1-main.446.20260913.g95d081d`                                                                                                                                                                                                                                                       | `npm install @vivswan/github-settings-as-code@next`                 |
+| `latest`     | Every release cut                                                                                                                                                | The released version: `2.1.0`. Until the first stable release it names the `0.0.0` placeholder that reserved the package name: a packument always carries `latest` (npm/registry REGISTRY-API.md, "dist-tags: an object with at least one key, latest"), so the first publish took it, and the first stable release moves it; ask for `@next` until then | `npm install @vivswan/github-settings-as-code`                      |
+| none         | Every green push to `main` (`build/<position>.<sha7>`, the ten newest kept) and every release tag                                                                | The commit itself                                                                                                                                                                                                                                                                                                                                        | `npm install github:Vivswan/github-settings-as-code#<packaged sha>` |
 
 The npm dist-tag `latest` is not the git tag `latest`: the git tag names the packaged commit of the newest `main` commit (every green push moves it forward, never back), the dist-tag names the newest release on the registry.
 

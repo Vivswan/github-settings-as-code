@@ -20,4 +20,4 @@ expect:
   zero_requests: true
   stdout_contains:
     - 'layer "'
-    - "settings.yml\": labels[0] carries _remove: true, but under _layering: replace the higher list already wins, so there is nothing to remove. Remove the entry, or fix its key"
+    - 'settings.yml": labels[0] carries _remove: true, but under _layering: replace the higher list already wins, so there is nothing to remove. Remove the entry, or fix its key'

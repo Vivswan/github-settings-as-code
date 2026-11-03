@@ -25,6 +25,6 @@ expect:
     - "DELETE /orgs/e2e-owner/teams/"
     - "PUT /orgs/e2e-owner/teams/"
   stdout_contains:
-    - "team \"legacy\" has access but is not declared in the settings file; kept under \"_undeclared: keep\""
+    - 'team "legacy" has access but is not declared in the settings file; kept under "_undeclared: keep"'
     - 'or set "_undeclared: delete" to have apply'
   fixpoint: converges

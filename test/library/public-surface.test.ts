@@ -114,6 +114,8 @@ export function documentedNames(markdown: string): string[] {
 describe("the public entry", () => {
   const page = readFileSync(join(ROOT, PAGE), "utf8");
   const entry = readFileSync(join(ROOT, ENTRY), "utf8");
+  // The committed `Io` row, biome's padding included: the anchor the row-shaped variants below are spliced before.
+  const ioRow = page.match(/^\| `Io` +\| type +\|[^\n]*$/m)?.[0] ?? "";
 
   test("exports exactly the names the library page's API tables document", () => {
     const exported = exportedNames(ENTRY, entry);
@@ -128,7 +130,8 @@ describe("the public entry", () => {
   ])(
     "a Name table body row whose first cell is not one code span (%s) is refused, not skipped (negative control)",
     (row, message) => {
-      const bareRow = page.replace("| `Io` | type |", `${row}\n| \`Io\` | type |`);
+      expect(ioRow).not.toBe("");
+      const bareRow = page.replace(ioRow, `${row}\n${ioRow}`);
       expect(bareRow).not.toBe(page);
       expect(() => documentedNames(bareRow)).toThrow(message);
     },
@@ -165,16 +168,8 @@ describe("the public entry", () => {
 
   // Every table form GFM renders is read, so a row cannot escape the pin by its spelling.
   test.each([
-    [
-      "a row with leading whitespace",
-      "| `Io` | type |",
-      "  | `notExported` | function | Extra |\n| `Io` | type |",
-    ],
-    [
-      "a row without a leading pipe",
-      "| `Io` | type |",
-      "`notExported` | function | Extra |\n| `Io` | type |",
-    ],
+    ["a row with leading whitespace", ioRow, `  | \`notExported\` | function | Extra |\n${ioRow}`],
+    ["a row without a leading pipe", ioRow, `\`notExported\` | function | Extra |\n${ioRow}`],
     [
       "a table with a compact header",
       "### Io\n",

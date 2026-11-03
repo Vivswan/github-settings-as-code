@@ -47,11 +47,11 @@ Not every 403 is a missing grant. Rate limits can arrive as 403, and the action 
 
 Permission failures are the only errors the run can be told to tolerate; everything else always fails with the API message verbatim (see [Semantics](semantics.md)). Two inputs set the policy:
 
-| Input | A denied section is | The run |
-| --- | --- | --- |
-| `on-missing-permission: fail` (the default) | failed | fails |
-| `on-missing-permission: warn` | skipped with a warning annotation | continues; when nothing else drifts or fails the result is `partial` and the run stays green |
-| `required-sections` naming the section, even under `warn` | failed | fails regardless |
+| Input                                                     | A denied section is               | The run                                                                                      |
+| --------------------------------------------------------- | --------------------------------- | -------------------------------------------------------------------------------------------- |
+| `on-missing-permission: fail` (the default)               | failed                            | fails                                                                                        |
+| `on-missing-permission: warn`                             | skipped with a warning annotation | continues; when nothing else drifts or fails the result is `partial` and the run stays green |
+| `required-sections` naming the section, even under `warn` | failed                            | fails regardless                                                                             |
 
 Under `fail`, an apply run stops before its first write when a read is denied: the [preflight barrier](semantics.md#the-preflight-barrier) probes every active section (each declared section the `sections` input selects; all of them when that input is unset) read-only before anything is written.
 

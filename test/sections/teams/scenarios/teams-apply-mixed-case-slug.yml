@@ -27,5 +27,5 @@ expect:
     - "DELETE /orgs/e2e-owner/teams/core-team/repos/{repo}"
     - "DELETE /orgs/e2e-owner/teams/Core-Team/repos/{repo}"
   stdout_contains:
-    - "granted team \"Core-Team\" push"
+    - 'granted team "Core-Team" push'
   fixpoint: converges

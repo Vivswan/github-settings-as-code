@@ -135,20 +135,20 @@ Undeclared secrets are kept by default, since a deleted secret's value is unreco
 
 Unlike the variables sections, a secret entry accepts ONLY `name` and `value`: an unknown key is rejected upfront rather than passed through. That is not an inconsistency:
 
-| Entry | Where an extra key goes | Outcome |
-| --- | --- | --- |
-| a variables entry | the body goes to GitHub verbatim, so the key rides along | GitHub decides |
-| a secret entry | the PUT body is built from the sealed value alone, so the key has no destination | the key would "apply" successfully forever while doing nothing |
+| Entry             | Where an extra key goes                                                          | Outcome                                                        |
+| ----------------- | -------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| a variables entry | the body goes to GitHub verbatim, so the key rides along                         | GitHub decides                                                 |
+| a secret entry    | the PUT body is built from the sealed value alone, so the key has no destination | the key would "apply" successfully forever while doing nothing |
 
 ## Dependabot, Codespaces, and Copilot agents secrets
 
 Three sibling sections manage the other repository-level secret stores with the exact same shape and semantics. Each seals against its own public key and needs its own PAT permission:
 
-| Section | Store | PAT permission |
-| --- | --- | --- |
-| `dependabot_secrets` | private-registry credentials Dependabot uses when it resolves dependencies | "Dependabot secrets" |
-| `codespaces_secrets` | secrets exposed to development environments | "Codespaces secrets", and GitHub gates even the Codespaces secret reads at write access |
-| `agents_secrets` | the Copilot agents secret store | "Agent secrets" |
+| Section              | Store                                                                      | PAT permission                                                                          |
+| -------------------- | -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `dependabot_secrets` | private-registry credentials Dependabot uses when it resolves dependencies | "Dependabot secrets"                                                                    |
+| `codespaces_secrets` | secrets exposed to development environments                                | "Codespaces secrets", and GitHub gates even the Codespaces secret reads at write access |
+| `agents_secrets`     | the Copilot agents secret store                                            | "Agent secrets"                                                                         |
 
 ```yaml settings
 dependabot_secrets:

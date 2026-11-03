@@ -315,7 +315,8 @@ export function renderPolicyDefaultsTable(
  * cellFault() admits inside the prose. */
 function policyRow(cells: readonly string[], key: string): Result<PolicyRow, string> {
   const policy = /^(delete|keep)(?: \((.*)\))?$/s.exec(cells[1] ?? "");
-  const buys = /^`(delete|keep)`: (.*)$/s.exec(cells[2] ?? "");
+  // Nothing after the colon is a blank override, which proseFault() names below.
+  const buys = /^`(delete|keep)`:(?: (.*))?$/s.exec(cells[2] ?? "");
   if (policy === null) {
     return err("states no delete or keep default");
   }
@@ -704,50 +705,50 @@ export const FILES: GeneratedFiles = {
   },
   "docs/reference/undeclared-policy.md": {
     regions: [
-      GeneratedRegion.of<readonly string[]>({
+      GeneratedRegion.markdown<readonly string[]>({
         name: "policy-count-sentence",
         placement: { kind: "under-heading", heading: "# The undeclared policy" },
         data: () => countSentenceKeys(knobbedSections()),
-        render: block(countSentence),
+        render: countSentence,
         parse: parseCountSentence,
       }),
-      GeneratedRegion.of<readonly PolicyRow[]>({
+      GeneratedRegion.markdown<readonly PolicyRow[]>({
         name: "policy-defaults-table",
         placement: { kind: "under-heading", heading: "## Defaults per section" },
         data: () => policyRows(knobbedSections(), POLICY_ROW_PROSE),
-        render: block(renderPolicyRows),
+        render: renderPolicyRows,
         parse: tableBody(DEFAULTS_TABLE_HEADER, "keyed", policyRow),
       }),
     ],
   },
   "docs/reference/permissions.md": {
     regions: [
-      GeneratedRegion.of({
+      GeneratedRegion.markdown({
         name: "permissions-grant-sentence",
         placement: { kind: "under-heading", heading: "## What to grant" },
         data: () => grantLabels(SECTIONS),
-        render: block(grantSentence),
+        render: grantSentence,
         parse: parseGrantSentence,
       }),
-      GeneratedRegion.of<readonly GatedRead[]>({
+      GeneratedRegion.markdown<readonly GatedRead[]>({
         name: "permissions-gated-reads",
         placement: { kind: "under-heading", heading: "## How a denial surfaces" },
         data: () => gatedReads(SECTIONS),
-        render: block(gatedBullets),
+        render: gatedBullets,
         parse: (body) => blockLines(body).andThen((lines) => parseGatedBullets(lines, 1)),
       }),
     ],
   },
   "docs/operate/check-mode.md": {
     regions: [
-      GeneratedRegion.of<readonly GatedRead[]>({
+      GeneratedRegion.markdown<readonly GatedRead[]>({
         name: "check-mode-gated-reads",
         placement: {
           kind: "under-heading",
           heading: "## Checking settings changes on pull requests",
         },
         data: () => gatedReads(SECTIONS),
-        render: block(checkModeGatedReads),
+        render: checkModeGatedReads,
         parse: parseCheckModeGatedReads,
       }),
     ],

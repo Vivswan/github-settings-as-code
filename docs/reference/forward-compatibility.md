@@ -14,7 +14,7 @@ The published JSON Schema follows the same tenet. It is documentation, not a gat
 
 Two deliberate boundaries:
 
-- A brand-new top-level settings *category* needs a handler: a new API endpoint cannot be guessed, so unknown sections fail loudly rather than no-op.
+- A brand-new top-level settings _category_ needs a handler: a new API endpoint cannot be guessed, so unknown sections fail loudly rather than no-op.
 - The pinned `X-GitHub-Api-Version` only changes intentionally.
 
 ## The closed sections

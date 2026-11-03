@@ -28,5 +28,5 @@ expect:
     - "PUT /orgs/e2e-owner/teams/platform/repos/{repo}"
     - "DELETE /orgs/e2e-owner/teams/platform/repos/{repo}"
   stdout_contains:
-    - "REVOKED undeclared team \"legacy\""
+    - 'REVOKED undeclared team "legacy"'
   fixpoint: converges

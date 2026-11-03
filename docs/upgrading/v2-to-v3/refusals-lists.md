@@ -43,14 +43,14 @@ v3   branches[0].protection.required_status_checks.enforcement_level: ... is Git
      (exit 1, zero requests)
 ```
 
-| Declared | v2 | v3 |
-|---|---|---|
-| A GET-only key at any depth (`name`, `enabled`, `enforcement_level`, `url`, `*_url`) | A `{url, enabled}` wrapper 422ed at apply; the other keys applied, then drifted forever | Refused with the fix |
-| `required_status_checks` without `strict`, or without `contexts` or `checks` | 422 at apply | Refused |
-| `required_approving_review_count: 7` | 422 at apply | Refused: a whole number 0 to 6 |
-| A `checks` item with a key other than `context` and `app_id` | Sent as written | Refused naming the key |
-| A scalar where `required_status_checks` or `required_pull_request_reviews` goes | Refused on a wildcard entry, passed through to the PUT on a literal one | Refused: a mapping or `null` on every entry |
-| An actor object copied from the GET (`restrictions.users: [{login: octocat}]`) | Sent to the PUT, which 422ed | Refused: write the `login` or `slug` string, `octocat` |
+| Declared                                                                             | v2                                                                                      | v3                                                     |
+| ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| A GET-only key at any depth (`name`, `enabled`, `enforcement_level`, `url`, `*_url`) | A `{url, enabled}` wrapper 422ed at apply; the other keys applied, then drifted forever | Refused with the fix                                   |
+| `required_status_checks` without `strict`, or without `contexts` or `checks`         | 422 at apply                                                                            | Refused                                                |
+| `required_approving_review_count: 7`                                                 | 422 at apply                                                                            | Refused: a whole number 0 to 6                         |
+| A `checks` item with a key other than `context` and `app_id`                         | Sent as written                                                                         | Refused naming the key                                 |
+| A scalar where `required_status_checks` or `required_pull_request_reviews` goes      | Refused on a wildcard entry, passed through to the PUT on a literal one                 | Refused: a mapping or `null` on every entry            |
+| An actor object copied from the GET (`restrictions.users: [{login: octocat}]`)       | Sent to the PUT, which 422ed                                                            | Refused: write the `login` or `slug` string, `octocat` |
 
 For `@vivswan/github-settings-as-code` consumers, `required_status_checks` and `restrictions` under `SectionInput<"branches">` (and so `SettingsFile`) are typed shapes, once `unknown`; a check list without `strict`, or an actor object, stops compiling.
 
@@ -202,14 +202,14 @@ v3   -> result: clean
 
 GitHub answers `protection_rules: []` for an unprotected environment, and the flattened body now starts from the disabled values, so the declaration is satisfied by the absence of the rule. A snapshot writes the three disabled values out for an unprotected environment.
 
-| Declared | v2 | v3 |
-|---|---|---|
-| `deployment_branch_policy: {protected_branches: false, custom_branch_policies: false}` | 422 | Refused: GitHub spells "any branch may deploy" as `deployment_branch_policy: null`, so write `null` |
-| Both flags `true` | 422 | Refused: the flags are mutually exclusive |
-| `prevent_self_review: true` with no reviewers | Drifted forever (the flag rides the required-reviewers rule) | Refused: declare a reviewer, or write `false` |
-| `wait_timer: 2.5`, or outside 0 to 43200 | 422 | Refused: a whole number of minutes in GitHub's range |
-| More than 6 `reviewers` | 422 | Refused: GitHub's cap |
-| `deployment_branch_policies[].type: wildcard` | Deleted the live policy, then the create 422ed; every run retried | Refused: `branch` or `tag` |
+| Declared                                                                               | v2                                                                | v3                                                                                                  |
+| -------------------------------------------------------------------------------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `deployment_branch_policy: {protected_branches: false, custom_branch_policies: false}` | 422                                                               | Refused: GitHub spells "any branch may deploy" as `deployment_branch_policy: null`, so write `null` |
+| Both flags `true`                                                                      | 422                                                               | Refused: the flags are mutually exclusive                                                           |
+| `prevent_self_review: true` with no reviewers                                          | Drifted forever (the flag rides the required-reviewers rule)      | Refused: declare a reviewer, or write `false`                                                       |
+| `wait_timer: 2.5`, or outside 0 to 43200                                               | 422                                                               | Refused: a whole number of minutes in GitHub's range                                                |
+| More than 6 `reviewers`                                                                | 422                                                               | Refused: GitHub's cap                                                                               |
+| `deployment_branch_policies[].type: wildcard`                                          | Deleted the live policy, then the create 422ed; every run retried | Refused: `branch` or `tag`                                                                          |
 
 For `@vivswan/github-settings-as-code` consumers, a policy's `type` under `SectionInput<"environments">` (and so `SettingsFile`) is `"branch" | "tag"`, where the pre-release v3 builds typed `string`; a `string` there no longer compiles.
 

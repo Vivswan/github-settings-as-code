@@ -55,11 +55,11 @@ Two details in that file earn a sentence each:
 
 Capability boundaries decide what belongs in a shared baseline for a mixed fleet:
 
-| The setting | Example | Where it goes |
-|---|---|---|
-| Exists only on public repositories | Private vulnerability reporting | A job scoped with `visibility: public` |
-| Gated by plan, not visibility | Secret scanning on private repositories needs Advanced Security, which no discovery filter can see | A topic-marked capability cohort, the same mechanism as the rings |
-| Accepted everywhere, applied on public only | `selected_actions.patterns_allowed` | The baseline; private repositories rely on `github_owned_allowed` and `verified_allowed` alone |
+| The setting                                 | Example                                                                                            | Where it goes                                                                                  |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Exists only on public repositories          | Private vulnerability reporting                                                                    | A job scoped with `visibility: public`                                                         |
+| Gated by plan, not visibility               | Secret scanning on private repositories needs Advanced Security, which no discovery filter can see | A topic-marked capability cohort, the same mechanism as the rings                              |
+| Accepted everywhere, applied on public only | `selected_actions.patterns_allowed`                                                                | The baseline; private repositories rely on `github_owned_allowed` and `verified_allowed` alone |
 
 ## The layers
 

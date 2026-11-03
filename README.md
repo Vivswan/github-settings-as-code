@@ -49,12 +49,11 @@ Apply declarative repository settings from `.github/settings.yml`: a loud, state
 
 ## Versioning
 
-| Pin | Points at | Use it for |
-|---|---|---|
-| `@v2` <!-- x-release-please-major --> | The newest release in the major line, so fixes arrive without changing your pin | Production |
-| `@vX.Y.Z` or a commit SHA | One release, frozen by a ruleset | Byte-stable behavior |
-| `@latest` | The newest green `main` commit, packaged; breaking changes arrive here unannounced, ahead of any release | Trying unreleased fixes |
-
+| Pin                                   | Points at                                                                                                | Use it for              |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------- | ----------------------- |
+| <!-- x-release-please-major --> `@v2` | The newest release in the major line, so fixes arrive without changing your pin                          | Production              |
+| `@vX.Y.Z` or a commit SHA             | One release, frozen by a ruleset                                                                         | Byte-stable behavior    |
+| `@latest`                             | The newest green `main` commit, packaged; breaking changes arrive here unannounced, ahead of any release | Trying unreleased fixes |
 - Every pin points at a packaged commit: the child of one `main` commit, carrying its tree plus the built action. `main` is source-only and not runnable as an action. The tags up to v2.0.0 point at release commits on `main` from when `main` still committed the bundle.
 - v2 activates settings keys that were inert on v1: `actions.oidc_customization_sub`, `actions.fork_pr_contributor_approval`, `actions.fork_pr_workflows_private_repos`, and `branches[].protection.required_signatures`. Audit them before moving a `@v1` pin; a stale `required_signatures: false` would remove a hand-enabled requirement.
 - Only the latest release is supported; fixes are not backported (see [SECURITY.md](.github/SECURITY.md)). Each major has an [upgrade guide](docs/upgrading/README.md).
@@ -68,27 +67,27 @@ The same engine is the npm package `@vivswan/github-settings-as-code` (ESM, Node
 
 ## Docs
 
-| Goal | Read |
-|---|---|
-| Get one repository under management | [Getting started](docs/start/getting-started.md) |
-| Copy a settings.yml shape | [Examples](docs/start/examples.md) |
-| Look up what a section manages and deletes | [Sections](docs/reference/sections.md) |
-| Look up an input or output | [Inputs and outputs](docs/reference/inputs.md) |
-| Predict what an apply or a check will do | [Semantics](docs/reference/semantics.md) |
-| Scope the token | [Token permissions](docs/reference/permissions.md) |
+| Goal                                                       | Read                                                         |
+| ---------------------------------------------------------- | ------------------------------------------------------------ |
+| Get one repository under management                        | [Getting started](docs/start/getting-started.md)             |
+| Copy a settings.yml shape                                  | [Examples](docs/start/examples.md)                           |
+| Look up what a section manages and deletes                 | [Sections](docs/reference/sections.md)                       |
+| Look up an input or output                                 | [Inputs and outputs](docs/reference/inputs.md)               |
+| Predict what an apply or a check will do                   | [Semantics](docs/reference/semantics.md)                     |
+| Scope the token                                            | [Token permissions](docs/reference/permissions.md)           |
 | Decide what happens to resources the file does not declare | [The undeclared policy](docs/reference/undeclared-policy.md) |
-| Feed secret values from GitHub Secrets or a vault | [Secrets and vaults](docs/reference/secrets-and-vaults.md) |
-| Detect drift without changing anything | [Check mode](docs/operate/check-mode.md) |
-| Manage a fleet from one repository | [Multi-repo mode](docs/operate/multi-repo.md) |
-| Layer settings files and fold them with `mode: render` | [Layering settings files](docs/operate/layering.md) |
-| Keep private targets out of public logs | [Private repositories](docs/operate/private-repositories.md) |
-| Replace the Probot Settings app | [Migrating from Probot](docs/start/migrating-from-probot.md) |
-| Adapt a complete platform-team workflow | [Playbooks](docs/playbooks/README.md) |
-| Read a failing run | [Troubleshooting](docs/operate/troubleshooting.md) |
-| Move a pin to a new major | [Upgrading](docs/upgrading/README.md) |
-| See how the code is laid out | [Architecture](docs/reference/architecture.md) |
-| Use the engine from your own code | [Library](docs/reference/library.md) |
-| Run check, apply, or validate from a terminal | [Command line](docs/start/cli.md) |
+| Feed secret values from GitHub Secrets or a vault          | [Secrets and vaults](docs/reference/secrets-and-vaults.md)   |
+| Detect drift without changing anything                     | [Check mode](docs/operate/check-mode.md)                     |
+| Manage a fleet from one repository                         | [Multi-repo mode](docs/operate/multi-repo.md)                |
+| Layer settings files and fold them with `mode: render`     | [Layering settings files](docs/operate/layering.md)          |
+| Keep private targets out of public logs                    | [Private repositories](docs/operate/private-repositories.md) |
+| Replace the Probot Settings app                            | [Migrating from Probot](docs/start/migrating-from-probot.md) |
+| Adapt a complete platform-team workflow                    | [Playbooks](docs/playbooks/README.md)                        |
+| Read a failing run                                         | [Troubleshooting](docs/operate/troubleshooting.md)           |
+| Move a pin to a new major                                  | [Upgrading](docs/upgrading/README.md)                        |
+| See how the code is laid out                               | [Architecture](docs/reference/architecture.md)               |
+| Use the engine from your own code                          | [Library](docs/reference/library.md)                         |
+| Run check, apply, or validate from a terminal              | [Command line](docs/start/cli.md)                            |
 
 ## Contributing
 
