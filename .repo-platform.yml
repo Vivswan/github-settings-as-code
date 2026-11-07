@@ -10,4 +10,3 @@ project:
   name: GitHub Settings as Code
   slug: github-settings-as-code
   description: "GitHub Action applying declarative repository settings: rulesets, labels, branch protection, and more. A loud, stateless Probot Settings replacement."
-  copyright_holder: Vivswan Shah (https://github.com/Vivswan)
