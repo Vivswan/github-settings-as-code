@@ -49,6 +49,14 @@
     }
   },
   "overrides": [
+    // release-please writes this file on every release PR, with `*` bullets and its own blank lines; formatting it
+    // here fails that PR's format check on each release, so it stays as its generator writes it.
+    {
+      "includes": ["CHANGELOG.md"],
+      "formatter": {
+        "enabled": false
+      }
+    },
     {
       "includes": ["src/generated/upstream-gaps.ts"],
       "assist": {
