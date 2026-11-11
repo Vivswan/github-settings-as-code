@@ -24,6 +24,9 @@ const schema = readSettingsSchema();
 /** tsdown types its options loosely (a glob, a list, or a map); this config is the map form. */
 const build = tsdown as { entry: Record<string, string>; outDir: string };
 
+/** Room for the `npm pack` each manifestMessages call spawns: 1 to 3 s as a rule, and past bun's 5 s default on a slow runner. */
+const NPM_PACK_TIMEOUT = 30_000;
+
 /** The two fields the publish checks read, so a hand-made variant of `pkg` is a manifest too. */
 interface Manifest {
   readonly exports: Readonly<Record<string, string | { types: string; default: string }>>;
@@ -176,17 +179,25 @@ describe("package.json as the npm manifest", () => {
     }
   });
 
-  test("npm's pack list holds every file the manifest points at, and publint has nothing else to say", async () => {
-    // npm packs `files`, the manifest, README, LICENSE, and every bin, so a target outside them installs as a dangling path.
-    expect(await manifestMessages(pkg)).toEqual([]);
-  });
+  test(
+    "npm's pack list holds every file the manifest points at, and publint has nothing else to say",
+    async () => {
+      // npm packs `files`, the manifest, README, LICENSE, and every bin, so a target outside them installs as a dangling path.
+      expect(await manifestMessages(pkg)).toEqual([]);
+    },
+    NPM_PACK_TIMEOUT,
+  );
 
-  test("an export target outside `files` is reported as unpublished (negative control)", async () => {
-    const manifest = { ...pkg, exports: { ...pkg.exports, "./extra": "./dist/extra.js" } };
-    expect(await manifestMessages(manifest)).toEqual([
-      'pkg.exports["./extra"] is ./dist/extra.js but the file is not published. Is it specified in pkg.files?',
-    ]);
-  });
+  test(
+    "an export target outside `files` is reported as unpublished (negative control)",
+    async () => {
+      const manifest = { ...pkg, exports: { ...pkg.exports, "./extra": "./dist/extra.js" } };
+      expect(await manifestMessages(manifest)).toEqual([
+        'pkg.exports["./extra"] is ./dist/extra.js but the file is not published. Is it specified in pkg.files?',
+      ]);
+    },
+    NPM_PACK_TIMEOUT,
+  );
 
   test("the runtime dependencies are exactly the packages the library entries import", () => {
     // tsdown externalizes `dependencies`, so the consumer's package manager installs them beside lib/pkg/; the action bundle inlines everything,
