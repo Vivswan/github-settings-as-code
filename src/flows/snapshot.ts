@@ -48,7 +48,7 @@ import { snapshotTakenLine, writeSnapshotDirSummary, writeSummary } from "./summ
 
 // x-release-please-start-major
 export const SNAPSHOT_SCHEMA_URL =
-  "https://raw.githubusercontent.com/Vivswan/github-settings-as-code/v2/lib/settings.schema.json";
+  "https://raw.githubusercontent.com/Vivswan/github-settings-as-code/v3/lib/settings.schema.json";
 
 // x-release-please-end
 
