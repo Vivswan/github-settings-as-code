@@ -27,7 +27,6 @@ extend-ignore-re = [
 PATCHed = "PATCHed"
 DELETEd = "DELETEd"
 DELETEs = "DELETEs"
-DELETEing = "DELETEing"
 # the class age-encryption exports, and the variable that holds one.
 Encrypter = "Encrypter"
 encrypter = "encrypter"
@@ -39,8 +38,7 @@ R_kgDOnotOurs = "R_kgDOnotOurs"
 # valid spelling (the dictionary prefers "unparsable"); the harness's
 # UNPARSEABLE_YAML fixture pool and comments in src and test use it.
 unparseable = "unparseable"
-# "look-alikes": the near-miss fixtures in test/scripts/generated-regions.test.ts
-# and test/docs/guides.test.ts.
+# "look-alikes": the near-miss fixtures in test/scripts/generated-regions.test.ts.
 alikes = "alikes"
 
 # Deliberate misspellings that are negative test input, allowed only where the

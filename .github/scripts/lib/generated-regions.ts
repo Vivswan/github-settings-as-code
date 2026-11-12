@@ -40,6 +40,9 @@ const REGION_NAME_CLASS = "[a-z0-9-]+";
 // A whole name, as regionBounds() admits it.
 const REGION_NAME = new RegExp(`^${REGION_NAME_CLASS}$`);
 
+// The name inside a marker's own text.
+const MARKED_NAME = new RegExp(` GENERATED: (${REGION_NAME_CLASS})`);
+
 /** A docs path for biome's markdown formatter: it picks the language and the config's overrides from the path, which need not exist. */
 const MARKDOWN_PATH = "docs/generated-region.md";
 
@@ -108,9 +111,11 @@ function markerSpans(
   });
 }
 
-/** True when `text` carries a BEGIN marker of any region in `syntax`: the scan the generated-output table is pinned against. */
-export function hasGeneratedRegion(text: string, syntax: MarkerSyntax): boolean {
-  return markerSpans(text, "BEGIN", REGION_NAME_CLASS, syntax).length > 0;
+/** The region name of every BEGIN marker `text` carries in `syntax`, in file order: the scan the generated-output table and the build:check runner read. */
+export function regionNames(text: string, syntax: MarkerSyntax): string[] {
+  return markerSpans(text, "BEGIN", REGION_NAME_CLASS, syntax).flatMap(
+    ([start, end]) => MARKED_NAME.exec(text.slice(start, end))?.[1] ?? [],
+  );
 }
 
 /** Region `name`'s marker spans: exactly one BEGIN and one END, in that order, else a throw. */
