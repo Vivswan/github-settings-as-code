@@ -353,6 +353,15 @@ describe("init: an existing settings file", () => {
     }));
 
   const NO_MILESTONES = { "GET /repos/o/r/milestones?state=all&per_page=100&page=1": { data: [] } };
+  const FORBIDDEN = {
+    error: { status: 403, message: "Resource not accessible by personal access token", body: "" },
+  };
+  /** No limit is set, and the two reads GitHub gates at write are denied. */
+  const DENIED_LIMIT_KEYS = {
+    "GET /repos/o/r/interaction-limits": { data: {} },
+    "GET /repos/o/r/interaction-limits/pulls/creation-cap": FORBIDDEN,
+    "GET /repos/o/r/interaction-limits/pulls/bypass-list": FORBIDDEN,
+  };
   test.each<[string, string[], Record<string, unknown>, string, number | undefined]>([
     [
       "no selected section can be read back",
@@ -373,7 +382,15 @@ describe("init: an existing settings file", () => {
       "nothing exists for the selected sections",
       ["--sections", "milestones"],
       NO_MILESTONES,
-      "nothing exists on the repository: milestones",
+      "nothing to declare: milestones",
+      undefined,
+    ],
+    // The label is one for both: init cannot tell this section from the one above, so it may not say "nothing exists".
+    [
+      "the selected section's keys were denied under warn, so nothing of it can be declared",
+      ["--sections", "interaction_limits", "--on-missing-permission", "warn"],
+      DENIED_LIMIT_KEYS,
+      "nothing to declare: interaction_limits",
       undefined,
     ],
   ])(

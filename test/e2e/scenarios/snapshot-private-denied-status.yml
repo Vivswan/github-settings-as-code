@@ -1,0 +1,47 @@
+# A private snapshot target whose labels read is denied. A check run over the
+# same target prints the denial's HTTP status in its one public line and its
+# summary cell. Snapshot mode closes through the same seal, so it prints the
+# same two values and nothing else of the denial: the slug, the request path,
+# GitHub's message, and the grant advice stay sealed.
+name: snapshot-private-denied-status
+description: >-
+  The dir form under the default redaction and the default fail policy: a private target's denied
+  section shows its key and the denial's HTTP status in the public line and the summary cell, as a
+  check run does, and nothing else about the denial.
+settings: {}
+denial_style: 403
+repos:
+  e2e-owner/svc-vault:
+    live_state:
+      repo:
+        private: true
+        visibility: private
+      labels:
+        - name: hush-project
+          color: "000000"
+          description: Not for the public log
+    permissions:
+      issues: none
+inputs:
+  mode: snapshot
+  snapshot_dir: snapshots
+  sections: labels
+expect:
+  exit_code: 1
+  result: failed
+  repos_result:
+    "private repository #1": failed
+  stdout_contains:
+    - "::error::private repository #1: failed - labels (403). details hidden: the repository is private or internal."
+  summary_contains:
+    - "| private repository #1 | remote | :x: failed | - |"
+    - "| labels | :x: failed | hidden (private repository), HTTP 403 |"
+  leaks_nowhere:
+    - svc-vault
+    - hush-project
+    - Not for the public log
+    - /labels
+    - Resource not accessible
+    - the token was denied
+    - To fix, grant
+  mutations: []

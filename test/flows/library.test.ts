@@ -273,6 +273,7 @@ describe("snapshotRepository and snapshotRepositories", () => {
           key: "labels",
           status: "failed",
           detail: [expect.stringMatching(/^the token was denied GET \/repos\/o\/r\/labels/)],
+          httpStatus: 404,
         },
       ],
       takenAt: expect.stringMatching(ISO_INSTANT),

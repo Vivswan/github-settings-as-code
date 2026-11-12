@@ -35,6 +35,7 @@ import {
 import { collectingIo, type Io } from "../../src/io.js";
 import { isPrivate, markPrivate } from "../../src/private.js";
 import type { SectionKey } from "../../src/schema.js";
+import { captureIo } from "../io/capture.js";
 import { MockApi } from "../mock-api.js";
 import { withTempDir } from "../temp-dir.js";
 
@@ -195,13 +196,60 @@ describe("runSnapshot, file form", () => {
       expect(existsSync(cfg.snapshotFile)).toBe(false);
       expect(collected.lines).toEqual([
         TAKEN,
-        { level: "error", line: `private repository #1: failed - labels. ${REDACTED_NOTE}` },
+        { level: "error", line: `private repository #1: failed - labels (404). ${REDACTED_NOTE}` },
         { line: "result: failed" },
       ]);
       expect(collected.summary[0]).toContain(
-        "| labels | :x: failed | hidden (private repository) |",
+        "| labels | :x: failed | hidden (private repository), HTTP 404 |",
       );
       expect(collected.summary[0]).not.toContain("/repos/o/r/labels");
+    }));
+
+  test("a private target's skipped section shows the denial's status and nothing else of it: no slug, no path, none of GitHub's words", () =>
+    withTempDir("snapshot-flow-", async (dir) => {
+      // Recorded raw: collectingIo prints a registered slug as ***, which would hide the very leak this sweeps for.
+      const surfaces = async (privateRepos: FileConfig["privateRepos"]) => {
+        const api = new MockApi({
+          "GET /repos/o/r": { data: { private: true, visibility: "private" } },
+          "GET /repos/o/r/labels?per_page=100&page=1": {
+            error: { status: 403, message: "Resource not accessible by integration", body: "" },
+          },
+        });
+        const cfg = fileCfg(dir, {
+          privateRepos,
+          selfSlug: "admin/fleet",
+          onMissingPermission: "warn",
+        });
+        const raw = captureIo();
+        const summaries: string[] = [];
+        const io: Io = { ...raw.io, summary: (markdown) => summaries.push(markdown) };
+        expect(await run(api, cfg, io)).toBe(0);
+        const lines = [...raw.annotations, ...raw.logs];
+        const text = [...lines, ...summaries, ...Object.values(raw.outputs)].join("\n");
+        return { lines, text };
+      };
+      const hidden = await surfaces("redact");
+      expect(hidden.lines).toEqual([
+        expect.stringMatching(/^notice: snapshot taken /),
+        `warning: private repository #1: partial - labels (403). ${REDACTED_NOTE}`,
+        "result: partial",
+      ]);
+      expect(hidden.text).toContain(
+        "| labels | :fast_forward: skipped | hidden (private repository), HTTP 403 |",
+      );
+      // The control: the same run in the clear prints every one of these, so the sweep below can fail.
+      const shown = await surfaces("show");
+      const sealed = [
+        "o/r",
+        "/labels",
+        "Resource not accessible",
+        "the token was denied",
+        "To fix, grant",
+      ];
+      for (const needle of sealed) {
+        expect(shown.text, `"${needle}" is not live in the clear`).toContain(needle);
+        expect(hidden.text, `"${needle}" reached a public surface`).not.toContain(needle);
+      }
     }));
 
   test("a denied section is skipped under warn: partial, the file omits it, the header and the outputs say so", () =>
@@ -1104,6 +1152,7 @@ describe("runSnapshot, dir form", () => {
               key: "labels",
               status: "failed",
               detail: [expect.stringMatching(/^the token was denied GET \/repos\/o\/p\/labels/)],
+              httpStatus: 404,
             },
           ],
           note: "the snapshot failed, so no file was written",
@@ -1123,13 +1172,13 @@ describe("runSnapshot, dir form", () => {
       expect(collected.lines).toEqual([
         TAKEN,
         { line: `o/a: snapshot written to ${join(cfg.snapshotDir, "o", "a.yml")}` },
-        { level: "error", line: `private repository #1: failed - labels. ${REDACTED_NOTE}` },
+        { level: "error", line: `private repository #1: failed - labels (404). ${REDACTED_NOTE}` },
         { line: "result: failed" },
       ]);
       // Nothing was written, so the File column says so in the clear: an absent file is not a value the seal hides.
       expect(collected.summary[0]).toContain("| private repository #1 | remote | :x: failed | - |");
       expect(collected.summary[0]).toContain(
-        "| labels | :x: failed | hidden (private repository) |",
+        "| labels | :x: failed | hidden (private repository), HTTP 404 |",
       );
       const publicText = [
         ...collected.lines.map((entry) => entry.line),
