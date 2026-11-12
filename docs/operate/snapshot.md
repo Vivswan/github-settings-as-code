@@ -153,6 +153,13 @@ A snapshot is written so that applying it changes nothing and checking it reads 
 
 A section that exists but holds nothing live (no milestones, no Pages site) is omitted with a header line, never written as an empty list: an empty list under `_undeclared: delete` would delete on apply.
 
+The closing header line of an omitted section says which kind of omission it is:
+
+| The section                                                                                                                                                                       | Its closing header line                                                                |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Read everything and found nothing                                                                                                                                                 | `nothing exists on the repository, so the section is omitted`                          |
+| Declares nothing, under header lines of its own: a key the token was denied under `warn`, an interaction limit set at the organization level, an owner that is a personal account | `nothing was read back to declare, so the section is omitted; its notes above say why` |
+
 ## Many repositories
 
 `snapshot-dir` writes one file per target in the layout `repos-dir` reads, `<snapshot-dir>/<owner>/<name>.yml`. The targets come from `repos` and `repos-dir` exactly as in a [multi-repo](multi-repo.md) apply, `repos: "*"` discovery and its filters included; `defaults-file` has no meaning here and is rejected.

@@ -43,11 +43,14 @@ export interface SnapshotRunOptions {
 /**
  * One section's end state: read back ("snapshot", its notes in detail), denied under the warn
  * policy ("skipped"), without a snapshot handler ("unsupported", the reason in detail), or failed.
+ * `httpStatus` is the safe code of the denial behind a skipped or failed section, as SectionOutcome carries it for
+ * the redacted view; a failure of any other kind carries none.
  */
 export interface SectionSnapshotOutcome {
   key: SectionKey;
   status: "snapshot" | "skipped" | "unsupported" | "failed";
   detail: string[];
+  httpStatus?: number;
 }
 
 /**
@@ -74,8 +77,12 @@ type SectionRead =
   | { readonly outcome: SectionSnapshotOutcome; readonly declared: false }
   | { readonly outcome: SectionSnapshotOutcome; readonly declared: true; readonly value: unknown };
 
-/** What a section without live state says for itself in the outcome and the file header. */
-const NOTHING_TO_DECLARE = "nothing exists on the repository, so the section is omitted";
+/** The closing line, in the outcome and the file header, of a section that returned no value and no note: it read everything it reads and found nothing. */
+const NOTHING_EXISTS = "nothing exists on the repository, so the section is omitted";
+
+/** The closing line of a section that returned no value beside notes of its own (a denied read, a value left out): the notes are the reason, so the line claims nothing about the repository. */
+const NOTHING_READ_BACK =
+  "nothing was read back to declare, so the section is omitted; its notes above say why";
 
 /**
  * The client as one section's snapshot sees it, reporting whether a GET on `read`'s route
@@ -123,10 +130,10 @@ function failedSnapshot(
   if (failure.kind === "permission-denied") {
     if (policy === "warn") {
       io.annotate("warning", `${key}: skipped - ${failure.detail}`);
-      return { key, status: "skipped", detail: [failure.detail] };
+      return { key, status: "skipped", detail: [failure.detail], httpStatus: failure.status };
     }
     io.annotate("error", `${key}: not snapshotted - ${failure.detail}`);
-    return { key, status: "failed", detail: [failure.detail] };
+    return { key, status: "failed", detail: [failure.detail], httpStatus: failure.status };
   }
 
   const prefixed = underKey(key, failure.message);
@@ -135,7 +142,7 @@ function failedSnapshot(
 }
 
 /**
- * A section with nothing live. Chosen at the engine level so every absent-posture section behaves alike: the 404
+ * A section that returned no value. Chosen at the engine level so every absent-posture section behaves alike: the 404
  * keeps its "nothing exists" reading, and the note names the denial it could also be. Keyed on an observed 404, so
  * an empty 200 listing earns no note.
  */
@@ -153,7 +160,7 @@ function absentSnapshot(
     io.annotate("notice", concealed);
     detail.push(concealed);
   }
-  detail.push(NOTHING_TO_DECLARE);
+  detail.push(notes.length === 0 ? NOTHING_EXISTS : NOTHING_READ_BACK);
   return { key: section.key, status: "snapshot", detail };
 }
 
