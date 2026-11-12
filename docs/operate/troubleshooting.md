@@ -90,7 +90,7 @@ Every API call the action makes is traced as a debug line: method, path, request
 What the trace never shows:
 
 - **The token.** The authorization header is not part of the trace line, and a token stored as a repository secret is masked by the runner wherever it appears in output.
-- **A redacted private target's detail.** For redacted private targets in multi-repo mode, the traced path collapses to `<redacted>` and the payload is dropped entirely.
+- **A redacted private target's detail.** For a redacted private target, whether a single-repository, multi-repo, or snapshot run reaches it, the traced path collapses to `<redacted>` and the payload is dropped entirely.
 
 Failures do not need debug mode; every error already carries the API's message and the fix, so reach for the trace when you need to see the requests that succeeded.
 

@@ -280,7 +280,7 @@ async function snapshotFile(
     channel,
     () =>
       snapshotTarget({
-        api,
+        api: channel.client(api),
         repo: cfg.repo,
         cfg,
         path: cfg.snapshotFile,
@@ -333,7 +333,7 @@ async function snapshotDir(
             channel,
             () =>
               snapshotTarget({
-                api,
+                api: channel.client(api),
                 repo: target.repo,
                 cfg,
                 path: located.path,
