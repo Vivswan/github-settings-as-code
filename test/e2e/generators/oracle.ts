@@ -160,13 +160,7 @@ export interface SectionPrediction {
 
   /** The outcomes the section is allowed to report; the runner must see one. */
   allowed: Set<Outcome>;
-
-  /** False folds the section into writeDeniedSections, whose writes the fuzz asserts never mutate state. */
-  mayWrite: boolean;
 }
-
-/** One section's verdict at one grade: what it may report and whether a write may land. */
-type GradeArm = Pick<SectionPrediction, "allowed" | "mayWrite">;
 
 export interface RunPrediction {
   /** One prediction per declared section, in declaration order. */
@@ -177,9 +171,6 @@ export interface RunPrediction {
 
   /** True in check mode, where any write is a violation. */
   noWritesInCheck: boolean;
-
-  /** Sections whose denied writes must never mutate state. */
-  writeDeniedSections: SectionKey[];
 
   /** The fixpoint proofs in fuzz.ts run only under this. */
   fullyGranted: boolean;
@@ -351,28 +342,25 @@ function deniedOutcome(meta: ScenarioMeta, required: boolean): Set<Outcome> {
 }
 
 /** At a write grant only the witness decides: a matching one mirrors every field the handler diffs, so no write is ever attempted; a drift witness makes a check-mode clean a false-negative drift detector. */
-function predictAtWriteGrant(check: boolean, witness: LiveWitnessKind | undefined): GradeArm {
+function predictAtWriteGrant(check: boolean, witness: LiveWitnessKind | undefined): Set<Outcome> {
   if (witness === "matching") {
-    return { allowed: new Set([check ? "clean" : "applied"]), mayWrite: false };
+    return new Set([check ? "clean" : "applied"]);
   }
   if (witness !== undefined) {
-    return { allowed: new Set([check ? "drift" : "applied"]), mayWrite: !check };
+    return new Set([check ? "drift" : "applied"]);
   }
-  return {
-    allowed: check ? new Set(["clean", "drift"]) : new Set(["applied"]),
-    mayWrite: !check,
-  };
+  return check ? new Set(["clean", "drift"]) : new Set(["applied"]);
 }
 
 /** The reads go through in check mode, so the witness alone narrows {clean, drift}. */
-function predictCheckReadThrough(witness: LiveWitnessKind | undefined): GradeArm {
+function predictCheckReadThrough(witness: LiveWitnessKind | undefined): Set<Outcome> {
   if (witness === "matching") {
-    return { allowed: new Set(["clean"]), mayWrite: false };
+    return new Set(["clean"]);
   }
   if (witness !== undefined) {
-    return { allowed: new Set(["drift"]), mayWrite: false };
+    return new Set(["drift"]);
   }
-  return { allowed: new Set(["clean", "drift"]), mayWrite: false };
+  return new Set(["clean", "drift"]);
 }
 
 /**
@@ -380,27 +368,24 @@ function predictCheckReadThrough(witness: LiveWitnessKind | undefined): GradeArm
  * so the missing grant is never exercised; a drift witness forces one, so the section can never be a no-op
  * "applied" (the mid-apply permission-denied fold in orchestrate.ts). Without a witness, a comparing section may
  * land applied when the live state already matched, while a no-read section's write is unconditional, so its
- * denial is certain and "applied" unreachable; an absent-posture section may attempt one write before the denial.
+ * denial is certain and "applied" unreachable.
  */
 function predictApplyReadThrough(
   key: SectionKey,
   meta: ScenarioMeta,
   witness: LiveWitnessKind | undefined,
-  posture: DenialPosture,
-): GradeArm {
+): Set<Outcome> {
   const required = meta.requiredSections.includes(key);
   if (witness === "matching") {
-    return { allowed: new Set(["applied"]), mayWrite: false };
+    return new Set(["applied"]);
   }
   if (witness !== undefined) {
-    return { allowed: deniedOutcome(meta, required), mayWrite: false };
+    return deniedOutcome(meta, required);
   }
   const canSilentlyApply = !NO_READ_SECTIONS.has(key);
-  const allowed: Set<Outcome> =
-    required || meta.policy === "fail"
-      ? new Set(canSilentlyApply ? ["applied", "failed"] : ["failed"])
-      : new Set(canSilentlyApply ? ["applied", "skipped"] : ["skipped"]);
-  return { allowed, mayWrite: posture === "absent" };
+  return required || meta.policy === "fail"
+    ? new Set(canSilentlyApply ? ["applied", "failed"] : ["failed"])
+    : new Set(canSilentlyApply ? ["applied", "skipped"] : ["skipped"]);
 }
 
 /**
@@ -412,11 +397,11 @@ function predictAtGrade(
   meta: ScenarioMeta,
   grade: MaskGrade,
   posture: DenialPosture,
-): GradeArm {
+): Set<Outcome> {
   const check = meta.mode === "check";
   const witness = meta.liveKinds?.[key];
   if (check && NO_READ_SECTIONS.has(key)) {
-    return { allowed: new Set(["clean"]), mayWrite: false };
+    return new Set(["clean"]);
   }
 
   if (grade === "write") {
@@ -430,7 +415,7 @@ function predictAtGrade(
     !NO_READ_SECTIONS.has(key) &&
     (meta.denialStyle === 403 || posture === "denied");
   if (readsAsDenied) {
-    return { allowed: deniedOutcome(meta, meta.requiredSections.includes(key)), mayWrite: false };
+    return deniedOutcome(meta, meta.requiredSections.includes(key));
   }
 
   // From here the reads go through and only an apply-mode write can be denied.
@@ -439,7 +424,7 @@ function predictAtGrade(
   if (check) {
     return predictCheckReadThrough(witness);
   }
-  return predictApplyReadThrough(key, meta, witness, posture);
+  return predictApplyReadThrough(key, meta, witness);
 }
 
 /**
@@ -462,7 +447,6 @@ export function predictSectionAt(
       grades: [],
       posture: DENIAL_POSTURE[key],
       allowed: new Set(["excluded"]),
-      mayWrite: false,
     };
   }
   // The org probe is declared permission "none", so no mask key gates it and its 404 is met before
@@ -473,7 +457,6 @@ export function predictSectionAt(
       grades: ["write"],
       posture: DENIAL_POSTURE[key],
       allowed: new Set([meta.mode === "check" ? "clean" : "applied"]),
-      mayWrite: false,
     };
   }
   const grant = sectionGrade(key, meta.mask);
@@ -495,8 +478,7 @@ export function predictSectionAt(
     key,
     grades: orgDenied ? ["none"] : grades,
     posture,
-    allowed: new Set(arms.flatMap((arm) => [...arm.allowed])),
-    mayWrite: arms.some((arm) => arm.mayWrite),
+    allowed: new Set(arms.flatMap((arm) => [...arm])),
   };
 }
 
@@ -593,7 +575,6 @@ export function predictOutcomes(meta: ScenarioMeta): RunPrediction {
     sections,
     allowedExitCodes: exitCodes,
     noWritesInCheck: check,
-    writeDeniedSections: sections.filter((s) => !writeGranted(s) && !s.mayWrite).map((s) => s.key),
     fullyGranted: sections.every(writeGranted),
     preflightAborts,
   };

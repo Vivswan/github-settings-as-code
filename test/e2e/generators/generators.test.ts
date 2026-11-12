@@ -663,6 +663,34 @@ describe("genInvalidSettings", () => {
     }
   });
 
+  test("no token is satisfied by a rejection that names only other keys", () => {
+    // A token that is a fragment of the error's own boilerplate (the known-sections list, the directive advice)
+    // would be found whichever key the run refused, so its case could never fail.
+    const decoy = validateSettingsDoc(
+      { zzz_decoy: [], _zzz: "x" },
+      "settings.yml",
+      SectionSelection.ALL,
+      silentIo(),
+    );
+    const boilerplate = describeProblem(decoy._unsafeUnwrapErr());
+    // The control: the decoy prints both boilerplates, so the bare fragments a token must not be are found in it.
+    expect(["label", "_layerin"].filter((bare) => boilerplate.includes(bare))).toEqual([
+      "label",
+      "_layerin",
+    ]);
+
+    const satisfied = new Set<string>();
+    for (const { name, build } of INVALID_SETTINGS_CASES) {
+      for (let i = 0; i < 200; i++) {
+        const { offendingToken } = build(new Rng(i * 13 + 1));
+        if (boilerplate.includes(offendingToken)) {
+          satisfied.add(`${name}: ${offendingToken}`);
+        }
+      }
+    }
+    expect([...satisfied]).toEqual([]);
+  });
+
   test("draws every catalog case over seeds", () => {
     const drawn = new Set<string>();
     for (let i = 0; i < 400; i++) {

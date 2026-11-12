@@ -1184,7 +1184,6 @@ export function genMergeScenario(
   const top = layers[count - 1] as MergeLayer;
   const scenario: Scenario = {
     name: `fuzz-merge-${rng.seed}`,
-    tiers: ["mock"],
     settings: top.doc,
     settings_layers: layers.slice(0, -1).map((layer) => layer.doc),
     inputs: {
