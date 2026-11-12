@@ -491,6 +491,36 @@ function toggleTolerated(
     : `repository.${toggle.key}: ${meaning}, so nothing changed (${status})`;
 }
 
+/** The private flag each visibility means, by the PATCH's own description of the two fields; one outside the table is GitHub's to judge. A Map, so a visibility naming a prototype property cannot match. */
+const PRIVATE_BY_VISIBILITY: ReadonlyMap<unknown, boolean> = new Map([
+  ["public", false],
+  ["private", true],
+  ["internal", true],
+]);
+
+/** The notes the declaration alone draws, each naming the fix: a private flag that contradicts the visibility beside it, and a null security_and_analysis. */
+function declarationNotes(declared: RepositoryConfig): string[] {
+  const notes: string[] = [];
+
+  // The PATCH's descriptor says neither which of the two fields wins nor what a null does, hence each note's "if".
+  const meant = PRIVATE_BY_VISIBILITY.get(declared.visibility);
+  if (declared.private !== undefined && meant !== undefined && declared.private !== meant) {
+    notes.push(
+      `repository: private: ${declared.private} contradicts visibility: ${JSON.stringify(declared.visibility)}, which means private: ${meant}, ` +
+        "so if GitHub keeps only one of them check reports the other as drift on every run. Remove private or visibility from the settings file",
+    );
+  }
+
+  if (declared.security_and_analysis === null) {
+    notes.push(
+      "repository.security_and_analysis: null names no feature to turn off, so check reports drift while the live repository has the mapping, " +
+        'and if GitHub ignores the null no apply clears it. Remove the key, or write each feature\'s status ("enabled" or "disabled") instead',
+    );
+  }
+
+  return notes;
+}
+
 /** The PATCH op when the declared fields differ from live; a declared key GitHub never echoes is noted first. */
 function planPatch(
   plan: RepositoryPlan,
@@ -802,7 +832,7 @@ export const repositorySection = {
   async plan(ctx, declared) {
     const section = this;
     return safeTry(async function* () {
-      const plan: RepositoryPlan = { ops: [], notes: [], drift: [] };
+      const plan: RepositoryPlan = { ops: [], notes: declarationNotes(declared), drift: [] };
       const desired: Record<string, unknown> = declared;
       const patch: Record<string, PlainData | undefined> = Object.fromEntries(
         Object.entries(declared).filter(([key]) => !SPECIAL_KEYS.has(key)),

@@ -84,6 +84,7 @@ The side-by-side comparison with the Probot Settings app lives in the migration 
 - Covers name, description, homepage, visibility/private, has_issues, has_wiki, has_projects, has_discussions, the merge-strategy toggles, squash/merge commit title and message, delete_branch_on_merge, allow_update_branch, allow_auto_merge, web_commit_signoff_required, is_template, archived, and default_branch.
 - PATCH /repos/{owner}/{repo} passthrough: documented fields are typed (toggles true or false; description and homepage also null, the API's clear); a field GitHub adds later works day one.
 - GET-only fields, a commit message without its title, and illegal squash pairs are refused at parse: each would drift or 422 every run.
+- private beside a visibility that contradicts it (true with public; false with private or internal) still parses; check adds a note naming the pair and the fix, to remove one of the two keys.
 - Check diffs the declared keys against GET /repos; snapshot reads back the PATCH fields, topics, toggles, and GraphQL keys (docs/operate/snapshot.md).
 
 **security_and_analysis** (`repository`)
@@ -92,6 +93,7 @@ The side-by-side comparison with the Probot Settings app lives in the migration 
 - Nested in the same PATCH, closed to the sub-keys the PATCH accepts (GitHub 422s any other): each feature is {status: enabled/disabled}, delegated-bypass reviewers are {reviewer_id, reviewer_type: TEAM/ROLE, mode: ALWAYS/EXEMPT}, and the GET-only dependabot_security_updates points at enable_automated_security_fixes.
 - secret_scanning_validity_checks nests here too (documented in the GHEC flavor of the spec).
 - The GET echoes all of it, so check verifies it.
+- security_and_analysis: null still parses; check adds a note naming the key and the fix, to write each feature's status or remove the key, since the null names no feature to turn off.
 
 **Forking policy** (`repository`)
 

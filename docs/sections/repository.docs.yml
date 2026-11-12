@@ -23,6 +23,10 @@ coverage:
         GET-only fields, a commit message without its title, and illegal squash pairs are refused at
         parse: each would drift or 422 every run.
       - >-
+        private beside a visibility that contradicts it (true with public; false with private or
+        internal) still parses; check adds a note naming the pair and the fix, to remove one of the
+        two keys.
+      - >-
         Check diffs the declared keys against GET /repos; snapshot reads back the PATCH fields, topics,
         toggles, and GraphQL keys (docs/operate/snapshot.md).
   - area: "[security_and_analysis](https://docs.github.com/en/rest/repos/repos)"
@@ -40,6 +44,9 @@ coverage:
       - >-
         secret_scanning_validity_checks nests here too (documented in the GHEC flavor of the spec).
       - The GET echoes all of it, so check verifies it.
+      - >-
+        security_and_analysis: null still parses; check adds a note naming the key and the fix, to
+        write each feature's status or remove the key, since the null names no feature to turn off.
   - area: "[Forking policy](https://docs.github.com/en/rest/repos/repos)"
     keys: allow_forking
     endpoints: []
@@ -167,7 +174,9 @@ schema:
   RepositoryConfig.homepage: >-
     A URL with more information about the repository; null clears it.
   RepositoryConfig.visibility: >-
-    public, private, or internal (Enterprise); a free string, since the spec omits internal.
+    public, private, or internal (Enterprise); a free string, since the spec omits internal. Beside
+    private it must agree with it: private: true with public, or private: false with private or
+    internal, is a contradiction check notes.
   RepositoryConfig.default_branch: The default branch; an existing branch name.
   RepositoryConfig.pull_request_creation_policy: >-
     Who may create pull requests: "all" (everyone) or "collaborators_only".
@@ -193,7 +202,8 @@ schema:
   RepositoryConfig.web_commit_signoff_required: Require contributors to sign off on web-based commits (true) or not (false).
   RepositoryConfig.security_and_analysis: >-
     The security_and_analysis object of PATCH /repos/{r}: GitHub Advanced Security, secret scanning,
-    push protection, and the other nested feature toggles.
+    push protection, and the other nested feature toggles. Write each feature's status: null names
+    no feature to turn off, and check notes it.
   RepositoryConfig.squash_merge_commit_title: >-
     The default title of a squash merge commit: PR_TITLE or COMMIT_OR_PR_TITLE. Required beside
     squash_merge_commit_message; legal pairs are PR_TITLE with PR_BODY, BLANK, or COMMIT_MESSAGES,

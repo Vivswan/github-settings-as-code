@@ -1,0 +1,22 @@
+# A private/visibility pair that contradicts (private: true beside visibility:
+# public) still parses. Check reports the drift it always did and adds one note
+# naming the pair and the fix, since the drift line names neither. Check mode
+# only: the pinned descriptor's PATCH body has no "internal" visibility.
+name: repository-private-visibility-contradiction-note
+settings:
+  repository:
+    private: true
+    visibility: public
+inputs:
+  mode: check
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    repository: drift
+  never:
+    - "PATCH /repos/{repo}"
+  stdout_contains:
+    - 'repository: private: true contradicts visibility: "public"'
+    - "Remove private or visibility from the settings file"
+    - "drift: repository.private: true != false"

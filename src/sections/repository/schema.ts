@@ -499,8 +499,10 @@ const patchFieldShape = {
   homepage: CLEARABLE,
   private: repositoryToggle(),
   // A free string: `internal` is valid on Enterprise, and the pinned spec omits it.
+  // COMPAT(v4): a repository.visibility that contradicts repository.private still parses and draws the pair note of declarationNotes (index.ts); refuse the pair in RepositoryConfig's check with that note's fix, and delete the note.
   visibility: patchString().optional(),
   // Nullable as the PATCH body documents it; the object form stays closed.
+  // COMPAT(v4): repository.security_and_analysis: null still parses and draws the null note of declarationNotes (index.ts); drop .nullable() so the validator's null rule refuses it ("has no empty state"), and delete the note.
   security_and_analysis: SecurityAndAnalysisConfig.nullable().optional(),
   has_issues: repositoryToggle(),
   has_projects: repositoryToggle(),

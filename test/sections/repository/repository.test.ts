@@ -208,6 +208,87 @@ describe("repository", () => {
     expect(result.ops.map((op) => op.role)).toEqual(["update"]);
   });
 
+  const SECRET_SCANNING_ON = { secret_scanning: { status: "enabled" } } as const;
+  const PAIR_FIX =
+    "so if GitHub keeps only one of them check reports the other as drift on every run. Remove private or visibility from the settings file";
+
+  test.each<[what: string, declared: Desired, notes: string[], drift: string[]]>([
+    [
+      "private: true beside visibility: public",
+      { private: true, visibility: "public" },
+      [
+        `repository: private: true contradicts visibility: "public", which means private: false, ${PAIR_FIX}`,
+      ],
+      ["repository.private: true != false"],
+    ],
+    [
+      "private: false beside visibility: private",
+      { private: false, visibility: "private" },
+      [
+        `repository: private: false contradicts visibility: "private", which means private: true, ${PAIR_FIX}`,
+      ],
+      ['repository.visibility: "private" != "public"'],
+    ],
+    [
+      "private: false beside visibility: internal",
+      { private: false, visibility: "internal" },
+      [
+        `repository: private: false contradicts visibility: "internal", which means private: true, ${PAIR_FIX}`,
+      ],
+      ['repository.visibility: "internal" != "public"'],
+    ],
+    [
+      "control: private: true agrees with visibility: private",
+      { private: true, visibility: "private" },
+      [],
+      ["repository.private: true != false", 'repository.visibility: "private" != "public"'],
+    ],
+    [
+      "control: private: true agrees with visibility: internal",
+      { private: true, visibility: "internal" },
+      [],
+      ["repository.private: true != false", 'repository.visibility: "internal" != "public"'],
+    ],
+    [
+      "control: private: false agrees with visibility: public",
+      { private: false, visibility: "public" },
+      [],
+      [],
+    ],
+    [
+      "security_and_analysis: null",
+      { security_and_analysis: null },
+      [
+        "repository.security_and_analysis: null names no feature to turn off, so check reports drift while the live repository has the mapping, and if GitHub ignores the null no apply clears it. " +
+          'Remove the key, or write each feature\'s status ("enabled" or "disabled") instead',
+      ],
+      [
+        'repository.security_and_analysis: expected empty, live has {"secret_scanning":{"status":"enabled"}}',
+      ],
+    ],
+    [
+      "control: a declared security_and_analysis mapping",
+      { security_and_analysis: SECRET_SCANNING_ON },
+      [],
+      [],
+    ],
+  ])(
+    "a private/visibility pair that contradicts, and a null security_and_analysis, still parse and are noted with the fix, since the drift line names neither the cause nor the way out (%s)",
+    async (_what, declared, notes, drift) => {
+      // plan() takes its input through the validator, so a row the parse refused would fail here naming the refusal.
+      const api = new MockApi({
+        [GET]: {
+          data: { private: false, visibility: "public", security_and_analysis: SECRET_SCANNING_ON },
+        },
+      });
+      const result = await plan(api, declared);
+      expect({ notes: result.notes, drift: result.ops.flatMap((op) => op.drift) }).toEqual({
+        notes,
+        drift,
+      });
+    },
+  );
+
   test.each([
     ["vulnerability-alerts", { enabled: true }],
     ["automated-security-fixes", null],
@@ -1169,7 +1250,7 @@ describe("repository parse refusals", () => {
 
   test.each<[string, Record<string, unknown>]>([
     [
-      "security_and_analysis: null, which the PATCH body documents",
+      "security_and_analysis: null, which the PATCH body documents and the plan notes",
       { security_and_analysis: null },
     ],
     [
