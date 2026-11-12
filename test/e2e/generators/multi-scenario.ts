@@ -485,7 +485,6 @@ export function genMultiScenario(
 
   const scenario: Scenario = {
     name: `fuzz-multi-${rng.seed}`,
-    tiers: ["mock"],
     settings: {},
     inputs: {
       mode,

@@ -1,9 +1,8 @@
 # The issue-on-failure channel on a HEALTHY run: total quiet. svc-quiet is
-# private and clean (the declared labels, marker included, match live), so the
-# channel performs exactly one read - the open-issue lookup by the marker
-# label - finds no open report issue, and writes NOTHING: no marker-label
-# ensure-create, no issue create or update, no fallback title scan. A healthy
-# repo never sees a report issue at all.
+# private and converged and never needed a report, so neither its settings nor
+# the repository holds the marker label. The channel reads the marker label
+# (404: not declared, the check stays clean) and looks up an open report
+# issue, finds none, and writes NOTHING: no label, no issue, no title scan.
 name: multi-report-issue-on-failure-healthy-quiet
 settings: {}
 inputs:
@@ -15,9 +14,6 @@ repos:
       labels:
         - name: declared
           color: "00ff00"
-        - name: settings-as-code-report
-          color: "0e2a47"
-          description: "managed by settings-as-code private reporting - do not remove"
     live_state:
       repo:
         private: true
@@ -25,9 +21,6 @@ repos:
       labels:
         - name: declared
           color: "00ff00"
-        - name: settings-as-code-report
-          color: "0e2a47"
-          description: "managed by settings-as-code private reporting - do not remove"
     permissions:
       issues: write
       contents: read
@@ -41,8 +34,8 @@ expect:
     - "svc-quiet"
   stdout_lacks:
     - "svc-quiet"
-  # Zero report issues created; the one request the channel made was the
-  # marker-label lookup.
+  # Zero report issues created; the channel looked for an open one by the
+  # marker label.
   issue_report:
     slug: e2e-owner/svc-quiet
     created_count: 0
@@ -56,6 +49,8 @@ expect:
     # Both create-guard reads (the state=all label lookup and the title scan) share
     # the open lookup's path; their state=all query is what sets them apart.
     - "GET /repos/e2e-owner/svc-quiet/issues?state=all"
-  # The single read: an indexed lookup for an OPEN report issue by the marker.
+  # The two reads: the marker label, then an indexed lookup for an OPEN report
+  # issue by the marker.
   requests_contain:
+    - "GET /repos/e2e-owner/svc-quiet/labels/settings-as-code-report"
     - "GET /repos/e2e-owner/svc-quiet/issues?state=open&labels=settings-as-code-report&per_page=100"

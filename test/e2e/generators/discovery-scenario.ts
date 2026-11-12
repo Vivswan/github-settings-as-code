@@ -115,7 +115,6 @@ export function genDiscoveryScenario(
   const privateRepos = "redact" as const;
   const scenario: Scenario = {
     name: `fuzz-discovery-${rng.seed}`,
-    tiers: ["mock"],
     settings: {},
     inputs: { mode: "apply", on_missing_permission: "warn", private_repos: privateRepos },
     denial_style: "fine_grained",

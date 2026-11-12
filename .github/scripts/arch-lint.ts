@@ -202,8 +202,9 @@ function literalModuleRequest(node: Node): string | undefined {
   return undefined;
 }
 
-/** Every relative specifier `text` loads, each once. A file that does not parse or loads a module through a
- * computed specifier throws naming the line: a dropped edge would let a forbidden import pass. */
+/** Every relative specifier `text` loads, each once, the bare `.` and `..` (a directory's index) included. A file
+ * that does not parse or loads a module through a computed specifier throws naming the line: a dropped edge would
+ * let a forbidden import pass. */
 export function importSpecifiers(text: string, file: string): string[] {
   const { program, errors } = parseSync(file, text);
   const lineOf = (offset: number): number => text.slice(0, offset).split("\n").length;
@@ -226,7 +227,7 @@ export function importSpecifiers(text: string, file: string): string[] {
     }
     specifiers.add(specifier);
   });
-  return [...specifiers].filter((specifier) => /^\.\.?\//.test(specifier));
+  return [...specifiers].filter((specifier) => /^\.\.?(?:\/|$)/.test(specifier));
 }
 
 /** Source spells the emitted `.js`, hence the `.ts` and `/index.ts` candidates. Nothing found throws: a dangling

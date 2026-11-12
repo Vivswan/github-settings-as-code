@@ -1,0 +1,25 @@
+# security_and_analysis: null still parses. Against a live mapping, check
+# reports the drift it always did and adds one note naming the key and the fix
+# (write each feature's status), since the drift line names neither.
+name: repository-null-security-and-analysis-note
+settings:
+  repository:
+    security_and_analysis: null
+inputs:
+  mode: check
+live_state:
+  repo:
+    security_and_analysis:
+      secret_scanning:
+        status: enabled
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    repository: drift
+  never:
+    - "PATCH /repos/{repo}"
+  stdout_contains:
+    - "repository.security_and_analysis: null names no feature to turn off"
+    - "Remove the key, or write each feature's status"
+    - "drift: repository.security_and_analysis: expected empty, live has"

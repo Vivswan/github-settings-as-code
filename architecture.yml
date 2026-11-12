@@ -47,4 +47,3 @@ edges:
   report: [discovery, engine, github, io, private, problem, schema, sections, types]
   problem: [plain-data, schema, text]
   schema: [sections, types]
-  upstream-gaps: [types]
