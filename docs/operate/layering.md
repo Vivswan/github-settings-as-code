@@ -76,7 +76,7 @@ Beside these, `_remove: true` on a keyed entry drops the lower entry under that 
 
 Any other underscore key at the top level or on a wrapper fails validation with an error naming which directive belongs where (a note belongs in a YAML comment). A misspelled directive can therefore never pass as a private note and quietly merge a layer meant to replace.
 
-Inside a keyed entry, an underscore key is a field like any other: a closed entry shape refuses it as unrecognized, and an open one keeps it, as it keeps every unknown key.
+Inside a keyed entry, an underscore key is a field like any other: a closed entry shape refuses it as unrecognized, and an open one keeps it, as it keeps every unknown key. A `_remove` on an entry of a list that is not keyed (a ruleset's `bypass_actors`) is such a field: it removes nothing, and the run warns, naming its path.
 
 ## The rules
 

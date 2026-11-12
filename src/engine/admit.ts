@@ -16,12 +16,15 @@ import {
   UNDECLARED_POLICIES,
 } from "../sections/shared/schema-helpers.js";
 import type { DistributiveOmit, UndeclaredPolicy } from "../types.js";
-import { KNOBBED, LAYERING_KEY, nestedForm, REMOVE_KEY, UNDECLARED_KEY } from "./directives.js";
+import {
+  isLayering,
+  KNOBBED,
+  LAYERING_KEY,
+  nestedForm,
+  REMOVE_KEY,
+  UNDECLARED_KEY,
+} from "./directives.js";
 import type { Layer } from "./layers.js";
-
-function isLayering(value: unknown): value is Layering {
-  return LAYERINGS.some((layering) => layering === value);
-}
 
 function isUndeclaredPolicy(value: unknown): value is UndeclaredPolicy {
   return UNDECLARED_POLICIES.some((policy) => policy === value);

@@ -47,7 +47,9 @@ export interface FoldedLayers {
  */
 function validateLayer(layer: Layer, io: Io): Result<ValidatedSettings, SettingsProblem> {
   const view = standaloneView(layer.doc);
-  return validateSettingsDoc(view.doc, layer.name, EVERY_SECTION, io).mapErr((problem) =>
+  return validateSettingsDoc(view.doc, layer.name, EVERY_SECTION, io, {
+    asWritten: view.asWritten,
+  }).mapErr((problem) =>
     problem.code === "settings-malformed-sections"
       ? { ...problem, issues: problem.issues.map(view.asWritten) }
       : problem,

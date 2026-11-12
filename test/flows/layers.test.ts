@@ -2,11 +2,13 @@ import { describe, expect, spyOn, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { err, ok } from "neverthrow";
+import { unkeyedRemovalNote } from "../../src/engine/directives.js";
 import type { Layering } from "../../src/engine/layers.js";
 import { foldLayers, readLayerFiles } from "../../src/flows/layers.js";
 import * as settingsRead from "../../src/flows/settings-read.js";
 import { silentIo } from "../../src/io.js";
 import { describeProblem } from "../../src/problem.js";
+import { captureIo } from "../io/capture.js";
 import { withTempDir } from "../temp-dir.js";
 
 describe("readLayerFiles", () => {
@@ -178,6 +180,37 @@ describe("foldLayers", () => {
       );
     },
   );
+
+  // A warning is no issue, so nothing renumbered it: the layer's view index went out, one short per removal before it.
+  test("a layer's warning names the entry by its index in the file as written, the keyed removal before it counted and still dropping its lower entry", () => {
+    const ruleset = (name: string) => ({ name, target: "branch", enforcement: "active" });
+    const marked = { actor_id: 1, actor_type: "Team", bypass_mode: "always", _remove: true };
+    const { io, annotations } = captureIo();
+    const folded = foldLayers(
+      [
+        { name: "fleet.yml", doc: { rulesets: [ruleset("old"), ruleset("r")] } },
+        {
+          name: "repo.yml",
+          doc: {
+            rulesets: [
+              { name: "old", _remove: true },
+              { name: "r", bypass_actors: [marked] },
+            ],
+          },
+        },
+      ],
+      "merged",
+      { layering: "deep" },
+      io,
+    );
+    expect(folded.map((out) => out.notices)).toEqual(
+      ok([{ layer: "repo.yml", path: "rulesets[0]" }]),
+    );
+    expect(annotations).toEqual([
+      `warning: ${unkeyedRemovalNote("repo.yml", "rulesets[1].bypass_actors[0]._remove")}`,
+      `warning: ${unkeyedRemovalNote("merged", "rulesets.entries[0].bypass_actors[0]._remove")}`,
+    ]);
+  });
 
   test("a malformed marker inside a closed entry schema is the fold's refusal, not the layer's own unknown-key problem", () => {
     // Per-layer validation runs before the fold, and an environment secret's schema is closed: were the marker left in
