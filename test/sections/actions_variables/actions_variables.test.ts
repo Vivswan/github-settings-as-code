@@ -294,7 +294,7 @@ describe("actions_variables", () => {
       const result = await plan(new MockApi(listRoute(live)), [variable as never]);
       expect(result.notes).toEqual([
         'actions_variables[DEPLOY_REGION]: "created_at" is a value GitHub reports, not a setting it accepts ' +
-          "(the GET returns it, the PATCH does not take it), so a declared value that differs from the live one drifts on every check and its update re-runs on every apply without converging; remove it from the settings file",
+          "(the GET returns it, neither the POST nor the PATCH takes it), so a declared value that differs from the live one drifts on every check and its update re-runs on every apply without converging; remove it from the settings file",
       ]);
     },
   );

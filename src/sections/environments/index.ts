@@ -16,6 +16,7 @@ import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import type { SectionMeta, SectionModule } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import { hasDrift } from "../contract/plan.js";
+import { reportedKeyNote } from "../shared/reported-key-note.js";
 import { layeredList, routed } from "../shared/schema-helpers.js";
 import { upperKey } from "../shared/secrets-and-variables/named-scope.js";
 import { listSecretValues } from "../shared/secrets-and-variables/secrets-engine.js";
@@ -38,7 +39,7 @@ import {
   planPinned,
   snapshotPins,
 } from "./pins.js";
-import { ENVIRONMENT_REPORTED_KEYS, reportedKeysNote } from "./reported-keys.js";
+import { ENVIRONMENT_REPORTED_KEYS } from "./reported-keys.js";
 import { EnvironmentConfig, EnvironmentsConfig, environmentKey } from "./schema.js";
 import { sharedSecretNotes, snapshotNested, withPins } from "./snapshot.js";
 
@@ -165,33 +166,25 @@ export function flattenEnvironment(live: LiveEnvironmentBody): Record<string, un
 }
 
 /**
- * The PUT replaces the environment's settings whole (an omitted `reviewers` clears the reviewers rule), so a
- * non-empty live setting the entry omits is drift too, and the lines it makes (`omitted`) are what apply refuses
- * the write over. The live body is split the way the entry was, so only the PUT's own keys take part in that sweep.
- * The entry passes unknown keys through, so a key the GET never echoes would re-PUT on every apply without
- * converging; `notes` names it. An entry key the GET omits (deployment_branch_policy on an environment that never
- * set one) is drift the PUT resolves, so only a key outside the entry shape is noted. A key GitHub only reports is
- * named from the declaration alone, never a second time as a key the GET lacks, so a missing environment earns it too.
+ * The PUT replaces the environment's settings whole, so a non-empty live setting the entry omits is drift too: the
+ * `omitted` lines, over which apply refuses the write. The live body is split the way the entry was, so only the
+ * PUT's own keys take part in that sweep.
+ *
+ * `notes` names a key no drift line explains. A key outside the entry shape that the GET never echoes would re-PUT
+ * on every apply, while an entry key the GET merely omits is drift the PUT resolves. A key GitHub only reports is
+ * named from the declaration, so a missing environment earns that note too.
  */
 function environmentDrift(
   label: string,
   settings: Record<string, unknown>,
   live: LiveEnvironmentBody | undefined,
 ): { drift: string[]; omitted: string[]; notes: string[] } {
-  const reported: readonly string[] = ENVIRONMENT_REPORTED_KEYS.filter((key) =>
-    Object.hasOwn(settings, key),
-  );
-  const notes =
-    reported.length > 0
-      ? [
-          reportedKeysNote(
-            label,
-            reported,
-            "PUT",
-            "so GitHub answers this environment's PUT with a 422 whenever apply sends one",
-          ),
-        ]
-      : [];
+  const reported = reportedKeyNote(label, settings, {
+    keys: ENVIRONMENT_REPORTED_KEYS,
+    write: "the PUT does not take",
+    outcome: "so GitHub answers this environment's PUT with a 422 whenever apply sends one",
+  });
+  const notes = [...reported.notes];
   if (live === undefined) {
     return { drift: [missingDrift(label)], omitted: [], notes };
   }
@@ -202,7 +195,7 @@ function environmentDrift(
     sweep: replaceSweep(EnvironmentConfig),
   }).map((delta) => renderDelta(label, delta));
   const phantom = phantomKeys(settings, flattened).filter(
-    (key) => !Object.hasOwn(EnvironmentConfig.shape, key) && !reported.includes(key),
+    (key) => !Object.hasOwn(EnvironmentConfig.shape, key) && !reported.keys.includes(key),
   );
   if (phantom.length > 0) {
     notes.push(phantomNote(label, phantom, "environment", "this PUT will re-run"));

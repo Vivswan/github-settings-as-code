@@ -699,17 +699,17 @@ describe("environments keys outside the entry shapes", () => {
   const ENV = "GET /repos/o/r/environments/prod";
 
   test.each([
-    ["the environment is missing", {}],
-    ["the live id equals the declared one", { [ENV]: liveEnv("prod", { id: 1 }) }],
-    ["the live id differs", { [ENV]: liveEnv("prod", { id: 99 }) }],
-    ["the live body carries no id", { [ENV]: liveEnv("prod") }],
-  ] as Array<[string, Record<string, Route>]>)(
+    ["the environment is missing", {}, 1],
+    ["the live id equals the declared one", { [ENV]: liveEnv("prod", { id: 1 }) }, 1],
+    ["the live id differs", { [ENV]: liveEnv("prod", { id: 99 }) }, 1],
+    ["the live body carries no id", { [ENV]: liveEnv("prod") }, 1],
+    // A reported key declared null is not inert: it drifts against the live id and rides the PUT.
+    ["it is declared null", { [ENV]: liveEnv("prod", { id: 99 }) }, null],
+  ] as Array<[string, Record<string, Route>, number | null]>)(
     "an entry's id, which GitHub only reports, is named once when %s",
-    async (_state, routes) => {
+    async (_state, routes, id) => {
       // Without the note an id equal to the live one reads clean in every run, until another key drifts and the PUT that carries it answers 422.
-      const checked = await check(new MockApi(routes), [
-        { name: "prod", id: 1 } as EnvironmentConfig,
-      ]);
+      const checked = await check(new MockApi(routes), [{ name: "prod", id } as EnvironmentConfig]);
       expect(checked.notes).toEqual([
         'environments[prod]: "id" is a value GitHub reports, not a setting it accepts (the GET returns it, the PUT does not take it), so GitHub answers this environment\'s PUT with a 422 whenever apply sends one; remove it from the settings file',
       ]);
@@ -757,7 +757,7 @@ describe("environments keys outside the entry shapes", () => {
       ]);
       expect(checked.notes).toEqual([
         'environments[prod].variables[X]: "updated_at" is a value GitHub reports, not a setting it accepts ' +
-          "(the GET returns it, the PATCH does not take it), so a declared value that differs from the live one drifts on every check and its update re-runs on every apply without converging; remove it from the settings file",
+          "(the GET returns it, neither the POST nor the PATCH takes it), so a declared value that differs from the live one drifts on every check and its update re-runs on every apply without converging; remove it from the settings file",
       ]);
     },
   );

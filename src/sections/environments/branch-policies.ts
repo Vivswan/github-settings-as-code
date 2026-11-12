@@ -13,6 +13,7 @@ import type { SectionFailure } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import type { SectionMeta } from "../contract/module.js";
 import { hasDrift, type Read } from "../contract/plan.js";
+import { reportedKeyNote } from "../shared/reported-key-note.js";
 import {
   type EnvironmentRestOp,
   type EnvironmentsRestContext,
@@ -20,7 +21,7 @@ import {
 } from "./endpoints.js";
 import type { LiveEnvironmentBody } from "./index.js";
 import type { NestedPlan } from "./nested.js";
-import { BRANCH_POLICY_REPORTED_KEYS, reportedKeysNote } from "./reported-keys.js";
+import { BRANCH_POLICY_REPORTED_KEYS } from "./reported-keys.js";
 import type { DeploymentBranchPolicyConfig } from "./schema.js";
 
 /** "delete" like the nested variables list: patterns are readable, recreatable configuration. */
@@ -200,17 +201,17 @@ function undeclaredKeyNotes(
 ): string[] {
   const label = patternLabel(envName, pattern.name);
   const { name: _name, type: _type, ...extra } = pattern as Record<string, unknown>;
-  const reported: readonly string[] = BRANCH_POLICY_REPORTED_KEYS.filter((key) =>
-    Object.hasOwn(extra, key),
-  );
-  const notes =
-    reported.length > 0
-      ? [reportedKeysNote(label, reported, "POST", `so ${KEY_OUTCOME.join(" ")}`)]
-      : [];
+  const reported = reportedKeyNote(label, extra, {
+    keys: BRANCH_POLICY_REPORTED_KEYS,
+    write: "the POST does not take",
+    outcome: `so ${KEY_OUTCOME.join(" ")}`,
+  });
+  const notes = [...reported.notes];
   if (existing === undefined) {
     return notes;
   }
-  const unechoed = phantomKeys(extra, existing).filter((key) => !reported.includes(key));
+
+  const unechoed = phantomKeys(extra, existing).filter((key) => !reported.keys.includes(key));
   if (unechoed.length > 0) {
     notes.push(phantomNote(label, unechoed, "deployment branch policy", ...KEY_OUTCOME));
   }

@@ -8,12 +8,12 @@ import type { components, operations } from "@octokit/openapi-types";
 import type { Result } from "neverthrow";
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../../engine/diff.js";
-import { agree } from "../../../text.js";
 import type { MustBeNever } from "../../../types.js";
 import { valueDrift } from "../../contract/drift.js";
 import type { SectionFailure } from "../../contract/errors.js";
 import type { SectionMeta } from "../../contract/module.js";
 import { type PlainData, paramsWith, type SectionPlan } from "../../contract/plan.js";
+import { reportedKeyNote } from "../reported-key-note.js";
 import {
   type AnyPlannedOp,
   missingNamedDrift,
@@ -44,24 +44,13 @@ type _ReportedKeysComplete = MustBeNever<
   Exclude<ReportedVariableKey, (typeof REPORTED_KEYS)[number]>
 >;
 
-/** One variable's declared keys GitHub only reports, and the note naming them, read off the declaration alone. */
-function reportedKeys(
-  label: string,
-  extraKeys: object,
-): { keys: readonly string[]; notes: string[] } {
-  const keys: readonly string[] = REPORTED_KEYS.filter((key) => Object.hasOwn(extraKeys, key));
-  if (keys.length === 0) {
-    return { keys, notes: [] };
-  }
-  const list = keys.map((key) => `"${key}"`).join(", ");
-  const count = keys.length;
-  const them = agree(count, "it", "them");
-  const note =
-    `${label}: ${list} ${agree(count, "is a value", "are values")} GitHub reports, not ${agree(count, "a setting", "settings")} it accepts ` +
-    `(the GET returns ${them}, the PATCH does not take ${them}), so a declared value that differs from the live one drifts on every check and its update re-runs on every apply without converging; ` +
-    `remove ${them} from the settings file`;
-  return { keys, notes: [note] };
-}
+/** The reported keys and the words a variable's note puts around them. */
+const REPORTED = {
+  keys: REPORTED_KEYS,
+  write: "neither the POST nor the PATCH takes",
+  outcome:
+    "so a declared value that differs from the live one drifts on every check and its update re-runs on every apply without converging",
+};
 
 /** The index signature types the passthrough fields as plain data, so spreading them into a body needs no cast. */
 export interface VariableEntry {
@@ -136,7 +125,7 @@ export function planVariables<
       const label = `${scope.label}[${variable.name}]`;
       const existing = liveOf(variable);
       const { name: _name, value: _value, ...extraKeys } = variable;
-      const reported = reportedKeys(label, extraKeys);
+      const reported = reportedKeyNote(label, extraKeys, REPORTED);
       notes.push(...reported.notes);
       if (!existing) {
         ops.push(
