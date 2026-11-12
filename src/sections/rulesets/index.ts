@@ -7,9 +7,9 @@
 
 import { err, ok, type Result } from "neverthrow";
 import { z } from "zod";
-import { deltas } from "../../engine/diff.js";
+import { itemKey } from "../../engine/diff.js";
 import { agree } from "../../text.js";
-import type { DeclaredIssue } from "../contract/declared.js";
+import { type DeclaredIssue, duplicateIssues } from "../contract/declared.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import { type SectionFailure, sectionFailure } from "../contract/errors.js";
 import { keyedBy } from "../contract/keyed-list.js";
@@ -94,49 +94,26 @@ function repeatedRuleTypes(
 }
 
 /**
- * An actor's identity as the comparison pairs it ("Team 5"). It is read off the engine's own pairing of a one-actor
- * list against an empty live one, so the refusal below and the comparison cannot disagree on what a repeat is.
- */
-function actorIdentity(actor: unknown): string {
-  const [unpaired] = deltas(
-    { bypass_actors: [actor] },
-    { bypass_actors: [] },
-    { matchBy: MATCH_BY },
-  );
-  const step = unpaired?.path.at(-1);
-  if (typeof step !== "object") {
-    throw new Error(
-      `BUG: the comparison filed the bypass actor ${JSON.stringify(actor)} under no key, though matchBy pairs bypass_actors by one`,
-    );
-  }
-
-  return step.key;
-}
-
-/**
- * One issue per actor a ruleset names again, at that entry: a repeat has no pairing. The write carries its actors as
- * stored, so two OrganizationAdmin entries are one actor whatever their ids.
+ * One issue per actor a ruleset names again, at that entry: a repeat has no pairing. Each actor is keyed as the
+ * comparison pairs it, and the write carries its actors as stored, so two OrganizationAdmin entries are one actor
+ * whatever their ids.
  */
 function repeatedActorIssues(write: ListWrite<"name">, index: number): DeclaredIssue[] {
   const actors = Array.isArray(write.bypass_actors) ? write.bypass_actors : [];
-  const firstAt = new Map<string, number>();
-  const issues: DeclaredIssue[] = [];
+  const named = actors.map((actor, at) => ({
+    identity: itemKey(actor, MATCH_BY.bypass_actors, "bypass_actors", "desired"),
+    at: `bypass_actors[${at}]`,
+  }));
 
-  for (const [at, actor] of actors.entries()) {
-    const identity = actorIdentity(actor);
-    const first = firstAt.get(identity);
-    if (first === undefined) {
-      firstAt.set(identity, at);
-      continue;
-    }
-
-    issues.push({
-      path: `[${index}].bypass_actors[${at}]`,
-      message: `the ruleset "${write.name}" lists the bypass actor "${identity}" more than once (first at bypass_actors[${first}]), and an actor has one bypass_mode - declare each actor once`,
-    });
-  }
-
-  return issues;
+  return duplicateIssues(
+    named,
+    {
+      keyOf: (actor) => actor.identity,
+      describe: (actor) => `${actor.identity} (${actor.at})`,
+      at: (actor) => `[${index}].${actor.at}`,
+    },
+    `bypass actor of the "${write.name}" ruleset`,
+  );
 }
 
 // The list summary and the per-item GET share these fields; a body without source_type reads as repository-owned, the only kind the repository endpoints can write.

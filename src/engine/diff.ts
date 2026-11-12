@@ -261,9 +261,14 @@ function describeKey(key: MatchKey): string {
 /**
  * The identity of one item: its key fields' values, space-joined. A null or absent part is left out (a DeployKey
  * actor carries no id), so both spellings of the same actor read as one; an item carrying none of the fields is a
- * declaration bug.
+ * declaration bug. The rulesets section calls it too, to refuse a repeated bypass actor under the key the pairing uses.
  */
-function itemKey(item: unknown, key: MatchKey, keyPath: string, side: "desired" | "live"): string {
+export function itemKey(
+  item: unknown,
+  key: MatchKey,
+  keyPath: string,
+  side: "desired" | "live",
+): string {
   const parts = isPlainObject(item) ? fieldsOf(key).filter((field) => item[field] != null) : [];
   if (!isPlainObject(item) || parts.length === 0) {
     throw new Error(

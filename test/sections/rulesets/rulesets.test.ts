@@ -517,7 +517,7 @@ describe("rulesets", () => {
         {
           path: "[0].bypass_actors[1]",
           message:
-            'the ruleset "main" lists the bypass actor "Team 5" more than once (first at bypass_actors[0]), and an actor has one bypass_mode - declare each actor once',
+            '"Team 5 (bypass_actors[1])" names the same bypass actor of the "main" ruleset as "Team 5 (bypass_actors[0])" declared earlier; keep exactly one entry per bypass actor of the "main" ruleset',
         },
       ],
     ],
@@ -531,7 +531,7 @@ describe("rulesets", () => {
         {
           path: "[0].bypass_actors[1]",
           message:
-            'the ruleset "main" lists the bypass actor "OrganizationAdmin 1" more than once (first at bypass_actors[0]), and an actor has one bypass_mode - declare each actor once',
+            '"OrganizationAdmin 1 (bypass_actors[1])" names the same bypass actor of the "main" ruleset as "OrganizationAdmin 1 (bypass_actors[0])" declared earlier; keep exactly one entry per bypass actor of the "main" ruleset',
         },
       ],
     ],
@@ -542,7 +542,7 @@ describe("rulesets", () => {
         {
           path: "[0].bypass_actors[1]",
           message:
-            'the ruleset "main" lists the bypass actor "DeployKey" more than once (first at bypass_actors[0]), and an actor has one bypass_mode - declare each actor once',
+            '"DeployKey (bypass_actors[1])" names the same bypass actor of the "main" ruleset as "DeployKey (bypass_actors[0])" declared earlier; keep exactly one entry per bypass actor of the "main" ruleset',
         },
       ],
     ],
@@ -556,8 +556,7 @@ describe("rulesets", () => {
       ],
       [2, 3].map((index) => ({
         path: `[0].bypass_actors[${index}]`,
-        message:
-          'the ruleset "main" lists the bypass actor "Team 5" more than once (first at bypass_actors[0]), and an actor has one bypass_mode - declare each actor once',
+        message: `"Team 5 (bypass_actors[${index}])" names the same bypass actor of the "main" ruleset as "Team 5 (bypass_actors[0])" declared earlier; keep exactly one entry per bypass actor of the "main" ruleset`,
       })),
     ],
   ])(
