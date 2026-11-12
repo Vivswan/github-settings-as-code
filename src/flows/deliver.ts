@@ -21,7 +21,6 @@ import { describeProblem, type Problem } from "../problem.js";
 import type { ArtifactUploader } from "../report/artifact-report.js";
 import {
   type ClosedOutcome,
-  isIssueChannel,
   openReportChannel,
   type PrivateReportChannel,
   type RedactedDetail,
@@ -137,8 +136,9 @@ export interface OpenedTarget {
 
 export interface Delivery {
   /**
-   * `work` is told whether to inject the issue channel's marker label. On close, a redacted target proven private or
-   * internal gets its report, an unproven one the withheld notice, and its public line is closed-value only.
+   * `work` is told whether to inject the issue channel's marker label, which the channel answers for a target it will
+   * report on. On close, a redacted target proven private or internal gets its report, an unproven one the withheld
+   * notice, and its public line is closed-value only.
    */
   target(
     opened: OpenedTarget,
@@ -192,7 +192,9 @@ export async function withDelivery<T>(
     reports !== null && exposure.kind === "redacted" && isPrivateVisibility(exposure.visibility);
   const delivery: Delivery = {
     async target({ repo, channel, exposure }, work) {
-      const outcome = await work(deliverable(exposure) && isIssueChannel(cfg.privateReport));
+      const declaresMarker =
+        reports !== null && deliverable(exposure) && (await reports.declaresMarker(repo));
+      const outcome = await work(declaresMarker);
       return closeTarget(io, channel, outcome, async (detail) => {
         if (reports === null) {
           return;

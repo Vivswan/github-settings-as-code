@@ -6,6 +6,7 @@ import { DEFAULT_DISCOVERY_FILTERS } from "../../src/discovery/discover.js";
 import { SectionSelection } from "../../src/engine/section-selection.js";
 import { runMulti } from "../../src/flows/multi.js";
 import type { TargetOutcome } from "../../src/flows/redact.js";
+import { DEFAULT_API_VERSION, GitHubApi } from "../../src/github/api.js";
 import { isPrivate } from "../../src/private.js";
 import { describeProblem, type Problem } from "../../src/problem.js";
 import {
@@ -14,9 +15,12 @@ import {
   type ArtifactUploader,
 } from "../../src/report/artifact-report.js";
 import { REPORT_HEADING } from "../../src/report/composer.js";
-import { ISSUE_TITLE, MARKER_LABEL } from "../../src/report/issue-report.js";
+import { ISSUE_TITLE, MARKER_LABEL, MARKER_LABEL_CONFIG } from "../../src/report/issue-report.js";
+import { ADMIN_OWNER, ADMIN_SLUG } from "../e2e/constants.js";
+import { startMockServer } from "../e2e/mock/server.js";
+import { scenario } from "../e2e/mock/server-test-support.js";
 import { captureIo } from "../io/capture.js";
-import { MockApi } from "../mock-api.js";
+import { MockApi, type Route } from "../mock-api.js";
 import { withTempDir } from "../temp-dir.js";
 
 /** True when the target closed sealed: the redaction decision, read from the brand. */
@@ -570,6 +574,21 @@ describe("runMulti redaction (private-repos: redact)", () => {
     }));
 });
 
+/** Answers an issue write the way GitHub does: 422 to a body over its 65536-character limit, on every attempt. */
+class BodyLimitApi extends MockApi {
+  override async tryRequest(
+    ...args: Parameters<MockApi["tryRequest"]>
+  ): ReturnType<MockApi["tryRequest"]> {
+    const [method, path, payload] = args;
+    const body = (payload as { body?: unknown } | undefined)?.body;
+    if (method !== "GET" && path.includes("/issues") && String(body ?? "").length > 65536) {
+      this.calls.push({ method, path, payload });
+      return { error: { status: 422, message: "Validation Failed", body: "" } };
+    }
+    return super.tryRequest(...args);
+  }
+}
+
 describe("runMulti private-report: issue wiring", () => {
   const listPath = (slug: string) =>
     `GET /repos/${slug}/issues?state=all&labels=${MARKER_LABEL}&per_page=100&page=1`;
@@ -584,7 +603,7 @@ describe("runMulti private-report: issue wiring", () => {
       { data?: unknown; error?: { status: number; message: string; body: string } }
     > = {},
   ) {
-    return new MockApi({
+    return new BodyLimitApi({
       "GET /repos/o/priv": { data: { description: "CANARY-live", private: true } },
       "GET /repos/o/priv/contents/.github/settings.yml": {
         data: 'repository:\n  description: "CANARY-want"\n',
@@ -636,13 +655,14 @@ describe("runMulti private-report: issue wiring", () => {
     expect(publicText).not.toContain("o/priv");
   });
 
-  test("marker label is injected when a labels section is declared, notice lands in the report only", async () => {
+  test("the marker label of a target that holds it is declared, and the notice lands in the report only", async () => {
     const api = reportApi({
       "GET /repos/o/priv/contents/.github/settings.yml": {
         data: 'labels:\n  - name: bug\n    color: "d73a4a"\n',
       },
-      "GET /repos/o/priv/labels?per_page=100&page=1": { data: [] },
-    }).allowMutations("POST /repos/o/priv/labels", "PATCH /repos/o/priv/labels/bug");
+      [`GET /repos/o/priv/labels/${MARKER_LABEL}`]: { data: MARKER_LABEL_CONFIG },
+      "GET /repos/o/priv/labels?per_page=100&page=1": { data: [MARKER_LABEL_CONFIG] },
+    }).allowMutations("POST /repos/o/priv/labels");
     const { io, annotations } = captureIo();
     await runMulti(
       api,
@@ -661,6 +681,48 @@ describe("runMulti private-report: issue wiring", () => {
     const body = String(((patch?.payload ?? {}) as { body?: unknown }).body ?? "");
     expect(body).toContain(`added the "${MARKER_LABEL}" marker label`);
     expect(annotations.some((a) => a.includes(MARKER_LABEL))).toBe(false);
+  });
+
+  test("a report over GitHub's issue-body limit is delivered cut to fit, every drift line still in its section", async () => {
+    // Uncut, the body earns GitHub's 422 on every attempt: the report is never delivered and re-running never helps.
+    const live = Array.from({ length: 300 }, (_, i) => ({
+      name: `area/component-${String(i).padStart(3, "0")}`,
+      color: "ededed",
+      description: null,
+    }));
+    const page = (n: number) => `GET /repos/o/priv/labels?per_page=100&page=${n}`;
+    const api = reportApi({
+      "GET /repos/o/priv/contents/.github/settings.yml": { data: "labels: []\n" },
+      [page(1)]: { data: live.slice(0, 100) },
+      [page(2)]: { data: live.slice(100, 200) },
+      [page(3)]: { data: live.slice(200) },
+      [page(4)]: { data: [] },
+    });
+    const { io, annotations, logs } = captureIo();
+    await runTargets(
+      api,
+      cfg({
+        reposInput: "o/priv",
+        mode: "check",
+        privateRepos: "redact",
+        privateReport: "issue",
+        selfSlug: "admin/repo",
+      }),
+      io,
+    );
+    expect(annotations.filter((a) => a.includes("could not deliver"))).toEqual([]);
+    expect(logs).toEqual(["report: updated issue #7 in private repository #1"]);
+    const patch = api.calls.find(
+      (c) => c.method === "PATCH" && c.path === "/repos/o/priv/issues/7",
+    );
+    const body = String(((patch?.payload ?? {}) as { body?: unknown }).body ?? "");
+    expect(body).toMatch(
+      /^\*\*Cut to fit 65536 characters\.\*\* Lines left out: \d+ of 600; each cut is marked where it was made\.$/m,
+    );
+    // The transcript repeats the Sections table, so the cut falls there and no label is lost from the report.
+    for (const label of live) {
+      expect(body).toContain(`labels[${label.name}]: undeclared`);
+    }
   });
 
   test("delivery failure warns safely and never changes the target result", async () => {
@@ -909,13 +971,61 @@ describe("runMulti private-report: issue-on-failure wiring", () => {
     expect(String(payload.body ?? "")).toContain("o/priv");
   });
 
-  test("marker injection still fires; its notice lands in the closing report only", async () => {
+  // The settings file declares one label and the repository holds it, so the target is converged whatever the channel.
+  const markerRead = `GET /repos/o/priv/labels/${MARKER_LABEL}`;
+  const bug = { name: "bug", color: "d73a4a", description: null };
+  const absent: Route = { error: { status: 404, message: "Not Found", body: "" } };
+  const unread: Route = { error: { status: 500, message: "Server Error", body: "" } };
+  test.each<[string, "check" | "apply", Route, unknown[]]>([
+    ["absent, in check", "check", absent, [bug]],
+    ["absent, in apply", "apply", absent, [bug]],
+    ["present, in check", "check", { data: MARKER_LABEL_CONFIG }, [bug, MARKER_LABEL_CONFIG]],
+    ["present, in apply", "apply", { data: MARKER_LABEL_CONFIG }, [bug, MARKER_LABEL_CONFIG]],
+    ["unread (HTTP 500), in apply", "apply", unread, [bug, MARKER_LABEL_CONFIG]],
+  ])(
+    "the marker label %s: a converged target plans nothing and nothing is written",
+    async (_name, mode, read, live) => {
+      // Declared for a target without the label, a check calls a repository no report ever touched drifted and an apply creates the label there.
+      // Left undeclared on a target that holds it, the label an earlier report created is drift in check and a DELETE in apply.
+      const api = new MockApi({
+        "GET /repos/o/priv": { data: { private: true } },
+        "GET /repos/o/priv/contents/.github/settings.yml": {
+          data: 'labels:\n  - name: bug\n    color: "d73a4a"\n',
+        },
+        "GET /repos/o/priv/labels?per_page=100&page=1": { data: live },
+        [markerRead]: read,
+        [openListPath("o/priv")]: { data: [] },
+      });
+      const { io, events } = captureIo();
+      const targets = await runTargets(
+        api,
+        cfg({
+          reposInput: "o/priv",
+          mode,
+          privateRepos: "redact",
+          privateReport: "issue-on-failure",
+          selfSlug: "admin/repo",
+        }),
+        io,
+      );
+      // An apply with nothing to change still says "applied"; its proof of convergence is the empty write list.
+      expect(targets[0]?.result).toBe(mode === "check" ? "clean" : "applied");
+      expect(api.mutations()).toEqual([]);
+      expect(events).toEqual([
+        "mask: o/priv",
+        "log: report: nothing to deliver for private repository #1",
+      ]);
+    },
+  );
+
+  test("the marker label of a target that holds it is declared; its notice lands in the closing report only", async () => {
     const api = new MockApi({
       "GET /repos/o/priv": { data: { private: true } },
       "GET /repos/o/priv/contents/.github/settings.yml": {
         data: 'labels:\n  - name: bug\n    color: "d73a4a"\n',
       },
-      "GET /repos/o/priv/labels?per_page=100&page=1": { data: [] },
+      [markerRead]: { data: MARKER_LABEL_CONFIG },
+      "GET /repos/o/priv/labels?per_page=100&page=1": { data: [MARKER_LABEL_CONFIG] },
       [openListPath("o/priv")]: { data: [issue7] },
       "PATCH /repos/o/priv/issues/7": { data: { number: 7 } },
     }).allowMutations("POST /repos/o/priv/labels");
@@ -931,17 +1041,75 @@ describe("runMulti private-report: issue-on-failure wiring", () => {
       }),
       io,
     );
-    const created = api
-      .mutations()
-      .filter((c) => c.method === "POST" && c.path === "/repos/o/priv/labels")
-      .map((c) => (c.payload as { name?: string }).name);
-    expect(created).toContain(MARKER_LABEL);
+    // The apply's one label write creates "bug"; the marker it declared is left as it is.
+    expect(
+      api
+        .mutations()
+        .filter((c) => c.path.startsWith("/repos/o/priv/labels"))
+        .map((c) => [c.method, (c.payload as { name?: string }).name]),
+    ).toEqual([["POST", "bug"]]);
     const patch = api.calls.find(
       (c) => c.method === "PATCH" && c.path === "/repos/o/priv/issues/7",
     );
     const body = String(((patch?.payload ?? {}) as { body?: unknown }).body ?? "");
     expect(body).toContain(`added the "${MARKER_LABEL}" marker label`);
     expect(annotations.some((a) => a.includes(MARKER_LABEL))).toBe(false);
+  });
+});
+
+describe("runMulti private-report: the marker read of a hidden target", () => {
+  test("its trace line is redacted under debug, like the target's other requests", async () => {
+    // The read is the first request that names the target after the visibility probe; made before the slug is masked, its trace line would print the private slug.
+    const slug = `${ADMIN_OWNER}/svc-hidden`;
+    const declared = [{ name: "declared", color: "00ff00" }];
+    const handle = await startMockServer(
+      scenario({
+        inputs: { mode: "check", private_report: "issue-on-failure" },
+        repos: {
+          [slug]: {
+            settings: { labels: declared },
+            live_state: { repo: { private: true, visibility: "private" }, labels: declared },
+            permissions: { issues: "write", contents: "read", administration: "read" },
+          },
+        },
+      }),
+    );
+    try {
+      const trace: string[] = [];
+      const io = { ...captureIo().io, debug: (line: string) => trace.push(line) };
+      const api = new GitHubApi({
+        token: "t",
+        io,
+        baseUrl: handle.url,
+        apiVersion: DEFAULT_API_VERSION,
+      });
+      const targets = await runTargets(
+        api,
+        cfg({
+          reposInput: slug,
+          adminOwner: ADMIN_OWNER,
+          mode: "check",
+          privateRepos: "redact",
+          privateReport: "issue-on-failure",
+          selfSlug: ADMIN_SLUG,
+        }),
+        io,
+      );
+      expect(targets.map((t) => [t.display, t.result])).toEqual([
+        ["private repository #1", "clean"],
+      ]);
+      expect(handle.violations).toEqual([]);
+      // The marker read is the run's one 404, so the one traced 404 is its line.
+      expect(
+        handle.requests.filter((r) => r.status === 404).map((r) => `${r.method} ${r.pathname}`),
+      ).toEqual([`GET /repos/${slug}/labels/${MARKER_LABEL}`]);
+      expect(trace.filter((line) => line.includes("-> 404"))).toEqual([
+        expect.stringMatching(/^GET <redacted> -> 404 \(\d+ms\)$/),
+      ]);
+      expect(trace.join("\n")).not.toContain("svc-hidden");
+    } finally {
+      await handle.stop();
+    }
   });
 });
 

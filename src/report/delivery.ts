@@ -23,10 +23,12 @@ import { type ArtifactUploader, deliverArtifactReport } from "./artifact-report.
 import { composeReport } from "./composer.js";
 import {
   deliverIssueReport,
+  ISSUE_BODY_LIMIT,
   type IssueReportMode,
   injectMarkerLabel,
   type LandedWrites,
   MARKER_LABEL,
+  mayHoldMarkerLabel,
 } from "./issue-report.js";
 
 /** The channels, in the words of the `private-report` input; the type below says what each delivers. */
@@ -90,9 +92,10 @@ export interface ReportRunMeta {
 }
 
 /**
- * `on` is false when the channel is off or the target is not redacted. The notice is returned rather than emitted, so
- * the caller can route it through the target's capturing sink. An injected document is a new document, so it earns
- * its brand where every document does: through validateSettingsDoc, the brand's one mint.
+ * `on` is what the target's channel answered (ReportChannel.declaresMarker): false when no issue channel reports on
+ * the target, or when the target holds no marker label to keep. The notice is returned rather than emitted, so the
+ * caller can route it through the target's capturing sink. An injected document is a new document, so it earns its
+ * brand where every document does: through validateSettingsDoc, the brand's one mint.
  */
 export function applyMarkerInjection(
   settings: ValidatedSettings,
@@ -168,7 +171,16 @@ interface ReportTarget {
  * content) and never changes any target's result.
  */
 export interface ReportChannel {
+  /**
+   * Whether the target's settings must declare the marker label (applyMarkerInjection), asked before the target's
+   * work. Only the issue channel has a label to keep, and it says no for a target it reads as holding none.
+   */
+  declaresMarker(repo: RepoRef | null): Promise<boolean>;
+
+  /** Delivers one target's report once the target's work is done. */
   deliver(target: ReportTarget): Promise<void>;
+
+  /** Ends the run's deliveries; a channel that gathers its reports sends them here. */
   flush(): Promise<void>;
 }
 
@@ -201,19 +213,25 @@ export function openReportChannel(
   }
 }
 
-/** The seal opens in full here: the readers are the target repository's own, or hold the artifact's decryption key. */
-function composeTargetReport(meta: ReportRunMeta, target: ReportTarget): string {
+/**
+ * The seal opens in full here: the readers are the target repository's own, or hold the artifact's decryption key.
+ * `limit` is the most characters the channel's document may hold; the report is cut to it and says so.
+ */
+function composeTargetReport(meta: ReportRunMeta, target: ReportTarget, limit?: number): string {
   const { slug, outcomes, transcript } = revealPrivate(target.detail);
-  return composeReport({
-    target: slug,
-    adminRepo: meta.adminRepo,
-    runUrl: meta.runUrl,
-    mode: meta.mode,
-    result: target.conclusion.result,
-    timestamp: meta.timestamp,
-    outcomes: outcomes.map((o) => ({ key: o.key, status: o.status, detail: o.detail })),
-    transcript,
-  });
+  return composeReport(
+    {
+      target: slug,
+      adminRepo: meta.adminRepo,
+      runUrl: meta.runUrl,
+      mode: meta.mode,
+      result: target.conclusion.result,
+      timestamp: meta.timestamp,
+      outcomes: outcomes.map((o) => ({ key: o.key, status: o.status, detail: o.detail })),
+      transcript,
+    },
+    limit,
+  );
 }
 
 function issueChannel(
@@ -223,6 +241,8 @@ function issueChannel(
   io: Io,
 ): ReportChannel {
   return {
+    // An unparseable slug names no repository to read, and no settings are applied to it either.
+    declaresMarker: async (repo) => repo !== null && (await mayHoldMarkerLabel(api, repo)),
     async deliver(target) {
       if (target.repo === null) {
         // The issue channel posts INTO the target repository, and an unparseable slug names none; the loss must not be silent.
@@ -232,7 +252,7 @@ function issueChannel(
         );
         return;
       }
-      const body = composeTargetReport(meta, target);
+      const body = composeTargetReport(meta, target, ISSUE_BODY_LIMIT);
       const delivery = await deliverIssueReport(
         api,
         target.repo,
@@ -279,6 +299,7 @@ function artifactChannel(
 ): ReportChannel {
   const reports: string[] = [];
   return {
+    declaresMarker: async () => false,
     async deliver(target) {
       reports.push(`<!-- ${target.display} -->\n\n${composeTargetReport(meta, target)}`);
     },

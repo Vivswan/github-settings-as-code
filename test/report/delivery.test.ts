@@ -270,6 +270,29 @@ describe("the artifact channel", () => {
     expect(annotations).toEqual([]);
   });
 
+  test("a report longer than an issue body holds is uploaded whole: only the issue channel cuts", async () => {
+    // The guide names this channel as the one that delivers the whole report; cut here too, the lines an issue leaves out would exist nowhere.
+    const { recipient, uploader, uploads, decrypt } = await harness();
+    const detail = Array.from({ length: 700 }, (_, i) => `labels[label-${i}]: ${"x".repeat(90)}`);
+    const channel = openReportChannel(
+      new MockApi({}),
+      "artifact",
+      META,
+      recipient,
+      silentIo(),
+      uploader,
+    );
+    await channel?.deliver({
+      ...target("o/a", 1),
+      detail: sealed("o/a", [{ key: "labels", status: "drift", detail }]),
+    });
+    await channel?.flush();
+    const document = await decrypt(uploads[0]?.file.data as Uint8Array);
+    expect(document.length).toBeGreaterThan(65536);
+    expect(document).toContain(detail.at(-1) as string);
+    expect(document).not.toContain("Cut to fit");
+  });
+
   test("flush uploads nothing when no target delivered", async () => {
     const { recipient, uploader, uploads } = await harness();
     await openReportChannel(
