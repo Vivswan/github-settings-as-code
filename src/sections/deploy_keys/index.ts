@@ -140,5 +140,14 @@ export const deployKeysSection = listSection({
             ];
       }),
   },
+  reported: {
+    id: true,
+    url: true,
+    verified: true,
+    created_at: true,
+    added_by: true,
+    last_used: true,
+    enabled: true,
+  },
   prose: { undeclaredAction: "DELETE it" },
 });

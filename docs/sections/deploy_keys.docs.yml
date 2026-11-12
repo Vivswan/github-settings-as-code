@@ -32,6 +32,11 @@ coverage:
         A 422 on create can mean the public key is already attached to another repository (one
         repository per key, account-wide); the error says so.
       - >-
+        A declared key the GET reports and the POST does not take (id, url, verified, created_at,
+        added_by, last_used, enabled) draws a note in check and in apply, whatever its value and with
+        or without a live key: a value that differs from the live one makes every apply delete and
+        recreate the key.
+      - >-
         Undeclared keys are KEPT by default (deleting a live deploy key breaks whatever service
         authenticates with it, and deployment tooling installs its own keys); the wrapped
         `_undeclared: delete` form opts into deletion.

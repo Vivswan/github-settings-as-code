@@ -3,6 +3,8 @@
  * bundled declarations cannot name a private one, and the package-smoke job fails.
  */
 
+import type { paths } from "@octokit/openapi-types";
+import type { Endpoints } from "@octokit/types";
 import type { Result } from "neverthrow";
 import type { z } from "zod";
 import type { MatchKey } from "../../../engine/diff.js";
@@ -124,6 +126,39 @@ type RouteOf<Ends, R extends string> = Ends extends {
 }
   ? U
   : never;
+
+type KeysOf<T> = T extends unknown ? keyof T : never;
+
+/** The keys of the item a GET returns: a list's element, or the one body. */
+type ItemKeys<R extends string> = R extends keyof Endpoints
+  ? KeysOf<
+      Endpoints[R]["response"]["data"] extends readonly (infer Item)[]
+        ? Item
+        : Endpoints[R]["response"]["data"]
+    >
+  : never;
+
+/** The keys of the JSON body a write takes. Read off `paths`: Endpoints' own `request.data` loses a body the description marks optional. */
+type BodyKeys<R extends string> = R extends `${infer Method} ${infer Path}`
+  ? Path extends keyof paths
+    ? Lowercase<Method> extends keyof paths[Path]
+      ? paths[Path][Lowercase<Method>] extends {
+          requestBody?: { content: { "application/json": infer Body } };
+        }
+        ? KeysOf<Body>
+        : never
+      : never
+    : never
+  : never;
+
+/**
+ * The entry keys GitHub only reports: on the item the `list` or the `get` role returns, and in the body of neither
+ * `create` nor `update`. `updateConfig` writes the mapping's fields, not the entry's, so it takes none away.
+ */
+type ReportedKey<Ends> = Exclude<
+  ItemKeys<RouteOf<Ends, "list"> | RouteOf<Ends, "get">>,
+  BodyKeys<RouteOf<Ends, "create"> | RouteOf<Ends, "update">>
+>;
 
 /** Every route addressing ONE live item; they all read the same params off `address`. */
 type ItemRoutes<Ends> =
@@ -358,6 +393,9 @@ interface ListSectionDeclFields<
   /** Dotted write paths holding a `$NAME` reference GitHub never echoes back (a webhook's config.secret): left out of the comparison, resolved at execution, re-sent every run under an unverifiable facet, and read back as a per-item reference. */
   readonly secrets?: readonly SecretPath<Ends, NoInfer<M>>[];
 
+  /** Every entry key GitHub only reports (see ReportedKey), mapped to `true`, so a key left out or one a write takes fails to compile; an entry declaring one draws a note in every plan. */
+  readonly reported: { readonly [P in ReportedKey<Ends>]: true };
+
   /** The undeclared wording: what apply does, and the optional rewordings of the keep-note and the delete drift. */
   readonly prose: {
     /** What apply does to an undeclared live resource, as the note and drift spell it ("DELETE it"). */
@@ -439,6 +477,7 @@ export interface ErasedDecl<Key extends string> {
   readonly foreign?: (live: object) => { readonly name: string; readonly reason: string } | null;
   readonly concealed?: (live: object) => readonly ConcealedField[];
   readonly secrets?: readonly string[];
+  readonly reported: Readonly<Record<string, true>>;
   readonly prose: ListSectionDeclFields<
     ListSectionKey,
     ListEndpoints,

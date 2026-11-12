@@ -90,6 +90,20 @@ export const milestonesSection = listSection({
     matchBy: {},
   },
   replaces: false,
+  reported: {
+    url: true,
+    html_url: true,
+    labels_url: true,
+    id: true,
+    node_id: true,
+    number: true,
+    creator: true,
+    open_issues: true,
+    closed_issues: true,
+    created_at: true,
+    updated_at: true,
+    closed_at: true,
+  },
   prose: {
     undeclaredAction: DETACH_ACTION,
     undeclaredNote: {

@@ -23,6 +23,7 @@ import {
   undeclaredNote,
   undeclaredPolicy,
 } from "../../contract/drift.js";
+import { endpointMethod } from "../../contract/endpoints.js";
 import { type SectionFailure, sectionFailure } from "../../contract/errors.js";
 import { liveByIdentity, liveIdentity, plural } from "../../contract/live.js";
 import { defaultUndeclaredPolicy, type SectionMeta } from "../../contract/module.js";
@@ -36,6 +37,7 @@ import {
   type SectionPlan,
   type Unverifiable,
 } from "../../contract/plan.js";
+import { reportedKeyNote, UPDATE_NEVER_CONVERGES } from "../reported-key-note.js";
 import { projectOntoSchema, replaceSweep } from "../snapshot-helpers.js";
 import {
   type ErasedDecl,
@@ -347,8 +349,33 @@ function createOp<Key extends string>(
 }
 
 /**
+ * The note an entry's reported keys draw (`reported` in decl.ts), from the write alone.
+ * COMPAT(v4): a reported key on a list entry still parses, rides the write, and is named by this note; delete the note and refuse the key in validateList, the rule the actions section's reported-only sweep applies.
+ */
+function reportedNotes<Key extends string>(
+  planning: Planning<Key>,
+  entry: DeclaredWrite<Key>,
+  label: string,
+): string[] {
+  const { decl, update } = planning;
+  const create = endpointMethod(decl.endpoints.create.route);
+  const words =
+    update === undefined
+      ? {
+          write: `the ${create} does not take`,
+          outcome: `so every apply deletes and recreates the ${decl.noun} while a declared value differs from the live one`,
+        }
+      : {
+          write: `neither the ${create} nor the ${endpointMethod(update.route)} takes`,
+          outcome: UPDATE_NEVER_CONVERGES,
+        };
+  return reportedKeyNote(label, entry.write, { keys: Object.keys(decl.reported), ...words }).notes;
+}
+
+/**
  * The entry compared with its live item: the item's full body read where a `get` role exists, concealed fields and
- * secrets left out, and the omitted-key sweep of a replace write. The phantom note follows the concealment notes.
+ * secrets left out, and the omitted-key sweep of a replace write. The phantom note follows the concealment notes; a
+ * key the live item lacks on or under a reported key stays out of it, since reportedNotes names that key.
  */
 async function compareWithLive<Key extends string>(
   planning: Planning<Key>,
@@ -386,7 +413,10 @@ async function compareWithLive<Key extends string>(
       remedies,
     );
   const notes = [...compared.notes];
-  const phantom = phantomPaths(found);
+  // COMPAT(v4): this filter keeps a reported key out of the unechoed-key note while reportedNotes names it; delete the filter with that note, once validateList refuses the key.
+  const phantom = phantomPaths(
+    found.filter((delta) => !Object.hasOwn(decl.reported, String(delta.path[0]))),
+  );
   if (phantom.length > 0) {
     notes.push(phantomNote(label, phantom, decl.noun, remedies.phantom));
   }
@@ -496,7 +526,7 @@ function updateOps<Key extends string>(
   return ops;
 }
 
-/** One declared entry's group: a create, a recreate pair, or the update ops, with the notes its compare raised. */
+/** One declared entry's group: a create, a recreate pair, or the update ops, with the notes its reported keys and its compare raised. */
 async function entryGroup<Key extends string>(
   planning: Planning<Key>,
   ctx: PlanContext<ListEndpoints>,
@@ -510,14 +540,16 @@ async function entryGroup<Key extends string>(
     return err(matched.error);
   }
   const existing = matched.value;
+  const reported = reportedNotes(planning, entry, label);
   if (existing === undefined) {
-    return ok({ ops: [createOp(planning, entry, label)], notes: [] });
+    return ok({ ops: [createOp(planning, entry, label)], notes: reported });
   }
   const compared = await compareWithLive(planning, ctx, entry, existing, label);
   if (compared.isErr()) {
     return err(compared.error);
   }
-  const { found, render, notes } = compared.value;
+  const { found, render } = compared.value;
+  const notes = [...reported, ...compared.value.notes];
   if (update === undefined) {
     return ok({ ops: recreateOps(planning, entry, existing, found.map(render), label), notes });
   }
