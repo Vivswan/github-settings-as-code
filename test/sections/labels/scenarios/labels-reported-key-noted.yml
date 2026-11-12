@@ -1,0 +1,31 @@
+# A label entry declares `id`, a value GitHub reports and no label write takes.
+# The key rides the PATCH, GitHub ignores it, and the live id stays 1, so the
+# next run plans the same update again. The note is the one line that says no
+# apply can set the key; the update itself completes.
+name: labels-reported-key-noted
+settings:
+  labels:
+    - name: bug
+      color: d73a4a
+      id: 5
+live_state:
+  labels:
+    - id: 1
+      name: bug
+      color: d73a4a
+      description: null
+inputs:
+  mode: apply
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    labels: applied
+  mutations:
+    - PATCH /repos/{repo}/labels/bug
+  never:
+    - POST /repos/{repo}/labels
+    - DELETE /repos/{repo}/labels
+  stdout_contains:
+    - '::notice::labels[bug]: "id" is a value GitHub reports, not a setting it accepts (the GET returns it, neither the POST nor the PATCH takes it), so a declared value that differs from the live one drifts on every check and its update re-runs on every apply without converging; remove it from the settings file'
+    - 'labels: updated label "bug"'

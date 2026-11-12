@@ -150,6 +150,7 @@ The side-by-side comparison with the Probot Settings app lives in the migration 
 
 - Full CRUD on /repos/{owner}/{repo}/labels: upsert by name, rename via new_name (Probot parity).
 - Undeclared labels are DELETED loudly by default; the wrapped `_undeclared: keep` form keeps them, each surfaced as a note.
+- A declared key the GET reports and neither the POST nor the PATCH takes (id, node_id, url, default) draws a note in check and in apply, whatever its value and with or without a live label: a value that differs from the live one drifts on every check, and its update re-runs on every apply.
 - Snapshot reads the live labels back as entries under the delete default.
 
 **Rulesets** (`rulesets`)
@@ -160,6 +161,7 @@ The side-by-side comparison with the Probot Settings app lives in the migration 
 - A rule type the spec does not know passes through verbatim, as does a new field on a known rule or a bypass actor, so what GitHub ships tomorrow works today.
 - The list carries summaries, so each matched ruleset is read whole before the comparison.
 - A live value the entry omits is drift, and apply refuses the PUT (the [replace-write rule](semantics.md)).
+- A declared key the GET reports and neither the POST nor the PUT takes (id, source_type, source, current_user_can_bypass, node_id, _links, created_at, updated_at) draws a note in check and in apply, whatever its value and with or without a live ruleset: a value that differs from the live one drifts on every check, and its update re-runs on every apply.
 - Undeclared rulesets are kept by default (notes only); the wrapped `_undeclared: delete` form deletes them.
 - Org-sourced rulesets are outside the section (source_type other than Repository).
 - GitHub returns bypass_actors only to a token with write access to the ruleset, so under a token without Administration write a declared bypass_actors is left out of the comparison and noted as not visible instead of reported as drift.
@@ -284,6 +286,7 @@ The side-by-side comparison with the Probot Settings app lives in the migration 
 
 - GET/POST/DELETE /repos/{owner}/{repo}/autolinks; immutable upstream so changed entries are delete+recreate.
 - Undeclared autolinks are DELETED by default, kept as notes under the wrapped `_undeclared: keep` form.
+- A declared key the GET reports and the POST does not take (id, updated_at) draws a note in check and in apply, whatever its value and with or without a live autolink: a value that differs from the live one makes every apply delete and recreate the autolink.
 - Snapshot reads the live autolinks back as entries under the delete default.
 
 **Actions permissions** (`actions`)
@@ -445,6 +448,7 @@ The side-by-side comparison with the Probot Settings app lives in the migration 
 
 - POST/PATCH/DELETE /repos/{owner}/{repo}/milestones, matched by title, declared-keys-only (description/state/due_on untouched unless declared; a due_on is a calendar day, compared and converged as the day GitHub keeps).
 - Undeclared milestones are kept by default and surfaced as notes, because deleting a milestone DETACHES it from every issue carrying it - the wrapped `_undeclared: delete` form opts into exactly that.
+- A declared key the GET reports and neither the POST nor the PATCH takes (url, html_url, labels_url, id, node_id, number, creator, open_issues, closed_issues, created_at, updated_at, closed_at) draws a note in check and in apply, whatever its value and with or without a live milestone: a value that differs from the live one drifts on every check, and its update re-runs on every apply.
 - Snapshot reads every milestone, open and closed, back as entries under the keep default.
 
 **Interaction limits** (`interaction_limits`)
@@ -495,6 +499,8 @@ The side-by-side comparison with the Probot Settings app lives in the migration 
 - A legacy service hook (name other than "web") or a hook without a config.url is outside the section: plan neither matches nor deletes it, snapshot notes it.
 - Config-field drift goes through the config sub-endpoint, which updates named fields without the general PATCH's whole-config replacement, so a live secret the file does not declare is never removed; events/active drift rides the general PATCH with no config key.
 - config.secret is declared as a whole-value `$NAME` reference resolved from the step env at apply time ([secrets and vaults](secrets-and-vaults.md)); GitHub echoes a live secret as "********", so check mode verifies everything except the secret (a cannot-verify note) and apply re-sends the declared secret every run so rotations propagate.
+- A declared entry key the GET reports and neither the POST nor the general PATCH takes (type, id, updated_at, created_at, url, test_url, ping_url, deliveries_url, last_response) draws a note in check and in apply, whatever its value and with or without a live hook: on a live hook a value that differs from the live one drifts on every check, and its update re-runs on every apply.
+- With no live hook such a key rides the create POST, whose body takes no key outside its own, so GitHub answers 422 and the section fails beside the note.
 - insecure_ssl compares number and string spellings as equal (GitHub stores strings); events compare as a set.
 - Hook urls appear in drift and change lines on purpose: they are configuration, not credentials (the secret is the masked part).
 - Snapshot reads the hooks back as entries under the keep default, a set secret as a `$SECRET_WEBHOOK_<id>` reference with a note to export it.
@@ -517,6 +523,7 @@ The side-by-side comparison with the Probot Settings app lives in the migration 
 - Material is compared as algorithm + base64 blob with the trailing comment ignored, because GitHub may strip or rewrite comments on storage - a raw-string compare would replace the key on every apply.
 - A live key under an algorithm the settings file cannot declare is outside the section: GitHub accepted it, so it is never matched, deleted, or aborted on, and a snapshot leaves it out with a note.
 - A 422 on create can mean the public key is already attached to another repository (one repository per key, account-wide); the error says so.
+- A declared key the GET reports and the POST does not take (id, url, verified, created_at, added_by, last_used, enabled) draws a note in check and in apply, whatever its value and with or without a live key: a value that differs from the live one makes every apply delete and recreate the key.
 - Undeclared keys are KEPT by default (deleting a live deploy key breaks whatever service authenticates with it, and deployment tooling installs its own keys); the wrapped `_undeclared: delete` form opts into deletion.
 - Snapshot reads the live keys back (title, comparable material, read_only) under the keep default.
 

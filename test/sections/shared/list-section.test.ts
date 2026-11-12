@@ -6,9 +6,15 @@
 import { describe, expect, test } from "bun:test";
 import { ok } from "neverthrow";
 import { z } from "zod";
+import type { SectionKey } from "../../../src/schema.js";
+import { autolinksSection } from "../../../src/sections/autolinks/index.js";
 import type { SectionInput } from "../../../src/sections/contract/declared.js";
 import { planContext } from "../../../src/sections/contract/plan.js";
+import { DOCS } from "../../../src/sections/docs-registry.js";
 import { labelsSection } from "../../../src/sections/labels/index.js";
+import { milestonesSection } from "../../../src/sections/milestones/index.js";
+import { SECTIONS } from "../../../src/sections/registry.js";
+import { rulesetsSection } from "../../../src/sections/rulesets/index.js";
 import {
   exactName,
   type ListEndpoints,
@@ -24,7 +30,7 @@ import { MockApi } from "../../mock-api.js";
 import { fragmentFake } from "../fragment-fake.js";
 import { LABELS_MOCK } from "../labels/mock.js";
 import { provePlanIdempotent } from "../plan-idempotence.js";
-import { failureOf, REPO, unwrap } from "../section-run.js";
+import { failureOf, REPO, sectionRunners, unwrap } from "../section-run.js";
 import { validatedInput } from "../validated-input.js";
 
 /** The labels declaration every variant module here is built from. */
@@ -143,7 +149,7 @@ describe("listSection", () => {
     );
   });
 
-  test("the declaration's types close the shape: same params on both item routes, no undefined write fields, matchBy over entry fields", () => {
+  test("the declaration's types close the shape: same params on both item routes, no undefined write fields, matchBy over entry fields, the reported map over the routes' types", () => {
     listSection({
       ...base,
       endpoints: {
@@ -203,6 +209,17 @@ describe("listSection", () => {
       ...base,
       // @ts-expect-error matchBy names entry fields, so a misspelled list path cannot go silently unused
       lens: { ...base.lens, matchBy: { colr: "id" } },
+    });
+    // The reported map's controls: widen its type to any map and both directives go unused, which fails the typecheck.
+    listSection({
+      ...base,
+      // @ts-expect-error `default` is on the label GET and in neither write body, so the map must hold it
+      reported: { id: true, node_id: true, url: true },
+    });
+    listSection({
+      ...base,
+      // @ts-expect-error the POST takes `color`, so it is a setting, not a reported key
+      reported: { id: true, node_id: true, url: true, default: true, color: true },
     });
   });
 
@@ -660,6 +677,116 @@ describe("listSection conflicts", () => {
       ),
     );
     expect(planned.ops.map((op) => op.role)).toEqual(["remove", "remove", "create"]);
+  });
+});
+
+describe("listSection reported keys", () => {
+  /** A live label with the keys only its GET carries. */
+  const live = [{ id: 1, node_id: "LA_1", name: "bug", color: "d73a4a", description: null }];
+
+  /** What a differing value costs where GitHub can edit the resource, and the note's close. */
+  const UPDATE_TAIL =
+    "so a declared value that differs from the live one drifts on every check and its update re-runs on every apply without converging; remove it from the settings file";
+
+  test.each([
+    ["a value that differs from the live one", 5, live],
+    ["the live value, which no comparison reports", 1, live],
+    ["null", null, live],
+    ["no live label to compare with", 5, []],
+  ] as const)(
+    "without the note a declared id is silent or drifts forever, so the entry alone draws it: %s",
+    async (_case, id, labels) => {
+      const { notes } = await sectionRunners(labelsSection).check(
+        new MockApi({ [LIST]: { data: labels } }),
+        { _undeclared: "keep", entries: [{ name: "bug", id } as never] },
+      );
+      expect(notes).toEqual([
+        `labels[bug]: "id" is a value GitHub reports, not a setting it accepts (the GET returns it, neither the POST nor the PATCH takes it), ${UPDATE_TAIL}`,
+      ]);
+    },
+  );
+
+  test("the note names the writes the section's own routes declare, and the delete-and-recreate where GitHub cannot edit", async () => {
+    const rulesets = await sectionRunners(rulesetsSection).check(
+      new MockApi({ "GET /repos/o/r/rulesets?per_page=100&page=1": { data: [] } }),
+      [{ name: "main", id: 5 } as never],
+    );
+    expect(rulesets.notes).toEqual([
+      `rulesets[main]: "id" is a value GitHub reports, not a setting it accepts (the GET returns it, neither the POST nor the PUT takes it), ${UPDATE_TAIL}`,
+    ]);
+    const autolinks = await sectionRunners(autolinksSection).check(
+      new MockApi({ "GET /repos/o/r/autolinks": { data: [] } }),
+      [
+        {
+          key_prefix: "JIRA-",
+          url_template: "https://x.test/<num>",
+          id: 5,
+          updated_at: "x",
+        } as never,
+      ],
+    );
+    expect(autolinks.notes).toEqual([
+      'autolinks[JIRA-]: "id", "updated_at" are values GitHub reports, not settings it accepts (the GET returns them, the POST does not take them), so every apply deletes and recreates the autolink while a declared value differs from the live one; remove them from the settings file',
+    ]);
+    // The same declaration without its update role changes both halves: the write it names and what a differing value costs.
+    const recreated = await sectionRunners(immutable).check(
+      new MockApi({ [LIST]: { data: live } }),
+      { _undeclared: "keep", entries: [{ name: "bug", id: 5 } as never] },
+    );
+    expect(recreated.notes).toEqual([
+      'labels[bug]: "id" is a value GitHub reports, not a setting it accepts (the GET returns it, the POST does not take it), so every apply deletes and recreates the label while a declared value differs from the live one; remove it from the settings file',
+    ]);
+  });
+
+  test("a reported key the live item lacks draws its own note alone, never the unechoed-key note too; a misspelt key beside it keeps that one", async () => {
+    const bare = [{ name: "bug", color: "d73a4a", description: null }];
+    const check = (entry: Record<string, unknown>) =>
+      sectionRunners(labelsSection).check(new MockApi({ [LIST]: { data: bare } }), {
+        _undeclared: "keep",
+        entries: [entry as never],
+      });
+    expect((await check({ name: "bug", node_id: "LA_9", colr: "000000" })).notes).toEqual([
+      `labels[bug]: "node_id" is a value GitHub reports, not a setting it accepts (the GET returns it, neither the POST nor the PATCH takes it), ${UPDATE_TAIL}`,
+      'labels[bug]: declared key "colr" does not exist on the live label, so if GitHub ignores it this update will re-run on every apply without converging. Fix the key name, or remove it from the settings file',
+    ]);
+    // The controls: a key the writes take, and an entry that declares nothing else, draw no note.
+    expect((await check({ name: "bug", color: "000000" })).notes).toEqual([]);
+    expect((await check({ name: "bug" })).notes).toEqual([]);
+
+    // A key the live item lacks UNDER a reported mapping is that mapping's to name: "fix the key name" would be the wrong advice.
+    const milestones = await sectionRunners(milestonesSection).check(
+      new MockApi({
+        "GET /repos/o/r/milestones?state=all&per_page=100&page=1": {
+          data: [{ number: 1, title: "v1", due_on: null, creator: { login: "octocat" } }],
+        },
+      }),
+      [{ title: "v1", creator: { login: "octocat", nickname: "cat" } } as never],
+    );
+    expect(milestones.notes).toEqual([
+      `milestones[v1]: "creator" is a value GitHub reports, not a setting it accepts (the GET returns it, neither the POST nor the PATCH takes it), ${UPDATE_TAIL}`,
+    ]);
+  });
+
+  test("each section's coverage fact lists exactly the keys of its reported map, so a key the compiler forces into the map cannot miss the page", () => {
+    const reportedBy = new Map(
+      SECTIONS.flatMap((section) =>
+        "decl" in section
+          ? [[section.key, (section.decl as { reported: Record<string, true> }).reported] as const]
+          : [],
+      ),
+    );
+    const listedOn = (key: SectionKey): string[] =>
+      DOCS[key].coverage
+        .flatMap((row) => row.notes)
+        .flatMap((fact) => /the GET reports [^(]*\(([^)]+)\)/.exec(fact)?.[1]?.split(", ") ?? [])
+        .sort();
+    expect(Object.fromEntries([...reportedBy.keys()].map((key) => [key, listedOn(key)]))).toEqual(
+      Object.fromEntries(
+        [...reportedBy].map(([key, reported]) => [key, Object.keys(reported).sort()]),
+      ),
+    );
+    // Non-vacuous: the pilot's map is among those compared.
+    expect([...reportedBy.keys()]).toContain("labels");
   });
 });
 

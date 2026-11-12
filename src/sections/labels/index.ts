@@ -84,5 +84,6 @@ export const labelsSection = listSection({
     matchBy: {},
   },
   replaces: false,
+  reported: { id: true, node_id: true, url: true, default: true },
   prose: { undeclaredAction: "DELETE it" },
 });
