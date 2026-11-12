@@ -532,7 +532,6 @@ async function witnessIteration(
   };
   const scenario: Scenario = {
     name: `fuzz-witness-${key}-${kind}-${mode}-${seed}`,
-    tiers: ["mock"],
     settings: settingsDoc,
     inputs: { mode, on_missing_permission: "warn" },
     denial_style: "fine_grained",
@@ -560,7 +559,6 @@ async function rejectionIteration(seed: number, spec: RejectionSpec): Promise<It
   const rng = new Rng(seed);
   const scenario: Scenario = {
     name: `fuzz-input-${spec.label}-${seed}`,
-    tiers: ["mock"],
     ...(spec.settingsRaw === undefined
       ? { settings: spec.settings }
       : { settings_raw: spec.settingsRaw }),
@@ -650,7 +648,6 @@ async function singleShotChaosIteration(
 ): Promise<IterationResult> {
   const scenario: Scenario = {
     name: `fuzz-chaos-single-${seed}`,
-    tiers: ["mock"],
     // Fully granted by default, so the list read reaches the mock and the corruption fires.
     settings: { labels: [{ name: "chaos", color: "d73a4a" }] },
     inputs: { mode: "apply" },
@@ -689,7 +686,6 @@ async function persistentChaosIteration(
 ): Promise<IterationResult> {
   const scenario: Scenario = {
     name: `fuzz-chaos-persist-${seed}`,
-    tiers: ["mock"],
     settings: { labels: [{ name: "chaos", color: "d73a4a" }] },
     inputs: { mode: "apply" },
     denial_style: "fine_grained",
@@ -1419,7 +1415,6 @@ async function faultedSectionRun(seed: number, plan: SectionFaultPlan): Promise<
   };
   const scenario: Scenario = {
     name: `fuzz-fault-${plan.section}-${plan.kind}-x${plan.exhausting ? RETRY_BUDGET : 1}-${seed}`,
-    tiers: ["mock"],
     settings,
     inputs: { mode: plan.mode, on_missing_permission: "warn" },
     denial_style: "fine_grained",
@@ -1456,7 +1451,6 @@ async function unfaultableSectionRun(
   }
   const scenario: Scenario = {
     name: `fuzz-unfaultable-${section}-${seed}`,
-    tiers: ["mock"],
     settings: { [section]: UNFAULTABLE_APPLY_SETTINGS[section] },
     inputs: { mode: "apply", on_missing_permission: "warn" },
     denial_style: "fine_grained",
@@ -1638,7 +1632,6 @@ async function preflightFaultRun(seed: number, surviving: boolean): Promise<Iter
   const times = surviving ? 2 * RETRY_BUDGET : RETRY_BUDGET;
   const scenario: Scenario = {
     name: `fuzz-preflight-fault-${surviving ? "survives" : "consumed"}-${seed}`,
-    tiers: ["mock"],
     settings,
     inputs: { mode: "apply", on_missing_permission: "fail" },
     denial_style: "fine_grained",

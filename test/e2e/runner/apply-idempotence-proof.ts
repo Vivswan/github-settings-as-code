@@ -48,10 +48,14 @@ export function captureRerun(
   };
 }
 
-/** Re-runs go through the runner: `invoke` uses the SAME mock and temp dir as the primary invocation; the kill cap is the runner's constant. */
+/**
+ * Re-runs go through the runner: `invoke` uses the SAME mock and temp dir as the primary invocation, and the kill cap
+ * is the runner's constant. So is the verdict on a check that did not report clean, which reads the run's outputs and summary.
+ */
 export interface ChildInvoker {
   invoke(scenario: Scenario): Promise<Invocation>;
   killNote(run: Invocation): string;
+  unverifiedCheckFailures(label: string, check: Invocation, requests: LoggedRequest[]): string[];
 }
 
 /** The multi settings/permissions maps and the discovery pool are run CONFIG the pipeline never mutates, so they stay out of the snapshot. */
@@ -293,15 +297,15 @@ export async function assertApplyIdempotent(
   const checkViolationsBefore = handle.violations.length;
   handle.enterCheckMode();
   const check = await child.invoke({ ...rerun, inputs: { ...rerun.inputs, mode: "check" } });
-  reruns.push(
-    captureRerun("apply-idempotence check", check, handle.requests.slice(checkRequestsBefore)),
-  );
+  const checkRequests = handle.requests.slice(checkRequestsBefore);
+  reruns.push(captureRerun("apply-idempotence check", check, checkRequests));
   if (check.exitCode !== 0) {
     failures.push(
       `apply-idempotence: the check run after the second apply exited ${check.exitCode}, expected 0${child.killNote(check)}`,
     );
   }
-  const checkWrites = handle.requests.slice(checkRequestsBefore).filter(isWriteRequest);
+  failures.push(...child.unverifiedCheckFailures("apply-idempotence", check, checkRequests));
+  const checkWrites = checkRequests.filter(isWriteRequest);
   if (checkWrites.length > 0) {
     failures.push(
       `apply-idempotence: the check run wrote ${checkWrites.length} time(s): ${checkWrites.map((r) => renderRequest(r, false)).join(", ")}`,
