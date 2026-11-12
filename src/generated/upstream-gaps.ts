@@ -42,7 +42,7 @@ export const UNDOCUMENTED_ROUTES: readonly (SupplementalRoute | SpecOnlyRoute)[]
 /**
  * The SDL GitHub's GraphQL API serves but the pinned @octokit/graphql-schema
  * release lacks, each with the gap file that carries it. Consumed by
- * test/sections/graphql-queries.test.ts, which extends the published schema
+ * test/e2e/mock/graphql-schema.ts, where the published schema is extended
  * with it before validating the declared queries.
  */
 export const UNSHIPPED_GRAPHQL_SDL: readonly UnshippedGraphqlSdl[] = unshippedGraphqlSdl(GAPS);

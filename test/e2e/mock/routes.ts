@@ -6,6 +6,7 @@
  * The stage order is the contract, the same on both wires:
  *   wire checks -> route match -> check-mode barrier -> target resolution -> fault barrier -> permission gate
  *     -> denial barrier -> body allowlist -> handler -> response guard -> chaos hook
+ * GraphQL has no body allowlist: its schema check follows the route match, as GitHub validates before it runs anything.
  */
 
 import { isPlainObject } from "../../../src/plain-data.js";
@@ -57,6 +58,7 @@ import {
   type Requirement,
   SECTION_BY_KEY,
 } from "./grading.js";
+import { graphqlRequestErrors } from "./graphql-request.js";
 import { GRAPHQL_HANDLERS, HANDLERS } from "./handlers.js";
 import { decodeNodeId, type NodeFamily } from "./node-id.js";
 import { acceptedBody } from "./request-body.js";
@@ -248,7 +250,7 @@ function parseGraphqlRequest(
   request: { method: string; body: unknown },
   ops: Readonly<Record<string, TaggedGraphqlOp>>,
   violation: (message: string) => PipelineResult,
-): { key: string; op: TaggedGraphqlOp; variables: Json } | PipelineResult {
+): { key: string; op: TaggedGraphqlOp; query: string; variables: Json } | PipelineResult {
   if (request.method !== "POST") {
     return violation(`GraphQL requests must be POST, got ${request.method}`);
   }
@@ -268,7 +270,31 @@ function parseGraphqlRequest(
       `no GraphQL operation named "${String(body.operationName)}" is declared by any section`,
     );
   }
-  return { key: dispatched.key, op: dispatched.op, variables: body.variables };
+  return { key: dispatched.key, op: dispatched.op, query: body.query, variables: body.variables };
+}
+
+/**
+ * The schema check. GitHub answers a document off its schema, or variables off the operation's declared types, with
+ * HTTP 200 carrying errors and no data. The action shapes every document and variable itself, so the refusal is a
+ * violation too: the scenario fails whatever outcome it expected.
+ */
+function graphqlSchemaRefusal(
+  op: TaggedGraphqlOp,
+  query: string,
+  variables: Json,
+  log: LoggedRequest,
+): PipelineResult | null {
+  const errors = graphqlRequestErrors(query, op.name, variables);
+  if (errors === null) {
+    return null;
+  }
+  return {
+    response: { status: 200, body: { errors } },
+    log: { ...log, status: 200 },
+    violation: `GraphQL ${op.name} is refused by GitHub's schema: ${errors.map((error) => error.message).join("; ")}`,
+    // A request error carries no type and no data beside it, which the validator's response contract would report a second time.
+    offSpecBody: true,
+  };
 }
 
 /**
@@ -340,11 +366,17 @@ export function handleGraphqlRequest(
   if (!("op" in parsed)) {
     return parsed;
   }
-  const { key, op, variables } = parsed;
+  const { key, op, query, variables } = parsed;
   const graphqlLog: LoggedRequest = {
     ...baseLog,
     graphql: { operationName: op.name, kind: op.kind },
   };
+
+  // Ahead of every barrier: no fault, denial, or handler answers a request GitHub refuses before running it.
+  const refused = graphqlSchemaRefusal(op, query, variables, graphqlLog);
+  if (refused) {
+    return refused;
+  }
 
   // Check-mode barrier before the fault barrier: a synthetic fault must not mask the one bug this barrier exists to catch.
   if (options.checkMode && op.kind !== "read") {
