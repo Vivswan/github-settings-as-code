@@ -1461,7 +1461,7 @@ describe("foldMergeLayers (the oracle's own dialect)", () => {
       },
     },
     {
-      name: "a label renaming into a name a higher entry declares is one resource: the higher entry stands in its slot, merged under deep",
+      name: "a label renaming into a name a higher entry declares is one resource: under deep the higher entry's fields merge into the rename, which keeps the name it renames from",
       layering: "deep",
       layers: stack(
         { labels: [{ name: "bug", new_name: "defect", color: "111111" }, { name: "docs" }] },
@@ -1471,7 +1471,7 @@ describe("foldMergeLayers (the oracle's own dialect)", () => {
         merged: {
           labels: {
             [UNDECLARED_KEY]: "delete",
-            entries: [{ name: "Defect", new_name: "defect", color: "222222" }, { name: "docs" }],
+            entries: [{ name: "bug", new_name: "defect", color: "222222" }, { name: "docs" }],
           },
         },
         notices: [],

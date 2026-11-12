@@ -219,9 +219,12 @@ describe("mergeLayers: keyed sections", () => {
     },
   );
 
-  /** The labels planner over an empty repository rejects two entries claiming one label, so a merged document it plans is one apply accepts. */
-  async function planLabels(entries: readonly Record<string, unknown>[]) {
-    const api = new MockApi({ "GET /repos/o/r/labels?per_page=100&page=1": { data: [] } });
+  /** The labels planner rejects two entries claiming one label, so a merged document it plans is one apply accepts; `live` is the repository's labels, none unless given. */
+  async function planLabels(
+    entries: readonly Record<string, unknown>[],
+    live: readonly Record<string, unknown>[] = [],
+  ) {
+    const api = new MockApi({ "GET /repos/o/r/labels?per_page=100&page=1": { data: live } });
     const plan = unwrap(
       await labelsSection.plan(
         planContext(labelsSection, api, REPO),
@@ -267,13 +270,22 @@ describe("mergeLayers: keyed sections", () => {
       [{ name: "Bug", new_name: "Defect" }],
     ],
     [
-      "the plain label above the rename, merged: the lower rename target rides along as a self-rename",
+      "the plain label above the rename, merged: the rename keeps the name it renames from and takes the higher color",
       "deep",
       {
         lower: [{ name: "bug", new_name: "defect" }],
         higher: [{ name: "defect", color: "ffffff" }],
       },
-      [{ name: "defect", new_name: "defect", color: "ffffff" }],
+      [{ name: "bug", new_name: "defect", color: "ffffff" }],
+    ],
+    [
+      "a rename above the rename it continues, merged: the higher layer's two names stand as written, since one entry cannot claim all three names",
+      "deep",
+      {
+        lower: [{ name: "bug", new_name: "defect" }],
+        higher: [{ name: "defect", new_name: "flaw" }],
+      },
+      [{ name: "defect", new_name: "flaw" }],
     ],
     [
       "the rename above the plain label, merged: the lower color rides along",
@@ -299,6 +311,32 @@ describe("mergeLayers: keyed sections", () => {
       expect(await planLabels(entries)).toEqual([
         `creating label "${entry?.new_name ?? entry?.name}"`,
       ]);
+    },
+  );
+
+  // The folded shape cannot show what is lost: only a plan against the label under its old name tells a rename from a
+  // delete and a create, which under the section's default delete policy takes the label off every issue carrying it.
+  test.each<[string, Record<string, unknown>[] | null, Record<string, unknown>]>([
+    ["alone (the control)", null, { name: "bug", new_name: "defect", color: "d73a4a" }],
+    [
+      "under a higher layer adding a description by the new name",
+      [{ name: "defect", description: "a defect" }],
+      { name: "bug", new_name: "defect", color: "d73a4a", description: "a defect" },
+    ],
+  ])(
+    "a lower layer's rename, %s, still renames the live label: one update, never a delete and a create",
+    async (_case, higher, entry) => {
+      const fleet = layer("fleet", {
+        labels: [{ name: "bug", new_name: "defect", color: "d73a4a" }],
+      });
+      const layers = higher === null ? [fleet] : [fleet, layer("repo", { labels: higher })];
+      const folded = mergeLayers(layers, { layering: "deep" })._unsafeUnwrap();
+      const { entries } = (folded.settings as { labels: { entries: Record<string, unknown>[] } })
+        .labels;
+      expect(
+        await planLabels(entries, [{ name: "bug", color: "d73a4a", description: null }]),
+      ).toEqual(['updating label "defect"']);
+      expect(entries).toEqual([entry]);
     },
   );
 
