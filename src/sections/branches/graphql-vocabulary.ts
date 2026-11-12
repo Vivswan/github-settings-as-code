@@ -57,7 +57,8 @@ export type ExplicitKeys<T> = keyof {
 export type RestCarriedKey =
   | "required_status_checks"
   | "required_pull_request_reviews"
-  | "restrictions";
+  | "restrictions"
+  | Exclude<BooleanControl, "required_signatures">;
 
 type _RoutedKeysCoverSchema = MustBeNever<
   Exclude<ExplicitKeys<BranchProtectionConfig>, RoutedKey | RestCarriedKey | "required_signatures">

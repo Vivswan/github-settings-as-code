@@ -1,0 +1,50 @@
+# A failed operation ends its section's plan, since a later operation may
+# depend on an earlier one, and the run names what that left unsent.
+#
+# Here the first environment's PUT is refused: it carries `id`, a key GitHub
+# only reports, and the environment PUT takes no key outside its own. The second
+# environment's variable and secret are then never written. One warning counts
+# them, and each gets its own "not attempted" line, in stdout and in the summary.
+name: environments-apply-refused-entry-reports-unattempted
+settings:
+  environments:
+    - name: production
+      id: 1
+    - name: staging
+      variables:
+        - name: REGION
+          value: eu-west-1
+      secrets:
+        - name: DEPLOY_TOKEN
+          value: $STAGING_DEPLOY_TOKEN
+env:
+  STAGING_DEPLOY_TOKEN: sealed-staging-plaintext-1a2b
+inputs:
+  mode: apply
+live_state:
+  environments:
+    staging:
+      name: staging
+      protection_rules: []
+token_permissions:
+  environments: write
+expect:
+  exit_code: 1
+  result: failed
+  outcomes:
+    environments: failed
+  mutations:
+    - "PUT /repos/{repo}/environments/production"
+  never:
+    - "POST /repos/{repo}/environments/staging/variables"
+    - "PUT /repos/{repo}/environments/staging/secrets"
+  stdout_contains:
+    - '"id" is not a permitted key'
+    - "::warning::environments: 2 operations after this failure were not attempted; re-run once it is fixed"
+    - 'environments: not attempted - creating variable "REGION" in environment "staging"'
+    - 'environments: not attempted - writing secret "DEPLOY_TOKEN" in environment "staging"'
+  summary_contains:
+    - 'not attempted - creating variable "REGION" in environment "staging"'
+    - 'not attempted - writing secret "DEPLOY_TOKEN" in environment "staging"'
+  leaks_nowhere:
+    - sealed-staging-plaintext-1a2b

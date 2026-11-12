@@ -278,4 +278,24 @@ describe("actions_variables", () => {
       ),
     ]);
   });
+
+  test.each([
+    ["the variable is missing", []],
+    ["the live variable carries no timestamp", [{ name: "DEPLOY_REGION", value: "us-east-1" }]],
+  ] as Array<[string, Array<{ name: string; value: string }>]>)(
+    "a declared created_at, which GitHub only reports, is named once when %s",
+    async (_state, live) => {
+      // The engine is shared with the environments section's nested variables: without the note a copied timestamp drifts on every check unexplained.
+      const variable = {
+        name: "DEPLOY_REGION",
+        value: "us-east-1",
+        created_at: "2026-01-01T00:00:00Z",
+      };
+      const result = await plan(new MockApi(listRoute(live)), [variable as never]);
+      expect(result.notes).toEqual([
+        'actions_variables[DEPLOY_REGION]: "created_at" is a value GitHub reports, not a setting it accepts ' +
+          "(the GET returns it, neither the POST nor the PATCH takes it), so a declared value that differs from the live one drifts on every check and its update re-runs on every apply without converging; remove it from the settings file",
+      ]);
+    },
+  );
 });

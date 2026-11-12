@@ -1,0 +1,32 @@
+# GitHub's protection PUT types every control and review setting as a
+# boolean, and the rule mutation's Boolean input cannot take a string, so a
+# quoted value failed at apply: a 422 on a literal branch, a rejected
+# mutation on a wildcard rule. A null answered 422 on a literal branch
+# outside enforce_admins and allow_force_pushes. Each is refused before any
+# request, naming the key.
+name: branches-non-boolean-control-rejected
+settings:
+  branches:
+    - name: main
+      protection:
+        required_linear_history: "yes"
+        allow_deletions: null
+        required_pull_request_reviews:
+          dismiss_stale_reviews: "no"
+    - name: "release/*"
+      protection:
+        lock_branch: "off"
+live_state:
+  branches: ["main"]
+token_permissions:
+  administration: write
+  contents: read
+expect:
+  exit_code: 1
+  result: failed
+  zero_requests: true
+  stdout_contains:
+    - "branches[0].protection.required_pull_request_reviews.dismiss_stale_reviews: required_pull_request_reviews.dismiss_stale_reviews must be an unquoted true or false"
+    - 'branches[0].protection.required_linear_history: required_linear_history must be an unquoted true or false (YAML parses "no"/"off"/"yes" as strings, not booleans), so the toggle direction is unambiguous'
+    - "branches[0].protection.allow_deletions has no empty state; write true or false"
+    - "branches[1].protection.lock_branch: lock_branch must be an unquoted true or false"

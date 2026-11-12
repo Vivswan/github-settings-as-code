@@ -1,0 +1,32 @@
+# `_remove` on an entry of a list the registry does not key (a ruleset's
+# bypass_actors) removes nothing: the entry is applied as written, the marker
+# one of its fields as before, and the run now warns, naming the entry's path.
+name: apply-unkeyed-remove-warns
+settings:
+  rulesets:
+    - name: r
+      target: branch
+      enforcement: active
+      bypass_actors:
+        - actor_id: 1
+          actor_type: Team
+          bypass_mode: always
+          _remove: true
+token_permissions:
+  administration: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    rulesets: applied
+  mutations:
+    - "POST /repos/{repo}/rulesets"
+  stdout_contains:
+    - "::warning::"
+    - >-
+      settings.yml: rulesets[0].bypass_actors[0]._remove:
+      _remove belongs on an entry of a keyed list, and this list is not keyed,
+      so it removes nothing and passes through as a field of the entry.
+      Remove the key; the next major version refuses it
+    - 'rulesets: created ruleset "r"'
+  fixpoint: converges

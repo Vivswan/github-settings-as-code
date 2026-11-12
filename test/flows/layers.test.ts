@@ -2,11 +2,13 @@ import { describe, expect, spyOn, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { err, ok } from "neverthrow";
+import { unkeyedRemovalNote } from "../../src/engine/directives.js";
 import type { Layering } from "../../src/engine/layers.js";
 import { foldLayers, readLayerFiles } from "../../src/flows/layers.js";
 import * as settingsRead from "../../src/flows/settings-read.js";
 import { silentIo } from "../../src/io.js";
 import { describeProblem } from "../../src/problem.js";
+import { captureIo } from "../io/capture.js";
 import { withTempDir } from "../temp-dir.js";
 
 describe("readLayerFiles", () => {
@@ -54,6 +56,9 @@ describe("readLayerFiles", () => {
 
 describe("foldLayers", () => {
   const fleet = { name: "fleet.yml", doc: { labels: [{ name: "bug", description: "fleet" }] } };
+
+  /** A repository section whose passthrough list carries a marker no list keys: valid, and warned of. */
+  const MARKED_REPOSITORY = { custom_list: [{ _remove: true }] };
   const fold = (doc: Record<string, unknown>, layering: Layering) =>
     foldLayers([fleet, { name: "repo.yml", doc }], "merged", { layering }, silentIo());
 
@@ -178,6 +183,96 @@ describe("foldLayers", () => {
       );
     },
   );
+
+  // A warning is no issue, so nothing renumbered it: the layer's view index went out, one short per removal before it.
+  test("a layer's warning names the entry by its index in the file as written, the keyed removal before it counted and still dropping its lower entry; the warnings print in layer order, the fold's own last", () => {
+    const ruleset = (name: string) => ({ name, target: "branch", enforcement: "active" });
+    const marked = { actor_id: 1, actor_type: "Team", bypass_mode: "always", _remove: true };
+    const { io, annotations } = captureIo();
+    const folded = foldLayers(
+      [
+        {
+          name: "fleet.yml",
+          doc: {
+            rulesets: [ruleset("old"), ruleset("r")],
+            repository: { custom_list: [{ _remove: true }] },
+          },
+        },
+        {
+          name: "repo.yml",
+          doc: {
+            rulesets: [
+              { name: "old", _remove: true },
+              { name: "r", bypass_actors: [marked] },
+            ],
+          },
+        },
+      ],
+      "merged",
+      { layering: "deep" },
+      io,
+    );
+    expect(folded.map((out) => out.notices)).toEqual(
+      ok([{ layer: "repo.yml", path: "rulesets[0]" }]),
+    );
+    expect(annotations).toEqual([
+      `warning: ${unkeyedRemovalNote("fleet.yml", "repository.custom_list[0]._remove")}`,
+      `warning: ${unkeyedRemovalNote("repo.yml", "rulesets[1].bypass_actors[0]._remove")}`,
+      `warning: ${unkeyedRemovalNote("merged", "rulesets.entries[0].bypass_actors[0]._remove")}`,
+      `warning: ${unkeyedRemovalNote("merged", "repository.custom_list[0]._remove")}`,
+    ]);
+  });
+
+  // A layer's standalone view validates without what the fold alone judges, so its warning went out ahead of the
+  // fold's refusal: "passes through as a field" printed for a render that wrote nothing.
+  test.each<[what: string, above: { name: string; doc: Record<string, unknown> }[], code: string]>([
+    [
+      "its own top-level _layering is outside the values",
+      [{ name: "repo.yml", doc: { _layering: "banana", repository: MARKED_REPOSITORY } }],
+      "layer-bad-directive",
+    ],
+    [
+      "a keyed marker beside it is not true",
+      [
+        {
+          name: "repo.yml",
+          doc: { labels: [{ name: "bug", _remove: false }], repository: MARKED_REPOSITORY },
+        },
+      ],
+      "layer-remove-not-true",
+    ],
+    [
+      "a wrapper's _layering beside it is outside the values",
+      [
+        {
+          name: "repo.yml",
+          doc: {
+            labels: { _layering: "union", entries: [{ name: "docs" }] },
+            repository: MARKED_REPOSITORY,
+          },
+        },
+      ],
+      "layer-bad-directive",
+    ],
+    [
+      "another layer is one the shapes refuse",
+      [
+        { name: "team.yml", doc: { repository: MARKED_REPOSITORY } },
+        { name: "repo.yml", doc: { labels: "oops" } },
+      ],
+      "settings-malformed-sections",
+    ],
+  ])("a refused fold prints no layer's warning: %s", (_what, above, code) => {
+    const { io, annotations } = captureIo();
+    const folded = foldLayers([fleet, ...above], "merged", { layering: "deep" }, io);
+    expect<string | null>(
+      folded.match(
+        () => null,
+        (problem) => problem.code,
+      ),
+    ).toBe(code);
+    expect(annotations).toEqual([]);
+  });
 
   test("a malformed marker inside a closed entry schema is the fold's refusal, not the layer's own unknown-key problem", () => {
     // Per-layer validation runs before the fold, and an environment secret's schema is closed: were the marker left in
