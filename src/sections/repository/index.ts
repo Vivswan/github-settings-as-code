@@ -506,7 +506,7 @@ function declarationNotes(declared: RepositoryConfig): string[] {
   const meant = PRIVATE_BY_VISIBILITY.get(declared.visibility);
   if (declared.private !== undefined && meant !== undefined && declared.private !== meant) {
     notes.push(
-      `repository: private: ${declared.private} contradicts visibility: ${JSON.stringify(declared.visibility)}, which means private: ${meant}, ` +
+      `repository.private: ${declared.private} contradicts repository.visibility: ${JSON.stringify(declared.visibility)}, which means private: ${meant}, ` +
         "so if GitHub keeps only one of them check reports the other as drift on every run. Remove private or visibility from the settings file",
     );
   }

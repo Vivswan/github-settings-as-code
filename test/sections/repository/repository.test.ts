@@ -217,7 +217,7 @@ describe("repository", () => {
       "private: true beside visibility: public",
       { private: true, visibility: "public" },
       [
-        `repository: private: true contradicts visibility: "public", which means private: false, ${PAIR_FIX}`,
+        `repository.private: true contradicts repository.visibility: "public", which means private: false, ${PAIR_FIX}`,
       ],
       ["repository.private: true != false"],
     ],
@@ -225,7 +225,7 @@ describe("repository", () => {
       "private: false beside visibility: private",
       { private: false, visibility: "private" },
       [
-        `repository: private: false contradicts visibility: "private", which means private: true, ${PAIR_FIX}`,
+        `repository.private: false contradicts repository.visibility: "private", which means private: true, ${PAIR_FIX}`,
       ],
       ['repository.visibility: "private" != "public"'],
     ],
@@ -233,7 +233,7 @@ describe("repository", () => {
       "private: false beside visibility: internal",
       { private: false, visibility: "internal" },
       [
-        `repository: private: false contradicts visibility: "internal", which means private: true, ${PAIR_FIX}`,
+        `repository.private: false contradicts repository.visibility: "internal", which means private: true, ${PAIR_FIX}`,
       ],
       ['repository.visibility: "internal" != "public"'],
     ],
