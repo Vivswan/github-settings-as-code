@@ -441,9 +441,9 @@ export const BranchConfig = open({
       }
     }),
   )
+  // The conditional is the null refusal's published twin, read from the same two lists: a refinement does not reach z.toJSONSchema.
   .meta({
     id: "BranchConfig",
-    // The null refusal's published twin, read from the same two lists: a refinement does not reach z.toJSONSchema.
     ...conditional(
       { properties: { name: { not: { pattern: WILDCARD_NAME.source } } } },
       {
