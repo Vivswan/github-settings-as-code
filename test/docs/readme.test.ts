@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import type { z } from "zod";
 import { countWord } from "../../.github/scripts/lib/count-word.js";
 import { RUN_RESULTS } from "../../src/engine/outcome.js";
 import { DEFAULT_PRIVATE_REPOS, INPUT_DECLS } from "../../src/flows/inputs.js";
@@ -10,14 +11,20 @@ import { SNAPSHOT_SCHEMA_URL } from "../../src/flows/snapshot.js";
 import { ARTIFACT_FILE, ARTIFACT_NAME } from "../../src/report/artifact-report.js";
 import { PRIVATE_REPORT_CHANNELS } from "../../src/report/delivery.js";
 import { ISSUE_REPORT_PERMISSION } from "../../src/report/issue-report.js";
-import { PROBOT_PARITY_KEYS, SECTION_KEYS } from "../../src/schema.js";
+import {
+  PROBOT_PARITY_KEYS,
+  SECTION_KEYS,
+  type SectionKey,
+  SettingsFile,
+} from "../../src/schema.js";
 import { grantFor } from "../../src/sections/contract/permissions.js";
 import { DOCS } from "../../src/sections/docs-registry.js";
 import { SECTIONS } from "../../src/sections/registry.js";
+import { schemaNode } from "../../src/sections/shared/schema-node.js";
 import { ROOT } from "../root.js";
 import { readSettingsSchema } from "../settings-schema.js";
 import { defaultClaimProblems, deleteEnumerationProblems } from "./claims.js";
-import { fencedBlocks, sectionLines } from "./markdown.js";
+import { fencedBlocks, sectionLines, tableRows } from "./markdown.js";
 import { assertValidSettingsExample } from "./settings-examples.js";
 import { stalePins } from "./version-pins.js";
 
@@ -266,17 +273,55 @@ describe("SettingsFile deletion claims", () => {
   });
 });
 
-describe("forward-compatibility closed-sections claim", () => {
-  test("the guide's prose names exactly the closedSurface sections", () => {
-    // closedSurface is the single source of which sections reject unrecognized keys. The page's title is a single `#`, so it is read whole-document.
-    const closed = SECTIONS.filter((section) => section.closedSurface !== undefined).map(
-      (section) => section.key,
-    );
+/**
+ * Every mapping a schema closes, by dotted path (a list item spelled `[]`), outermost only: a strict mapping's own
+ * strict children are part of it. A knob's wrapper holds this action's vocabulary, never GitHub's, so only its list is read.
+ */
+function strictMappings(schema: z.ZodType, path: string): string[] {
+  const node = schemaNode(schema);
+  switch (node.kind) {
+    case "object":
+      return node.openness === "strict"
+        ? [path]
+        : Object.entries(node.shape).flatMap(([key, child]) =>
+            strictMappings(child, `${path}.${key}`),
+          );
+    case "array":
+      return strictMappings(node.element, `${path}[]`);
+    case "record":
+      return strictMappings(node.value, `${path}.*`);
+    case "wrapper":
+      return strictMappings(node.inner, path);
+    case "union":
+      return node.knob === null
+        ? node.options.flatMap((option) => strictMappings(option, path))
+        : strictMappings(node.knob.list, path);
+    case "leaf":
+      return [];
+  }
+}
+
+/** The two ways a section refuses an unknown key (its closedSurface, a strict mapping at its root), and every outermost strict mapping below a root. */
+function closedShapes(): { sections: SectionKey[]; nested: string[] } {
+  const strict = new Set(
+    SECTION_KEYS.flatMap((key) => strictMappings(SettingsFile.shape[key], key)),
+  );
+  const sections = SECTIONS.filter(
+    (section) => section.closedSurface !== undefined || strict.has(section.key),
+  ).map((section) => section.key);
+  const roots = new Set<string>(SECTION_KEYS);
+  return { sections, nested: [...strict].filter((path) => !roots.has(path)) };
+}
+
+describe("forward-compatibility closed-shapes claims", () => {
+  // The page's title is a single `#`, so the sentence is read whole-document.
+  const source = "docs/reference/forward-compatibility.md";
+  const page = readFileSync(join(ROOT, source), "utf8");
+
+  test("the guide's prose names exactly the sections that refuse an unknown key, a strict root as much as a closedSurface", () => {
+    const closed = closedShapes().sections;
     expect(closed.length).toBeGreaterThan(0);
-    const paragraph = readFileSync(
-      join(ROOT, "docs", "reference", "forward-compatibility.md"),
-      "utf8",
-    ).replace(/\n/g, " ");
+    const paragraph = page.replace(/\n/g, " ");
     const sentence = paragraph.match(/[^.]*closed rather than passthrough[^.]*\./)?.[0];
     expect(
       sentence,
@@ -293,5 +338,14 @@ describe("forward-compatibility closed-sections claim", () => {
         expect(sentence).not.toContain(`\`${key}\``);
       }
     }
+  });
+
+  test("the nested-shapes table names exactly the outermost strict mappings below a section's root, so one a slice adds never stays off the page", () => {
+    const { nested } = closedShapes();
+    expect(nested.length).toBeGreaterThan(0);
+    const [, ...rows] = tableRows(
+      sectionLines(page, "The closed nested shapes", source).join("\n"),
+    );
+    expect(rows.map(([shape]) => shape).sort()).toEqual(nested.map((path) => `\`${path}\``).sort());
   });
 });

@@ -1,0 +1,24 @@
+# GitHub's Pages create takes build_type and source alone and requires one of
+# them. A settings file declaring neither, against a repository with no Pages
+# site, has no create GitHub accepts and no site to update: apply sends no
+# write and names what to declare, with the 404's other reading beside it.
+name: pages-enable-needs-build-type-or-source
+settings:
+  pages:
+    https_enforced: true
+live_state:
+  pages: null
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    pages: applied
+  never:
+    - "POST /repos/{repo}/pages"
+    - "PUT /repos/{repo}/pages"
+  stdout_contains:
+    - "::notice::pages: pages: declared in the settings file but GitHub Pages is not enabled on the repo, and GitHub enables a site only from build_type or source, so apply changes nothing"
+    - "declare build_type or source to enable the site, or remove the pages section"
+    - "A fine-grained token missing the Pages permission gets the same answer"
+  stdout_lacks:
+    - "enabled GitHub Pages"

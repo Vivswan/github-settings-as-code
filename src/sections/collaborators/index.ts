@@ -1,7 +1,7 @@
 /**
  * `collaborators:` section: direct collaborators by username plus their pending invitations; the owner is
- * never removed. Bespoke, not on listSection: one declared username resolves against two live pools (the
- * collaborator list and the pending invitations), each with its own writes.
+ * never touched, declared or not. Bespoke, not on listSection: one declared username resolves against two
+ * live pools (the collaborator list and the pending invitations), each with its own writes.
  */
 
 import { err, ok, type Result, safeTry } from "neverthrow";
@@ -32,7 +32,6 @@ import { CollaboratorConfig } from "./schema.js";
 
 const LiveCollaborator = z.looseObject({
   login: z.string(),
-  permissions: z.record(z.string(), z.boolean()).optional(),
   role_name: z.string().optional(),
 });
 type LiveCollaborator = z.infer<typeof LiveCollaborator>;
@@ -256,20 +255,30 @@ function inviteDeclared(
   });
 }
 
-/** One declared entry settled against the collaborator it already is, else its pending invitation, else invited. */
+/**
+ * One declared entry settled against the collaborator it already is, else its pending invitation, else invited.
+ * The owner is none of the three: an entry naming it earns a note, never a write.
+ */
 function settleDeclared(
+  ctx: CollaboratorsContext,
   collaborator: CollaboratorConfig,
   access: LiveAccess,
   plan: CollaboratorsPlan,
 ): void {
+  const login = loginKey(collaborator.username);
+  if (isOwner(ctx, login)) {
+    plan.notes.push(
+      `collaborator "${collaborator.username}" is the repository owner, whose access is implicit and never managed; the entry is ignored - remove it from the settings file to silence this note`,
+    );
+    return;
+  }
+
   const permission = collaborator.permission ?? DEFAULT_ROLE;
   const wanted: Wanted = {
     username: collaborator.username,
     permission,
     role: roleForPermission(permission),
   };
-  const login = loginKey(collaborator.username);
-
   const existing = access.liveByLogin.get(login);
   if (existing) {
     // On GitHub a user is never a collaborator AND an invitee at once, so this branch settles the entry.
@@ -465,7 +474,7 @@ export const collaboratorsSection = {
       const declaredKeys = new Set<LoginKey>();
       for (const collaborator of desired) {
         declaredKeys.add(loginKey(collaborator.username));
-        settleDeclared(collaborator, access, plan);
+        settleDeclared(ctx, collaborator, access, plan);
       }
 
       const undeclared: Undeclared = { declaredKeys, policy, listDefault };

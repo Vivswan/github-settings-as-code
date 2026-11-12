@@ -36,6 +36,7 @@ import {
   manifestJson,
   moveOf,
   originHolds,
+  originHooks,
   PERMANENT,
   PLANTED_PACKAGES,
   packagedOf,
@@ -869,6 +870,50 @@ describe("pruneBuildTags", () => {
     expect(deleted).toEqual([second, first]);
     expect(pushes).toEqual([deleteOf(second, first)]);
     expect(buildTags(fx).sort()).toEqual(refs.slice(2).sort());
+  });
+
+  test("a rival deleting every candidate inside the delete push, after the push read origin and before origin locks the refs, gets the push refused, and the prune succeeds on its postcondition: the tags it named are gone", () => {
+    const fx = seedFixture();
+    const { refs, first, second } = plantWindow(fx);
+    // The marker proves the rival ran inside the push; the next test pins that git refuses a ref it lost that way.
+    const marker = join(fx.root, "rival-deleted-inside");
+    originHooks(fx, {
+      "pre-receive": `git update-ref -d ${first} && git update-ref -d ${second} && : > "${marker}"\n`,
+    });
+    let deleted: string[] | undefined;
+    const pushes = withPushPlans(fx, [], () => {
+      deleted = pruneBuildTags(fx.work);
+    });
+    expect(existsSync(marker)).toBe(true);
+    expect(deleted).toEqual([second, first]);
+    expect(pushes).toEqual([deleteOf(second, first)]);
+    expect(buildTags(fx).sort()).toEqual(refs.slice(2).sort());
+  });
+
+  test("a refused delete push that leaves one candidate on origin fails with git's own words, though a rival took the other inside it: the postcondition is every tag gone, not some", () => {
+    const fx = seedFixture();
+    const { refs, first, second } = plantWindow(fx);
+    originHooks(fx, {
+      "pre-receive": `git update-ref -d ${second}\n`,
+      update: `test "$1" != ${first}\n`,
+    });
+    let error: unknown;
+    const pushes = withPushPlans(fx, [], () => {
+      try {
+        pruneBuildTags(fx.work);
+      } catch (thrown) {
+        error = thrown;
+      }
+    });
+    expect(pushes).toEqual([deleteOf(second, first)]);
+    const message = error instanceof Error ? error.message : "";
+    expect(message).toStartWith(`git push origin :${second} :${first} failed: `);
+    // git's reason for the ref the rival took has changed across versions; that it rejected the ref has not.
+    expect(message).toContain(` ! [remote rejected] ${second.replace("refs/tags/", "")} (`);
+    expect(message).toContain(
+      ` ! [remote rejected] ${first.replace("refs/tags/", "")} (hook declined)`,
+    );
+    expect(buildTags(fx).sort()).toEqual(refs.filter((ref) => ref !== second).sort());
   });
 
   test("a ref under build/ this pipeline would not name stops the prune", () => {

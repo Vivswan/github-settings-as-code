@@ -9,6 +9,15 @@ import { randomUUID } from "node:crypto";
 import { EOL } from "node:os";
 import type { AnnotationLevel, OutputName } from "../index.js";
 
+/**
+ * `::` where the runner reads it: at the start of a line, after the white space its TrimStart() removes. A line
+ * starts at the start of a chunk or after CR or LF, the only characters the runner's reader ends one at. The white
+ * space is the 25 characters .NET's Char.IsWhiteSpace accepts: U+0009..U+000D, U+0020, U+0085, U+00A0, U+1680,
+ * U+2000..U+200A, U+2028, U+2029, U+202F, U+205F, U+3000.
+ */
+const LINE_OPENING_COMMAND =
+  /(^|[\r\n])([\t-\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]*)::/g;
+
 export interface ActionsRunner {
   /** GITHUB_OUTPUT; the runner always sets it, so an unset one only drops the record, as the action's Io does. */
   readonly outputFile: string | undefined;
@@ -35,10 +44,29 @@ export function actionsRunner(
   };
 }
 
+/**
+ * `text` with each line break in the runner's spelling (%0D, %0A). The runner reads `::` as a workflow command at
+ * the start of a line, after leading whitespace, so text after a raw break could open one.
+ */
+export function oneLine(text: string): string {
+  return text.replace(/\r/g, "%0D").replace(/\n/g, "%0A");
+}
+
+/**
+ * `text` with no line the runner reads as a workflow command, so text from a settings file or from live GitHub
+ * state, printed by any of the CLI's own writers, cannot issue one. Not covered: what a dependency prints itself,
+ * a marker split across two writes, and a writer that bypasses the stream on purpose.
+ *
+ *   the runner reads `::` at the start of a line, after leading whitespace -> that `::` is written %3A%3A
+ *   the runner reads `##[` anywhere in a line                               -> it is written %23%23[
+ */
+export function withoutCommands(text: string): string {
+  return text.replace(LINE_OPENING_COMMAND, "$1$2%3A%3A").replace(/##\[/g, "%23%23[");
+}
+
 /** One `::name::message` line with the runner's data escaping (%, CR, LF), as @actions/core issues it. */
 export function workflowCommand(name: "add-mask" | AnnotationLevel, message: string): string {
-  const data = message.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
-  return `::${name}::${data}${EOL}`;
+  return `::${name}::${oneLine(message.replace(/%/g, "%25"))}${EOL}`;
 }
 
 /** One GITHUB_OUTPUT record in the heredoc form the runner reads, with the fresh delimiter @actions/core mints per record. */

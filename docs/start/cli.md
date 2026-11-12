@@ -10,19 +10,21 @@ start managing a repository from its live settings (`init`), validate a settings
 
 ## Install
 
-Run it without installing, with npm or bun. Until the first stable release publishes the package, ask for the `next` tag:
+Run it without installing, with npm or bun:
 
 ```bash
-npx @vivswan/github-settings-as-code@next --help
-bunx @vivswan/github-settings-as-code@next --help
+npx @vivswan/github-settings-as-code --help
+bunx @vivswan/github-settings-as-code --help
 ```
 
 Or install it and call `gsac`:
 
 ```bash
-npm install --global @vivswan/github-settings-as-code@next
+npm install --global @vivswan/github-settings-as-code
 gsac --help
 ```
+
+Each form fetches the released version. Append `@next` to the package name for the pre-release of `main`; [Versioning](../reference/library.md#versioning) says which build that is.
 
 The package needs Node 22.14 or newer; `bunx` fetches it the same way and honors the executable's `node` shebang. The command reads its token from `--token` or the `GITHUB_TOKEN` environment variable; the same fine-grained PAT the action uses (see [Token permissions](../reference/permissions.md)).
 
@@ -140,12 +142,12 @@ Two inputs have no command-line form: `--private-report artifact` is refused (th
 
 Four flags are the command line's own, and `init` has one more, `--force` (replace an existing settings file):
 
-| Flag               | Does                                                                                                                                                                                  |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--token <value>`  | The token; `GITHUB_TOKEN` when absent                                                                                                                                                 |
-| `--json`           | Print the outputs as one JSON object on stdout; log lines move to stderr                                                                                                              |
-| `--summary <file>` | Append the run's markdown summary (the action's step summary) to this file; under GitHub Actions the step summary itself when absent; `init`, `validate`, and `permissions` have none |
-| `--verbose`        | Show the debug trace on stderr                                                                                                                                                        |
+| Flag               | Does                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--token <value>`  | The token; `GITHUB_TOKEN` when absent                                                                                                                                                                                                                                                                                                                                                                                       |
+| `--json`           | Print the outputs as one JSON object on stdout; log lines move to stderr                                                                                                                                                                                                                                                                                                                                                    |
+| `--summary <file>` | Append the run's markdown summary (the action's step summary) to this file; under GitHub Actions the step summary itself when absent. The file is opened, and its directories created, before the run starts: a path that cannot be opened is refused before any request, and the empty file and its directories stay when the run is then refused for another reason. `init`, `validate`, and `permissions` never open it. |
+| `--verbose`        | Show the debug trace on stderr                                                                                                                                                                                                                                                                                                                                                                                              |
 
 ## Output and exit codes
 
@@ -158,12 +160,15 @@ skipped-sections=
 repos-result={}
 ```
 
+A log line is one line in every mode: a line break inside a logged value is written `%0D` or `%0A`.
+
 As a GitHub Actions step (`GITHUB_ACTIONS=true` in the environment, as the runner sets it) the command line reports as the action does, in addition:
 
 - **A masked value** is a `::add-mask::` command.
 - **An annotation** is a `::notice::`, `::warning::`, or `::error::` command on stdout instead of the stderr line.
 - **The outputs** land in the step outputs (`GITHUB_OUTPUT`).
 - **The summary** lands in the step summary (`GITHUB_STEP_SUMMARY`) unless `--summary` names a file.
+- **Every other line** has `##[` written `%23%23[`, the `--json` object's text included, and a `::` that opens a line written `%3A%3A`, since the runner reads both as workflow commands.
 
 Those commands share stdout with the `--json` object, so a step reads the outputs from the step outputs, not by parsing stdout; the one-object rule below holds in a terminal.
 

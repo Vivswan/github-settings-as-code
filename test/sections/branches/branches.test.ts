@@ -1205,6 +1205,10 @@ describe("branches GraphQL-routed keys", () => {
       notes: [],
       landed: 0,
       failure: { kind: "live-shape", message: GHOST_ACTOR_ERROR },
+      unattempted: [
+        'replacing protection for branch "dev"',
+        'setting the GraphQL-only protection fields of branch "dev"',
+      ],
     });
     expect(api.mutations()).toHaveLength(0);
   });

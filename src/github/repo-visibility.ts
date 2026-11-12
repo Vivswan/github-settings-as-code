@@ -26,7 +26,7 @@ export function createVisibilityResolver(
 
 async function probe(api: GitHubClient, slug: string): Promise<RepoVisibility> {
   // The probe decides redaction, so its own trace (and any throttle-callback trace) must fail closed before the answer
-  // is known: redactTrace holds the slug redacted for the request's duration.
+  // is known: the redactTrace mark seals the trace until the request settles.
   const result = await api.tryRequest("GET", `/repos/${slug}`, undefined, { redactTrace: true });
   if ("failed" in result || "error" in result) {
     return "unknown";

@@ -6,7 +6,9 @@
  * without touching the process.
  */
 
+import { closeSync } from "node:fs";
 import { Command, CommanderError, Option } from "commander";
+import { ok } from "neverthrow";
 import pc from "picocolors";
 import {
   describeProblem,
@@ -38,7 +40,14 @@ import {
   once,
   tokenValues,
 } from "./inputs.js";
-import { type CliIo, type CliStreams, cliIo, type MaskedStreams, maskedStreams } from "./io.js";
+import {
+  type CliIo,
+  type CliStreams,
+  cliIo,
+  type MaskedStreams,
+  maskedStreams,
+  openSummaryFile,
+} from "./io.js";
 
 /** Every subcommand, in help order; the package smoke asserts the installed help names each. */
 export const CLI_COMMANDS = [
@@ -101,14 +110,14 @@ export interface ProgramOptions {
   readonly executeInit?: (cfg: InitConfig, io: Io) => Promise<Rendered>;
 }
 
-/** What every subcommand's action shares; `exit` records the code main() returns. */
+/** What every subcommand's action shares; `exit` records the code main() returns, and `openIo` takes the descriptor a mode command holds on its `--summary` file. */
 interface Wiring {
   readonly host: CliHost;
   readonly streams: MaskedStreams;
   readonly bold: (text: string) => string;
   readonly execute: (cfg: RunConfig, io: Io) => Promise<RunEnd>;
   readonly executeInit: (cfg: InitConfig, io: Io) => Promise<Rendered>;
-  readonly openIo: (globals: Globals) => CliIo;
+  readonly openIo: (globals: Globals, summaryFd?: number) => CliIo;
   readonly exit: (code: number) => void;
 }
 
@@ -174,11 +183,23 @@ function addModeCommands(program: Command, wiring: Wiring): void {
 
     command.action(async function (this: Command) {
       const values = this.optsWithGlobals<Globals & Record<string, unknown>>();
-      const { io, flush } = wiring.openIo(values);
+      const summary =
+        values.summary === undefined ? ok(undefined) : openSummaryFile(values.summary);
+      if (summary.isErr()) {
+        // No run started, so this ends as a file-only command's failure does: the error line and the failed envelope.
+        const refused: Rendered = { code: 1, lines: [], json: failedEnvelope(summary.error) };
+        wiring.openIo(values).io.annotate("error", summary.error);
+        present(wiring.streams, refused, values);
+        wiring.exit(refused.code);
+        return;
+      }
+
+      const summaryFd = summary.value;
+      const { io, flush } = wiring.openIo(values, summaryFd);
       const read = argvReader(mode, values);
       // The envelope carries the fatal problem's text beside the outputs; the line itself is already on stderr.
       let fatal: string | undefined;
-      const code = await parseConfig(read, wiring.host.env, CLI_CAPABILITIES).match(
+      const run = parseConfig(read, wiring.host.env, CLI_CAPABILITIES).match(
         async (cfg) => {
           const end = await wiring.execute(cfg, io);
           fatal = end.fatal === undefined ? undefined : describeProblem(end.fatal);
@@ -189,6 +210,8 @@ function addModeCommands(program: Command, wiring: Wiring): void {
           return failRun(io, problem);
         },
       );
+      // Nothing appends to the summary once the run has settled, whichever way it ends.
+      const code = await (summaryFd === undefined ? run : run.finally(() => closeSync(summaryFd)));
       wiring.exit(code);
       flush(fatal);
     });
@@ -283,12 +306,12 @@ export function buildProgram(options: ProgramOptions): {
     bold: paint.bold,
     execute,
     executeInit,
-    openIo: (globals) =>
+    openIo: (globals, summaryFd) =>
       cliIo({
         streams,
         json: globals.json === true,
         verbose: globals.verbose === true,
-        summaryFile: globals.summary,
+        summaryFd,
         colors,
       }),
     exit: (code) => {

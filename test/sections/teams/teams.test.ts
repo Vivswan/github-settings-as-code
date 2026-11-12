@@ -5,6 +5,7 @@
 
 import { describe, expect, test } from "bun:test";
 import type { SectionInput } from "../../../src/sections/contract/declared.js";
+import { failureFor } from "../../../src/sections/contract/errors.js";
 import type { SectionModule } from "../../../src/sections/contract/module.js";
 import { planContext, snapshotContext } from "../../../src/sections/contract/plan.js";
 import { sectionModule } from "../../../src/sections/registry.js";
@@ -12,7 +13,7 @@ import { teamsSection } from "../../../src/sections/teams/index.js";
 import { MockApi } from "../../mock-api.js";
 import { fragmentFake } from "../fragment-fake.js";
 import { provePlanIdempotent } from "../plan-idempotence.js";
-import { REPO, unwrap } from "../section-run.js";
+import { REPO, rejectsDenied, unwrap } from "../section-run.js";
 import { validatedInput } from "../validated-input.js";
 import { teamsMockHandlers } from "./mock.js";
 
@@ -26,6 +27,13 @@ const plan = async (api: MockApi, desired: SectionInput<"teams">) =>
   unwrap(await gated.plan(planContext(gated, api, REPO), validatedInput("teams", desired)));
 const snapshot = async (api: MockApi) =>
   unwrap(await gated.snapshot(snapshotContext(gated, api, REPO, "fail")));
+
+const SECTION_GRANT =
+  'grant "Members" (read) under the PAT\'s Organization permissions and "Administration" (read and write) under its Repository permissions';
+/** What plan() and snapshot() both say of a team the list names and the probe answers 404 for. */
+const LISTED_PROBE_404 = (reading: string) =>
+  `listed with access to o/r, but the access probe answered 404, ${reading}. ` +
+  `A fine-grained token missing the grant gets the same answer; if the team does have access, ${SECTION_GRANT}`;
 
 describe("teams", () => {
   test("a personal account no-ops with a note after the org probe alone", async () => {
@@ -84,6 +92,70 @@ describe("teams", () => {
       probeOf("ops"),
       probeOf("new"),
     ]);
+  });
+
+  test("a listed team whose probe answers 404 drifts under both readings of the 404, as snapshot() notes the same state; unlisted, it is plain no access", async () => {
+    // Without the listing, check calls a probe the token may be denied "no access" and promises a grant, while snapshot() hedges the same answers.
+    const notFound = { error: { status: 404, message: "Not Found", body: "" } };
+    const api = new MockApi({
+      [ORG]: { data: { login: "o" } },
+      [LIST]: {
+        data: [
+          { slug: "core", access_source: "direct" },
+          { slug: "everyone", access_source: "organization" },
+        ],
+      },
+      // The declared spelling and the listed slug differ in case, as GitHub folds them.
+      [probeOf("Core")]: notFound,
+      [probeOf("core")]: notFound,
+      [probeOf("everyone")]: notFound,
+      [probeOf("new")]: notFound,
+    });
+    const result = await plan(api, [
+      { name: "Core", permission: "push" },
+      { name: "everyone" },
+      { name: "new" },
+    ]);
+    expect(result.ops.map((op) => op.drift)).toEqual([
+      [
+        `teams[Core]: ${LISTED_PROBE_404('read here as no access, so apply will grant "push"')}, then check again`,
+      ],
+      // Access granted above the repository is listed access all the same, so its 404 is as unproven.
+      [
+        `teams[everyone]: ${LISTED_PROBE_404('read here as no access, so apply will grant "push"')}, then check again`,
+      ],
+      ['teams[new]: no access to o/r; apply will grant "push"'],
+    ]);
+    expect(result.ops.map((op) => [op.role, op.params?.team_slug])).toEqual([
+      ["grant", "Core"],
+      ["grant", "everyone"],
+      ["grant", "new"],
+    ]);
+    expect([result.notes, result.drift]).toEqual([[], []]);
+    expect((await snapshot(api)).notes).toEqual([
+      `teams[core]: left out of the snapshot - ${LISTED_PROBE_404("read here as no access")}, then snapshot again`,
+      "teams[everyone]: left out of the snapshot - access to o/r is granted at the organization level, not on the repository, and declaring it would grant direct access",
+    ]);
+  });
+
+  test("a denied team list advises the grant the section's writes need, so the fix costs one round trip", async () => {
+    // Advice naming only the list's own gate (Administration, read) passes the next preflight, and the grant PUT is denied in turn.
+    const denied = {
+      status: 403,
+      message: "Resource not accessible by personal access token",
+      body: "",
+    };
+    const api = new MockApi({ [ORG]: { data: { login: "o" } }, [LIST]: { error: denied } });
+    expect(await rejectsDenied(plan(api, [{ name: "core" }]))).toBe(
+      `the token was denied GET /repos/o/r/teams: 403 Resource not accessible by personal access token. To fix, ${SECTION_GRANT}`,
+    );
+    const grant = teamsSection.endpoints.grant;
+    expect(
+      failureFor(gated, "PUT", "/orgs/o/teams/core/repos/o/r", denied, { op: grant }),
+    ).toMatchObject({
+      kind: "permission-denied",
+      detail: `the token was denied PUT /orgs/o/teams/core/repos/o/r: 403 Resource not accessible by personal access token. To fix, ${SECTION_GRANT}`,
+    });
   });
 
   // A converged declared team beside an undeclared direct team and a team whose access is granted above the repository.

@@ -30,6 +30,7 @@ import {
   writeGatedReads,
 } from "../../../src/sections/contract/operations.js";
 import {
+  coversPermission,
   type SectionPermission,
   samePermission,
 } from "../../../src/sections/contract/permissions.js";
@@ -1545,6 +1546,40 @@ describe("DenialPolicy", () => {
     const _standIn: Carrier = { onMissingPermission: { notesDenials: true } };
     // @ts-expect-error the constructor is private
     const _minted: DenialPolicy = new DenialPolicy("warn");
+  });
+});
+
+describe("coversPermission", () => {
+  // Only the first row is a shipped section (teams): the others keep the direction and the alternatives honest, where a
+  // symmetric or reversed comparison would advise a section grant that leaves the denied endpoint denied.
+  test.each<[label: string, grant: SectionPermission, asked: SectionPermission, covers: boolean]>([
+    [
+      "a read gated at the repository half of a grant that also carries an organization half",
+      { repo: ["administration"], org: "members" },
+      { repo: ["administration"] },
+      true,
+    ],
+    [
+      "an organization half the grant lacks",
+      { repo: ["administration"] },
+      { repo: ["administration"], org: "members" },
+      false,
+    ],
+    [
+      "a grant alternative the asked permission does not accept, which the user may be the one to pick",
+      { repo: ["administration", "code_scanning_alerts"] },
+      { repo: ["administration"] },
+      false,
+    ],
+    [
+      "a grant whose every alternative the asked permission accepts",
+      { repo: ["administration"] },
+      { repo: ["code_scanning_alerts", "administration"] },
+      true,
+    ],
+    ["a different resource", { repo: ["administration"] }, { repo: ["contents"] }, false],
+  ])("%s: %p against %p covers %p", (_label, grant, asked, covers) => {
+    expect(coversPermission(grant, asked)).toBe(covers);
   });
 });
 

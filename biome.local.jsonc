@@ -67,6 +67,18 @@
         }
       }
     },
+    // Every line the action or the CLI prints goes through its sink (src/action/io.ts) or the CLI's streams, where
+    // text the Actions runner would read as a workflow command is rewritten; a console call elsewhere bypasses both.
+    {
+      "includes": ["src/**", "!src/action/io.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noConsole": "error"
+          }
+        }
+      }
+    },
     {
       "includes": ["src/**"],
       "plugins": ["./lint/never-throw.grit"]

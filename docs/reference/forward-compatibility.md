@@ -8,7 +8,7 @@ GitHub ships new settings fields faster than any wrapper can track them, so this
 
 This page draws the line: where the passthrough tenet holds, and where a shape is deliberately closed.
 
-The passthrough is the default: every section not named in the closed list below accepts fields it does not recognize and sends them through. The richest passthrough sections are `rulesets` (new rule types, bypass-actor fields, condition types), `repository`, `branches`, `environments`, `actions`, `pages`, and `code_scanning_default_setup`.
+The passthrough is the default: every section not named in the closed list below accepts fields it does not recognize and sends them through. The [closed nested shapes](#the-closed-nested-shapes) inside some of those sections are the exception. The richest passthrough sections are `rulesets` (new rule types, bypass-actor fields, condition types), `repository`, `branches`, `environments`, `actions`, `pages`, and `code_scanning_default_setup`.
 
 The published JSON Schema follows the same tenet. It is documentation, not a gate, so unknown fields validate on purpose: declaring a field GitHub ships tomorrow must never read as an error.
 
@@ -19,16 +19,27 @@ Two deliberate boundaries:
 
 ## The closed sections
 
-Nine sections are closed rather than passthrough: `collaborators`, `teams`, `workflows`, `custom_properties`, `secret_scanning_custom_patterns`, and the secret sections `actions_secrets`, `dependabot_secrets`, `codespaces_secrets`, and `agents_secrets` reject entry keys they do not recognize.
+Ten sections are closed rather than passthrough: `collaborators`, `teams`, `workflows`, `custom_properties`, `secret_scanning_custom_patterns`, the secret sections `actions_secrets`, `dependabot_secrets`, `codespaces_secrets`, and `agents_secrets`, and `interaction_limits` reject keys they do not recognize.
 
-Their API calls carry at most the declared fields per entry (a `permission`, a property `value`, a sealed secret value, or a pattern's own fields; the workflow enable/disable calls carry none), so an extra key can only be a typo. Two typos a passthrough would have accepted silently:
+The first nine are lists, and the key they refuse is an entry's. Their API calls carry at most the declared fields per entry (a `permission`, a property `value`, a sealed secret value, or a pattern's own fields; the workflow enable/disable calls carry none), so an extra key can only be a typo. Two typos a passthrough would have accepted silently:
 
 - **A misspelled `permission`** would grant the default `push` role and never show up as drift.
 - **A pattern's `state` and `push_protection_enabled`** are read-only through the custom-pattern endpoints and would do nothing.
 
-A few nested shapes are strict for the same reason:
+`interaction_limits` is one mapping, and the key it refuses is its own: GitHub reports `origin` and `expires_at` beside the limit and accepts neither. Its `pull_request_creation_cap` stays passthrough.
 
-- **The actions section's `cache` object.** Each key of it is the entire body of its own endpoint, so an unrecognized cache key has nowhere to go and is rejected upfront; the rest of that section stays passthrough.
-- **The `secrets` and `deployment_protection_rules` entries inside a declared environment.** Their write bodies are built from the named fields alone, so an extra entry key would silently do nothing.
+## The closed nested shapes
+
+These mappings inside passthrough sections refuse a key they do not recognize.
+
+| Shape                                                   | Why an extra key is refused                                                            |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `actions.cache`                                         | Each key is the entire body of its own endpoint, so another key has nowhere to go      |
+| `actions.selected_actions`                              | It is the whole body of the allowlist PUT, and GitHub documents three fields for it    |
+| `repository.security_and_analysis`                      | The schema names every sub-key the PATCH accepts; every mapping under it is closed too |
+| `branches[].protection.required_status_checks.checks[]` | GitHub's protection PUT takes only `context` and `app_id` in a check item              |
+| `branches[].protection.required_deployments`            | The rule mutation is built from `environments` alone                                   |
+| `environments[].secrets[]`                              | The write body is built from the sealed value alone                                    |
+| `environments[].deployment_protection_rules[]`          | The enable call sends only the App's resolved id                                       |
 
 The wrapped form of the list sections is strict the same way: its keys are this action's own vocabulary, never sent to GitHub, so any other wrapper key is rejected upfront as a typo. The [undeclared policy page](undeclared-policy.md) is the one place that lists them.

@@ -3,8 +3,11 @@ import { parse as parseYaml } from "yaml";
 import {
   DEFAULT_API_VERSION,
   GitHubApi,
+  type GitHubClient,
+  type GraphqlOp,
   MAX_RETRIES,
   MAX_RETRY_WAIT_S,
+  redactedClient,
 } from "../../src/github/api.js";
 import {
   type ApiError,
@@ -18,7 +21,7 @@ import {
   TIMERS_SCHEDULER,
 } from "../../src/github/scheduler.js";
 import { redactingOctokitLog, TraceRedaction } from "../../src/github/trace-redaction.js";
-import { api, restoreFetch, stubFetch, traceIo } from "./stub.js";
+import { api, json, restoreFetch, stubFetch, timeless, traceIo } from "./stub.js";
 
 afterEach(restoreFetch);
 
@@ -30,6 +33,12 @@ const rateLimited = () =>
     status: 429,
     headers: { "retry-after": "0", "x-ratelimit-remaining": "0" },
   });
+
+const READ_OP: GraphqlOp = {
+  name: "RepoId",
+  kind: "read",
+  query: 'query RepoId($owner: String!) { repository(owner: $owner, name: "r") { id } }',
+};
 
 describe("retry and throttling", () => {
   test("429 rate limits are retried until they succeed", async () => {
@@ -103,6 +112,56 @@ describe("retry and throttling", () => {
     // No JSON content-type on the stubbed body, so the raw text is the message, and a string body carries no documentation_url.
     expect("error" in result && result.error.message).toBe('{"message":"rate limited"}');
     expect("error" in result && result.error.documentationUrl).toBeUndefined();
+  });
+
+  // The throttle line is the trace's only record of what the client did about a limit: it once announced a retry the
+  // callback then refused, so a run that failed at once read as one that had waited.
+  const primaryLimit = (resetInSeconds: number) => () =>
+    new Response('{"message":"API rate limit exceeded for user ID 1."}', {
+      status: 403,
+      headers: {
+        "content-type": "application/json",
+        "x-ratelimit-remaining": "0",
+        "x-ratelimit-reset": String(Math.floor(Date.now() / 1000) + resetInSeconds),
+      },
+    });
+  test.each<
+    [
+      name: string,
+      send: (client: GitHubApi) => Promise<unknown>,
+      response: () => Response,
+      requests: number,
+      lines: string[],
+    ]
+  >([
+    [
+      "a primary limit whose reset is beyond the cap gives up with one request sent",
+      (client) => client.tryRequest("GET", "/repos/o/r"),
+      primaryLimit(3000),
+      1,
+      [
+        `rate limit on GET /repos/o/r; giving up: the wait of Ns is over the ${MAX_RETRY_WAIT_S}s cap`,
+      ],
+    ],
+    [
+      "a GraphQL RATE_LIMITED is retried, then given up once the retries are spent",
+      (client) => client.tryGraphql(READ_OP, { owner: "o" }, "o/r"),
+      json({ data: null, errors: [{ type: "RATE_LIMITED", message: "slow down" }] }),
+      1 + MAX_RETRIES,
+      [
+        `rate limit on POST /graphql; retry 1/${MAX_RETRIES} after 0s`,
+        `rate limit on POST /graphql; retry 2/${MAX_RETRIES} after 0s`,
+        `rate limit on POST /graphql; giving up: the ${MAX_RETRIES} retries are spent`,
+      ],
+    ],
+  ])("the throttle trace says what follows: %s", async (_name, send, response, requests, lines) => {
+    const state = stubFetch([response]);
+    const trace = traceIo();
+    await send(api(trace.io));
+    expect(state.calls).toBe(requests);
+    // The wait is read off the clock (3000 or 3001 here), so its number is folded.
+    const limited = trace.lines.filter((line) => line.startsWith("rate limit on"));
+    expect(limited.map((line) => line.replace(/wait of \d+s/, "wait of Ns"))).toEqual(lines);
   });
 });
 
@@ -482,27 +541,78 @@ describe("debug-trace hardening for redacted slugs", () => {
     expect(dbg.lines).toEqual(["<redacted>", "<redacted>"]);
   });
 
-  test("redactTrace holds the slug for the request only; the same client traces it legibly afterwards", async () => {
-    // The visibility probe must not leak its target before the answer is known; once the flow decided it is public, the same slug is legible again.
-    stubFetch([() => new Response(null, { status: 204 })]);
-    const dbg = traceIo();
-    const client = api(dbg.io);
-    await client.tryRequest("GET", "/repos/owner/probed", undefined, { redactTrace: true });
-    // Octokit's own request lines ride the same channel, so the whole window must stay free of the slug.
-    const held = dbg.lines.join("\n");
-    expect(held).toContain("GET <redacted> -> 204");
-    expect(held).not.toContain("owner/probed");
-    dbg.lines.length = 0;
-    await client.tryRequest("GET", "/repos/owner/probed");
-    expect(dbg.lines.join("\n")).toContain("GET /repos/owner/probed -> 204");
-    // A hold needs a slug to hold: a slug-free path cannot be traced redacted.
-    await expect(
-      client.tryRequest("GET", "/user", undefined, { redactTrace: true }),
-    ).rejects.toThrow(/redactTrace needs a/);
-  });
+  // No slug is masked in this table: the mark alone decides, so a route that names no repository hides too. Each row
+  // is sent marked, then unmarked through the same client, which proves the seal lifts and shows what it hid.
+  test.each<
+    [
+      name: string,
+      send: (client: GitHubApi, mark: { redactTrace?: boolean }) => Promise<unknown>,
+      response: () => Response,
+      own: string,
+      hidden: string,
+    ]
+  >([
+    [
+      "the visibility probe",
+      (client, mark) => client.tryRequest("GET", "/repos/owner/probed", undefined, mark),
+      json({ private: true }),
+      "GET <redacted> -> 200 (Nms)",
+      "GET /repos/owner/probed -> 200",
+    ],
+    [
+      "the owner probe",
+      (client, mark) => client.tryRequest("GET", "/orgs/secret-org", undefined, mark),
+      json({ login: "secret-org" }),
+      "GET <redacted> -> 200 (Nms)",
+      "GET /orgs/secret-org -> 200",
+    ],
+    [
+      "the app lookup",
+      (client, mark) => client.tryRequest("GET", "/apps/internal-deploy-bot", undefined, mark),
+      json({ slug: "internal-deploy-bot" }),
+      "GET <redacted> -> 200 (Nms)",
+      "GET /apps/internal-deploy-bot -> 200",
+    ],
+    [
+      "a write and its payload",
+      (client, mark) =>
+        client.tryRequest("PATCH", "/orgs/secret-org", { description: "CANARY" }, mark),
+      json({}),
+      "PATCH <redacted> -> 200 (Nms)",
+      'payload: {"description":"CANARY"}',
+    ],
+    [
+      "a list walk",
+      (client, mark) => client.tryList("/orgs/secret-org/teams", mark),
+      json([]),
+      "GET <redacted> -> 200 (Nms)",
+      "GET /orgs/secret-org/teams?per_page=100&page=1 -> 200",
+    ],
+    [
+      "a GraphQL operation and its variables",
+      (client, mark) =>
+        client.tryGraphql(READ_OP, { owner: "secret-org" }, "secret-org/private-repo", mark),
+      json({ data: { repository: { id: "R_1" } } }),
+      "<redacted>",
+      'variables: {"owner":"secret-org"}',
+    ],
+  ])(
+    "a request marked as serving a redacted target leaves no route or payload in the trace: %s",
+    async (_name, send, response, own, hidden) => {
+      stubFetch([response]);
+      const dbg = traceIo();
+      const client = api(dbg.io);
+      await send(client, { redactTrace: true });
+      // The request-log plugin's two lines for the attempt, then the client's own.
+      expect(dbg.lines.map(timeless)).toEqual(["<redacted>", "<redacted>", own]);
+      dbg.lines.length = 0;
+      await send(client, {});
+      expect(dbg.lines.join("\n")).toContain(hidden);
+    },
+  );
 
   test("a rate-limited visibility probe leaks no raw slug in any trace", async () => {
-    // The throttle-callback trace fires on the 429 retry, before the probe result exists, so the probe's request-window hold is what redacts it.
+    // The throttle-callback trace fires on the 429 retry, before the probe result exists, so the seal the probe's mark sets is what redacts it.
     const { createVisibilityResolver } = await import("../../src/github/repo-visibility.js");
     stubFetch([
       rateLimited,
@@ -1231,21 +1341,66 @@ describe("DELETE request bodies reach the wire", () => {
   });
 });
 
-describe("TraceRedaction holds", () => {
-  test("overlapping holds on one slug are independent: releasing one, even twice, keeps the other's redaction", () => {
+describe("TraceRedaction.during", () => {
+  test("overlapping requests for redacted targets keep the trace sealed until the last one settles, a rejected one included", async () => {
+    // A seal the first settled request lifted would print the plugin lines of the one still in flight.
     const trace = new TraceRedaction(traceIo().io);
-    const releaseFirst = trace.hold("o/probed");
-    const releaseSecond = trace.hold("O/Probed");
-    releaseFirst();
-    releaseFirst(); // a repeated release must not consume the other hold
-    expect(trace.path("/repos/o/probed/labels")).toEqual({ path: "<redacted>", redacted: true });
-    expect(trace.message("retrying o/probed after 429")).toBe("<redacted>");
-    releaseSecond();
-    expect(trace.path("/repos/o/probed/labels")).toEqual({
-      path: "/repos/o/probed/labels",
-      redacted: false,
-    });
-    expect(trace.message("retrying o/probed after 429")).toBe("retrying o/probed after 429");
-    expect(trace.isRedacted("o/probed")).toBe(false);
+    const first = Promise.withResolvers<void>();
+    const second = Promise.withResolvers<void>();
+    const firstRequest = trace.during(true, () => first.promise);
+    const secondRequest = trace.during(true, () => second.promise);
+    first.resolve();
+    await firstRequest;
+    expect(trace.path("/orgs/o")).toEqual({ path: "<redacted>", redacted: true });
+    expect(trace.message("GET /orgs/o - 200 with id A1 in 1ms")).toBe("<redacted>");
+    second.reject(new Error("socket hang up"));
+    await expect(secondRequest).rejects.toThrow("socket hang up");
+    expect(trace.path("/orgs/o")).toEqual({ path: "/orgs/o", redacted: false });
+    expect(trace.message("GET /orgs/o - 200 with id A1 in 1ms")).toBe(
+      "GET /orgs/o - 200 with id A1 in 1ms",
+    );
+  });
+});
+
+describe("redactedClient", () => {
+  test("every request through the view reaches the client marked, the caller's own options kept", async () => {
+    // A method of the view that forgot the mark would print its route; one that dropped the caller's options would
+    // lose carriesSecret, and with it the withholding of a secret's echo.
+    const seen: unknown[][] = [];
+    const client: GitHubClient = {
+      tryRequest: async (...args) => {
+        seen.push(args);
+        return { data: null };
+      },
+      tryList: async (...args) => {
+        seen.push(args);
+        return { data: [] };
+      },
+      tryGraphql: async (...args) => {
+        seen.push(args);
+        return { data: {} };
+      },
+    };
+    const view = redactedClient(client);
+    await view.tryRequest(
+      "PUT",
+      "/orgs/o/teams/t",
+      { permission: "push" },
+      { carriesSecret: true },
+    );
+    await view.tryList("/orgs/o/teams", { perPage: 30 });
+    await view.tryGraphql(READ_OP, { owner: "o" }, "o/r");
+    expect(seen).toEqual([
+      [
+        "PUT",
+        "/orgs/o/teams/t",
+        { permission: "push" },
+        { carriesSecret: true, redactTrace: true },
+      ],
+      ["/orgs/o/teams", { perPage: 30, redactTrace: true }],
+      [READ_OP, { owner: "o" }, "o/r", { redactTrace: true }],
+    ]);
+    // One view per client: the owner gate memoizes its probe per client, so a view per target would probe once per redacted target.
+    expect(redactedClient(client)).toBe(view);
   });
 });
