@@ -13,6 +13,7 @@ import { type ValidatedSettings, validateSettingsDoc } from "../engine/orchestra
 import { SectionSelection } from "../engine/section-selection.js";
 import type { Io } from "../io.js";
 import type { LayerProblem, ProblemOf, SettingsProblem } from "../problem.js";
+import { capturingIo } from "./redact.js";
 import { readSettingsFile } from "./settings-read.js";
 
 export function readLayerFiles(
@@ -60,6 +61,9 @@ function validateLayer(layer: Layer, io: Io): Result<ValidatedSettings, Settings
  * A layer must be a valid document before it may contribute, so the merge can never complete a broken declaration into
  * a valid one. The fold, not the validated parse, is what is written: the file holds what the layers declared, and
  * validation only judges it.
+ *
+ * What the validations print is held until the fold stands, and dropped when it is refused: a layer's standalone view
+ * validates without what the fold alone judges, so its warning would speak of a run the fold then refuses.
  */
 export function foldLayers(
   layers: readonly Layer[],
@@ -67,11 +71,12 @@ export function foldLayers(
   options: FoldOptions,
   io: Io,
 ): Result<FoldedLayers, SettingsProblem | LayerProblem> {
-  return Result.combine(layers.map((layer) => validateLayer(layer, io)))
+  const held = capturingIo(io);
+  return Result.combine(layers.map((layer) => validateLayer(layer, held.io)))
     .andThen(() => mergeLayers(layers, options))
     .andThen((merged) =>
       // The fold resolved every policy already, so the run input changes nothing here; passed so the two paths read alike.
-      validateSettingsDoc(merged.settings, sourceLabel, EVERY_SECTION, io, {
+      validateSettingsDoc(merged.settings, sourceLabel, EVERY_SECTION, held.io, {
         undeclared: options.undeclared,
       }).map((settings) => ({
         settings,
@@ -79,5 +84,15 @@ export function foldLayers(
         // Validation just proved the fold a plain mapping of section keys: the directives were consumed, and any other key refused.
         yaml: renderCanonicalYaml(merged.settings as Record<string, unknown>),
       })),
-    );
+    )
+    .map((folded) => {
+      for (const { level, line } of held.drain()) {
+        if (level === undefined) {
+          io.log(line);
+        } else {
+          io.annotate(level, line);
+        }
+      }
+      return folded;
+    });
 }
