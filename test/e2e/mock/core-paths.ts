@@ -419,6 +419,39 @@ function serveMarkerLabelCreate(
   return { response: { status: 201, body: label }, coreKey };
 }
 
+/**
+ * The marker-label read precedes the target's work in both modes, so it is served here, beside the ensure-create, and
+ * only for the marker name on a delivery target; any other label GET falls through to section matching, where no
+ * route answers it.
+ */
+function serveMarkerLabelRead(
+  request: IssueReportRequest,
+  run: IssueReportRun,
+): IssueReportOutcome | null {
+  const labelMatch = request.pathname.match(/^\/repos\/([^/]+\/[^/]+)\/labels\/([^/]+)$/);
+  if (
+    !labelMatch ||
+    request.method !== "GET" ||
+    decodeURIComponent(labelMatch[2] ?? "") !== MARKER_LABEL
+  ) {
+    return null;
+  }
+  const slug = decodeURIComponent(labelMatch[1] ?? "");
+  if (!isReportDeliveryTarget(slug, run.scenario, run.multi, run.faults)) {
+    return null;
+  }
+  const coreKey = "core.reportLabelRead" as const;
+  const admitted = admitIssueRoute(request, run, slug, coreKey);
+  if (!("state" in admitted)) {
+    return admitted;
+  }
+  const label = findLabel(admitted.state, MARKER_LABEL);
+  return {
+    response: label ? ok(label) : { status: 404, body: { message: "Not Found" } },
+    coreKey,
+  };
+}
+
 /** GitHub's default is newest first; the number stands in for created_at, which the seeded issues do not carry. */
 function listIssues(state: MockState, query: Record<string, string>): IssueReportOutcome {
   if (query.sort !== undefined && query.sort !== "created") {
@@ -512,6 +545,7 @@ function serveIssueRoute(
 
 /**
  * Null when the path is not an issue-channel route, so the caller falls through to section matching.
+ *   GET  /repos/{o}/{r}/labels/{marker}   -> the marker read (Issues: read)
  *   POST /repos/{o}/{r}/labels (marker)   -> ensure-create (Issues: write)
  *   .../issues                            -> the issue routes
  */
@@ -519,7 +553,11 @@ export function handleIssueReport(
   request: IssueReportRequest,
   run: IssueReportRun,
 ): IssueReportOutcome | null {
-  return serveMarkerLabelCreate(request, run) ?? serveIssueRoute(request, run);
+  return (
+    serveMarkerLabelRead(request, run) ??
+    serveMarkerLabelCreate(request, run) ??
+    serveIssueRoute(request, run)
+  );
 }
 
 /** Wire attempts the probe can make, from the client's own MAX_RETRIES; once a slug's repository.get has faulted this many times the probe has given up, so the next repository.get is not a probe retry and the exemption expires. */

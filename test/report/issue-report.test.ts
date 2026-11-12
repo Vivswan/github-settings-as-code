@@ -11,6 +11,7 @@ import {
   injectMarkerLabel,
   MARKER_LABEL,
   MARKER_LABEL_CONFIG,
+  mayHoldMarkerLabel,
 } from "../../src/report/issue-report.js";
 import type { SettingsFile } from "../../src/schema.js";
 import { MockApi, type Route } from "../mock-api.js";
@@ -503,6 +504,33 @@ describe("deliverIssueReport under mode: on-failure", () => {
     const created = await sequence(createRoutes(), "on-failure");
     expect(created).toEqual(await sequence(createRoutes(), "always"));
     expect(created.some((c) => `${c.method} ${c.path}` === ISSUE_CREATE)).toBe(true);
+  });
+});
+
+describe("mayHoldMarkerLabel", () => {
+  const READ = `GET /repos/o/private-repo/labels/${MARKER_LABEL}`;
+  const failed = (status: number): Route => ({ error: { status, message: "CANARY", body: "" } });
+
+  // Only a 404 may leave the marker undeclared: were a failed read to do it too, an apply would delete a label it never saw.
+  test.each<[string, Route, boolean]>([
+    ["the label (200)", { data: MARKER_LABEL_CONFIG }, true],
+    ["no such label (404)", failed(404), false],
+    ["a denial (403)", failed(403), true],
+    ["a server error (500)", failed(500), true],
+    ["no HTTP answer", { failed: `${READ}: the transport failed` }, true],
+  ])("%s answers %p, after one read", async (_name, route, held) => {
+    const api = new MockApi({ [READ]: route });
+    expect(await mayHoldMarkerLabel(api, SLUG)).toBe(held);
+    expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([READ]);
+  });
+
+  test("a client that throws instead of answering is read like any failed read, and its message never escapes", async () => {
+    // The thrown message embeds the request path, which names the private slug.
+    const api = new MockApi({});
+    api.tryRequest = async (method, path) => {
+      throw new Error(`${method} ${path}: connection reset`);
+    };
+    expect(await mayHoldMarkerLabel(api, SLUG)).toBe(true);
   });
 });
 
