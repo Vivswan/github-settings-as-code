@@ -22,7 +22,7 @@ In a ruleset the sweep stops inside a rule (its `parameters` included) and insid
 
 Apply is convergent: re-running preserves the declared state (some sections diff first and skip converged writes, others send idempotent full-payload writes), and a check right after an apply reports clean wherever that apply reached the declared state.
 
-Three examples of a declared state no apply reaches, because its section has no write for it: a `workflows` entry whose file does not exist (`so apply skips it`), a `pull_request_creation_cap` where the cap endpoint answers 405 (`apply cannot set it`), and a `pages` section with neither `build_type` nor `source` and no live site (`so apply changes nothing`). Apply prints the line as a note, the next check as drift.
+Three examples of a declared state no operation of the plan reaches: a `workflows` entry whose file does not exist (`so apply skips it`), a `pull_request_creation_cap` where the cap endpoint answers 405 (`apply cannot set it`), and a `pages` section with neither `build_type` nor `source` and no live site (`so apply changes nothing`). Apply prints the line as a note, the next check as drift.
 
 ## What the parse refuses
 
