@@ -7,8 +7,13 @@
  *   GraphQL                     -> dispatched by operation name onto the mock's GraphQL handlers
  */
 
-import { type ClientAnswer, type GitHubClient, PAGE_SIZE } from "../../src/github/api.js";
-import type { ApiError } from "../../src/github/api-error.js";
+import {
+  type ClientAnswer,
+  type GitHubClient,
+  type GraphqlOp,
+  PAGE_SIZE,
+} from "../../src/github/api.js";
+import { type ApiError, apiErrorFromGraphqlErrors } from "../../src/github/api-error.js";
 import type { SectionKey } from "../../src/schema.js";
 import type { SectionMeta } from "../../src/sections/contract/module.js";
 import { endpointPermission } from "../../src/sections/contract/operations.js";
@@ -22,6 +27,7 @@ import {
   type Requirement,
   SECTION_BY_KEY,
 } from "../e2e/mock/grading.js";
+import { graphqlRequestErrors } from "../e2e/mock/graphql-request.js";
 import { GRAPHQL_HANDLERS, HANDLERS } from "../e2e/mock/handlers.js";
 import { acceptedBody } from "../e2e/mock/request-body.js";
 import { buildStateForSlug, type LiveState, type MockState } from "../e2e/mock/state.js";
@@ -100,19 +106,29 @@ function routeOf(
   return { url, matched, handler };
 }
 
-/** The GraphQL operation the body names and its handler, or the 404 the fake answers outside the section's (or the registry's) handlers. */
+/**
+ * The GraphQL operation the request names and its handler; else the 404 the fake answers outside the section's (or the registry's) handlers, or
+ * GitHub's refusal of a request off its schema, the stage the wire pipeline runs ahead of every barrier (routes.ts).
+ */
 function graphqlRouteOf(
   only: SectionKey | null,
-  name: string,
+  op: GraphqlOp,
+  variables: Readonly<Record<string, unknown>>,
 ): GraphqlRouted | { error: ApiError } {
-  const dispatched = graphqlOpForBody({ operationName: name }, allGraphqlOps());
+  const dispatched = graphqlOpForBody({ operationName: op.name }, allGraphqlOps());
   const handler = dispatched === null ? undefined : GRAPHQL_HANDLERS[dispatched.key];
   if (
     dispatched === null ||
     (only !== null && dispatched.op.section !== only) ||
     handler === undefined
   ) {
-    return { error: { status: 404, message: `unexpected GRAPHQL ${name}`, body: "" } };
+    return { error: { status: 404, message: `unexpected GRAPHQL ${op.name}`, body: "" } };
+  }
+
+  // Refused before the handler, so a section proof cannot converge on variables GitHub would not accept.
+  const refused = graphqlRequestErrors(op.query, op.name, variables);
+  if (refused !== null) {
+    return { error: apiErrorFromGraphqlErrors([...refused], false) };
   }
   return { dispatched, handler };
 }
@@ -233,7 +249,7 @@ function handlerFake(
       }
     },
     async tryGraphql(op, variables) {
-      const routed = graphqlRouteOf(only, op.name);
+      const routed = graphqlRouteOf(only, op, variables);
       if ("error" in routed) {
         return routed;
       }
