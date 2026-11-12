@@ -17,6 +17,6 @@ expect:
   never:
     - "PATCH /repos/{repo}"
   stdout_contains:
-    - '::notice::repository: repository.private: true contradicts repository.visibility: "public"'
+    - '::notice::repository.private: true contradicts repository.visibility: "public"'
     - "Remove private or visibility from the settings file"
     - "drift: repository.private: true != false"
