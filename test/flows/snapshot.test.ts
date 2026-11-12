@@ -35,7 +35,8 @@ import {
 import { collectingIo, type Io } from "../../src/io.js";
 import { isPrivate, markPrivate } from "../../src/private.js";
 import type { SectionKey } from "../../src/schema.js";
-import { captureIo } from "../io/capture.js";
+import { type CapturedIo, captureIo } from "../io/capture.js";
+import { expectSealed, publicSurfaces } from "../io/leak-sweep.js";
 import { MockApi } from "../mock-api.js";
 import { withTempDir } from "../temp-dir.js";
 
@@ -73,6 +74,15 @@ const TAKEN = {
   level: "notice" as const,
   line: expect.stringMatching(new RegExp(`^snapshot taken ${ISO_INSTANT.source.slice(1)}`)),
 };
+
+/** The same notice as a raw recording's event log spells it. */
+const TAKEN_EVENT = expect.stringMatching(
+  new RegExp(`^annotate notice: snapshot taken ${ISO_INSTANT.source.slice(1)}`),
+);
+
+/** A raw recording's annotations and log lines in call order, as its event log spells them. */
+const spoken = (raw: CapturedIo): string[] =>
+  raw.events.filter((event) => event.startsWith("annotate ") || event.startsWith("log: "));
 
 /** The summary's statement of the same moment. */
 const TAKEN_LINE = expect.stringMatching(
@@ -187,28 +197,33 @@ describe("runSnapshot, file form", () => {
   test("a private target that fails gets the fleet's one closed-value line, numbered as a fleet of one", () =>
     withTempDir("snapshot-flow-", async (dir) => {
       // No labels route: the read answers 404, the denial that fails the target under the fail policy.
-      const api = new MockApi({
-        "GET /repos/o/r": { data: { private: true, visibility: "private" } },
-      });
-      const cfg = fileCfg(dir, { privateRepos: "redact", selfSlug: "admin/fleet" });
-      const collected = collectingIo();
-      expect(await run(api, cfg, collected.io)).toBe(1);
-      expect(existsSync(cfg.snapshotFile)).toBe(false);
-      expect(collected.lines).toEqual([
-        TAKEN,
-        { level: "error", line: `private repository #1: failed - labels (404). ${REDACTED_NOTE}` },
-        { line: "result: failed" },
+      const recorded = async (privateRepos: FileConfig["privateRepos"]) => {
+        const api = new MockApi({
+          "GET /repos/o/r": { data: { private: true, visibility: "private" } },
+        });
+        const cfg = fileCfg(dir, { privateRepos, selfSlug: "admin/fleet" });
+        const raw = captureIo();
+        expect(await run(api, cfg, raw.io)).toBe(1);
+        expect(existsSync(cfg.snapshotFile)).toBe(false);
+        return raw;
+      };
+      const hidden = await recorded("redact");
+      expect(spoken(hidden)).toEqual([
+        TAKEN_EVENT,
+        "annotate error: private repository #1: failed - labels (404). details hidden: the repository is private or internal. Set private-repos: show to reveal them, or run the action inside that repository",
+        "log: result: failed",
       ]);
-      expect(collected.summary[0]).toContain(
+      expect(hidden.summaries[0]).toContain(
         "| labels | :x: failed | hidden (private repository), HTTP 404 |",
       );
-      expect(collected.summary[0]).not.toContain("/repos/o/r/labels");
+      const shown = await recorded("show");
+      expectSealed(publicSurfaces(hidden), publicSurfaces(shown), ["o/r", "/repos/o/r/labels"]);
     }));
 
   test("a private target's skipped section shows the denial's status and nothing else of it: no slug, no path, none of GitHub's words", () =>
     withTempDir("snapshot-flow-", async (dir) => {
       // Recorded raw: collectingIo prints a registered slug as ***, which would hide the very leak this sweeps for.
-      const surfaces = async (privateRepos: FileConfig["privateRepos"]) => {
+      const recorded = async (privateRepos: FileConfig["privateRepos"]) => {
         const api = new MockApi({
           "GET /repos/o/r": { data: { private: true, visibility: "private" } },
           "GET /repos/o/r/labels?per_page=100&page=1": {
@@ -221,35 +236,27 @@ describe("runSnapshot, file form", () => {
           onMissingPermission: "warn",
         });
         const raw = captureIo();
-        const summaries: string[] = [];
-        const io: Io = { ...raw.io, summary: (markdown) => summaries.push(markdown) };
-        expect(await run(api, cfg, io)).toBe(0);
-        const lines = [...raw.annotations, ...raw.logs];
-        const text = [...lines, ...summaries, ...Object.values(raw.outputs)].join("\n");
-        return { lines, text };
+        expect(await run(api, cfg, raw.io)).toBe(0);
+        return raw;
       };
-      const hidden = await surfaces("redact");
-      expect(hidden.lines).toEqual([
+      const hidden = await recorded("redact");
+      expect([...hidden.annotations, ...hidden.logs]).toEqual([
         expect.stringMatching(/^notice: snapshot taken /),
-        `warning: private repository #1: partial - labels (403). ${REDACTED_NOTE}`,
+        "warning: private repository #1: partial - labels (403). details hidden: the repository is private or internal. Set private-repos: show to reveal them, or run the action inside that repository",
         "result: partial",
       ]);
-      expect(hidden.text).toContain(
+      expect(hidden.summaries[0]).toContain(
         "| labels | :fast_forward: skipped | hidden (private repository), HTTP 403 |",
       );
       // The control: the same run in the clear prints every one of these, so the sweep below can fail.
-      const shown = await surfaces("show");
-      const sealed = [
+      const shown = await recorded("show");
+      expectSealed(publicSurfaces(hidden), publicSurfaces(shown), [
         "o/r",
         "/labels",
         "Resource not accessible",
         "the token was denied",
         "To fix, grant",
-      ];
-      for (const needle of sealed) {
-        expect(shown.text, `"${needle}" is not live in the clear`).toContain(needle);
-        expect(hidden.text, `"${needle}" reached a public surface`).not.toContain(needle);
-      }
+      ]);
     }));
 
   test("a denied section is skipped under warn: partial, the file omits it, the header and the outputs say so", () =>
@@ -906,34 +913,30 @@ describe("runSnapshot, dir form", () => {
 
   test("a collision whose first claimant is redacted names it by its placeholder; the sealed slug reaches no public surface", () =>
     withTempDir("snapshot-flow-", async (dir) => {
-      const api = new MockApi({
-        "GET /repos/alice/p": { data: { private: true, visibility: "private" } },
-        "GET /repos/bob/p": { data: { private: false } },
-        ...labelsRoute("alice/p", [BUG]),
-        ...labelsRoute("bob/p", [DOCS]),
-      });
-      const cfg = dirCfg(dir, { reposInput: "alice/p,bob/p" });
-      mkdirSync(join(cfg.snapshotDir, "alice"), { recursive: true });
-      symlinkSync("alice", join(cfg.snapshotDir, "bob"));
-      const collected = collectingIo();
-      expect(await run(api, cfg, collected.io)).toBe(1);
-      expect(collected.lines).toEqual([
-        TAKEN,
-        {
-          level: "error",
-          line:
-            `bob/p: cannot write the snapshot to ${join(cfg.snapshotDir, "bob", "p.yml")}: the filesystem carries it to ` +
-            'the file this run already claimed for private repository #1. Remove the link under the "snapshot-dir" ' +
-            "input that folds the two owners together, so each target has a file of its own",
-        },
-        { line: "result: failed" },
+      const recorded = async (privateRepos: DirConfig["privateRepos"]) => {
+        const api = new MockApi({
+          "GET /repos/alice/p": { data: { private: true, visibility: "private" } },
+          "GET /repos/bob/p": { data: { private: false } },
+          ...labelsRoute("alice/p", [BUG]),
+          ...labelsRoute("bob/p", [DOCS]),
+        });
+        const cfg = dirCfg(join(dir, privateRepos), { reposInput: "alice/p,bob/p", privateRepos });
+        mkdirSync(join(cfg.snapshotDir, "alice"), { recursive: true });
+        symlinkSync("alice", join(cfg.snapshotDir, "bob"));
+        const raw = captureIo();
+        expect(await run(api, cfg, raw.io)).toBe(1);
+        return { raw, cfg };
+      };
+      const { raw: hidden, cfg } = await recorded("redact");
+      expect(spoken(hidden)).toEqual([
+        TAKEN_EVENT,
+        `annotate error: bob/p: cannot write the snapshot to ${join(cfg.snapshotDir, "bob", "p.yml")}: the filesystem carries it to ` +
+          'the file this run already claimed for private repository #1. Remove the link under the "snapshot-dir" ' +
+          "input that folds the two owners together, so each target has a file of its own",
+        "log: result: failed",
       ]);
-      const publicText = [
-        ...collected.lines.map((entry) => entry.line),
-        ...collected.summary,
-        ...Object.values(collected.outputs),
-      ].join("\n");
-      expect(publicText).not.toContain("alice/p");
+      const shown = await recorded("show");
+      expectSealed(publicSurfaces(hidden), publicSurfaces(shown.raw), ["alice/p"]);
       expect(parseYaml(readFileSync(join(cfg.snapshotDir, "alice", "p.yml"), "utf8"))).toEqual(
         doc(BUG),
       );
@@ -1089,28 +1092,44 @@ describe("runSnapshot, dir form", () => {
 
   test("a redacted target's values reach its file and nothing else: the slug is masked, the public view shows the placeholder", () =>
     withTempDir("snapshot-flow-", async (dir) => {
-      const api = new MockApi({
-        "GET /repos/o/a": { data: { private: false } },
-        "GET /repos/o/p": { data: { private: true, visibility: "private" } },
-        ...labelsRoute("o/a", [BUG]),
-        ...labelsRoute("o/p", [{ name: "secret-project", color: "000000", description: "hush" }]),
-      });
-      const cfg = dirCfg(dir, { reposInput: "o/a,o/p" });
-      const collected = collectingIo();
-      expect(await run(api, cfg, collected.io)).toBe(0);
-      expect(parseYaml(readFileSync(join(cfg.snapshotDir, "o", "p.yml"), "utf8"))).toEqual(
-        doc({ name: "secret-project", color: "000000", description: "hush" }),
-      );
-      expect([...collected.io.masked()]).toEqual(["o/p"]);
-      const publicText = [
-        ...collected.lines.map((entry) => entry.line),
-        ...collected.summary,
-        ...Object.values(collected.outputs),
-      ].join("\n");
-      for (const needle of ["o/p", "p.yml", "secret-project", "hush"]) {
-        expect(publicText, `"${needle}" reached a public surface`).not.toContain(needle);
-      }
-      expect(collected.outputs).toEqual({
+      const recorded = async (privateRepos: DirConfig["privateRepos"]) => {
+        const api = new MockApi({
+          "GET /repos/o/a": { data: { private: false } },
+          "GET /repos/o/p": { data: { private: true, visibility: "private" } },
+          ...labelsRoute("o/a", [BUG]),
+          ...labelsRoute("o/p", [{ name: "secret-project", color: "000000", description: "hush" }]),
+          "GET /repos/o/a/rulesets?per_page=100&page=1": { data: [] },
+          // A snapshot notes an inherited ruleset by its name, so these two carry the label's values: the same run in
+          // the clear prints both, and the sweep for them below can fail.
+          "GET /repos/o/p/rulesets?per_page=100&page=1": {
+            data: [
+              { id: 1, name: "secret-project", source_type: "Organization" },
+              { id: 2, name: "hush", source_type: "Organization" },
+            ],
+          },
+        });
+        const cfg = dirCfg(join(dir, privateRepos), {
+          reposInput: "o/a,o/p",
+          sections: only("labels", "rulesets"),
+          privateRepos,
+        });
+        const raw = captureIo();
+        expect(await run(api, cfg, raw.io)).toBe(0);
+        expect(parseYaml(readFileSync(join(cfg.snapshotDir, "o", "p.yml"), "utf8"))).toEqual(
+          doc({ name: "secret-project", color: "000000", description: "hush" }),
+        );
+        return raw;
+      };
+      const hidden = await recorded("redact");
+      expect([...hidden.io.masked()]).toEqual(["o/p"]);
+      const shown = await recorded("show");
+      expectSealed(publicSurfaces(hidden), publicSurfaces(shown), [
+        "o/p",
+        "p.yml",
+        "secret-project",
+        "hush",
+      ]);
+      expect(hidden.outputs).toEqual({
         result: "snapshot",
         "skipped-sections": "",
         "repos-result": JSON.stringify({
@@ -1118,13 +1137,13 @@ describe("runSnapshot, dir form", () => {
           "private repository #1": { result: "snapshot", source: "remote", "skipped-sections": [] },
         }),
       });
-      expect(collected.summary[0]).toContain(
+      expect(hidden.summaries[0]).toContain(
         "| private repository #1 | remote | :white_check_mark: snapshot | hidden (private repository) |",
       );
-      expect(collected.summary[0]).toContain(
+      expect(hidden.summaries[0]).toContain(
         "### private repository #1 (snapshot)\n\ndetails hidden: the repository is private or internal.",
       );
-      expect(collected.summary[0]).toContain(
+      expect(hidden.summaries[0]).toContain(
         "| labels | :white_check_mark: snapshot | hidden (private repository) |",
       );
     }));
@@ -1132,14 +1151,20 @@ describe("runSnapshot, dir form", () => {
   test("a redacted target that fails closes sealed with its transcript and speaks the fleet's one closed-value line", () =>
     withTempDir("snapshot-flow-", async (dir) => {
       // No labels route for o/p: the read answers 404, the denial that fails the target under the fail policy.
-      const api = new MockApi({
-        "GET /repos/o/a": { data: { private: false } },
-        "GET /repos/o/p": { data: { private: true, visibility: "private" } },
-        ...labelsRoute("o/a", [BUG]),
-      });
-      const cfg = dirCfg(dir, { reposInput: "o/a,o/p" });
-      const collected = collectingIo();
-      const finished = (await runSnapshot(api, cfg, collected.io))._unsafeUnwrap();
+      const recorded = async (privateRepos: DirConfig["privateRepos"]) => {
+        const api = new MockApi({
+          "GET /repos/o/a": { data: { private: false } },
+          "GET /repos/o/p": { data: { private: true, visibility: "private" } },
+          ...labelsRoute("o/a", [BUG]),
+        });
+        const cfg = dirCfg(join(dir, privateRepos), { reposInput: "o/a,o/p", privateRepos });
+        const raw = captureIo();
+        const finished = (await runSnapshot(api, cfg, raw.io))._unsafeUnwrap();
+        expect(concludeSnapshot(raw.io, finished)).toBe(1);
+        expect(existsSync(join(cfg.snapshotDir, "o", "p.yml"))).toBe(false);
+        return { raw, cfg, finished };
+      };
+      const { raw, cfg, finished } = await recorded("redact");
       const hidden = finished.form === "dir" ? finished.targets[1] : undefined;
       expect(hidden?.display).toBe("private repository #1");
       expect(isPrivate(hidden?.detail)).toBe(true);
@@ -1167,26 +1192,20 @@ describe("runSnapshot, dir form", () => {
           ],
         }),
       );
-      expect(concludeSnapshot(collected.io, finished)).toBe(1);
-      expect(existsSync(join(cfg.snapshotDir, "o", "p.yml"))).toBe(false);
-      expect(collected.lines).toEqual([
-        TAKEN,
-        { line: `o/a: snapshot written to ${join(cfg.snapshotDir, "o", "a.yml")}` },
-        { level: "error", line: `private repository #1: failed - labels (404). ${REDACTED_NOTE}` },
-        { line: "result: failed" },
+      expect(spoken(raw)).toEqual([
+        TAKEN_EVENT,
+        `log: o/a: snapshot written to ${join(cfg.snapshotDir, "o", "a.yml")}`,
+        "annotate error: private repository #1: failed - labels (404). details hidden: the repository is private or internal. Set private-repos: show to reveal them, or run the action inside that repository",
+        "log: result: failed",
       ]);
       // Nothing was written, so the File column says so in the clear: an absent file is not a value the seal hides.
-      expect(collected.summary[0]).toContain("| private repository #1 | remote | :x: failed | - |");
-      expect(collected.summary[0]).toContain(
+      expect(raw.summaries[0]).toContain("| private repository #1 | remote | :x: failed | - |");
+      expect(raw.summaries[0]).toContain(
         "| labels | :x: failed | hidden (private repository), HTTP 404 |",
       );
-      const publicText = [
-        ...collected.lines.map((entry) => entry.line),
-        ...collected.summary,
-        ...Object.values(collected.outputs),
-      ].join("\n");
-      expect(publicText).not.toContain("/repos/o/p/labels");
-      expect(publicText).not.toContain("o/p.yml");
+      // The file's path is no needle: a failed target writes none, so it prints nowhere, hidden or shown.
+      const shown = await recorded("show");
+      expectSealed(publicSurfaces(raw), publicSurfaces(shown.raw), ["o/p", "/repos/o/p/labels"]);
     }));
 
   test("a fleet whose every target fails writes nothing and the summary says so", () =>

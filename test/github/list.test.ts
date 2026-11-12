@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { MAX_RETRIES } from "../../src/github/api.js";
+import { expectSealed } from "../io/leak-sweep.js";
 import { api, restoreFetch, stubFetch, traceIo } from "./stub.js";
 
 afterEach(restoreFetch);
@@ -74,24 +75,31 @@ describe("tryList", () => {
 
   test("every page is requested on the route the caller named, so a masked slug redacts every page's trace", async () => {
     // GitHub's next Link addresses the repository by id, a form the slug redaction cannot match.
-    const trace = traceIo();
-    trace.io.mask("o/private");
     const listPath = "/repos/o/private/environments/secret-environment/secrets";
-    const stub = stubFetch([
-      page(
-        { total_count: 101, secrets: fullPage("s") },
-        "https://api.test/repositories/123/environments/secret-environment/secrets?per_page=100&page=2",
-      ),
-      page({ total_count: 101, secrets: ["last"] }),
-    ]);
-    const result = await api(trace.io).tryList(listPath);
-    expect("data" in result && result.data).toHaveLength(2);
-    expect(stub.urls).toEqual([
-      `https://api.test${listPath}?per_page=100&page=1`,
-      `https://api.test${listPath}?per_page=100&page=2`,
-    ]);
-    expect(trace.lines.join("\n")).not.toContain("secret-environment");
-    const traced = trace.lines.filter((line) => line.includes(" -> "));
+    const walked = async (mask?: string) => {
+      const trace = traceIo();
+      if (mask !== undefined) {
+        trace.io.mask(mask);
+      }
+      const stub = stubFetch([
+        page(
+          { total_count: 101, secrets: fullPage("s") },
+          "https://api.test/repositories/123/environments/secret-environment/secrets?per_page=100&page=2",
+        ),
+        page({ total_count: 101, secrets: ["last"] }),
+      ]);
+      const result = await api(trace.io).tryList(listPath);
+      expect("data" in result && result.data).toHaveLength(2);
+      expect(stub.urls).toEqual([
+        `https://api.test${listPath}?per_page=100&page=1`,
+        `https://api.test${listPath}?per_page=100&page=2`,
+      ]);
+      return trace.lines;
+    };
+    const lines = await walked("o/private");
+    const clear = await walked();
+    expectSealed({ trace: lines.join("\n") }, { trace: clear.join("\n") }, ["secret-environment"]);
+    const traced = lines.filter((line) => line.includes(" -> "));
     expect(traced.map((line) => line.replace(/\(\d+ms\)/, "(ms)"))).toEqual([
       "GET <redacted> -> 200 (ms)",
       "GET <redacted> -> 200 (ms)",

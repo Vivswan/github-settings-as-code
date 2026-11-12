@@ -21,6 +21,7 @@ import {
   TIMERS_SCHEDULER,
 } from "../../src/github/scheduler.js";
 import { redactingOctokitLog, TraceRedaction } from "../../src/github/trace-redaction.js";
+import { expectSealed } from "../io/leak-sweep.js";
 import { api, json, restoreFetch, stubFetch, timeless, traceIo } from "./stub.js";
 
 afterEach(restoreFetch);
@@ -489,16 +490,20 @@ describe("debug-trace hardening for masked values and marked requests", () => {
 
   test("a team-repo route redacts its PREFIX too (no team slug leak)", async () => {
     // The team slug rides in the prefix before /repos/, so truncating to /repos/<redacted> would leak it.
-    const dbg = traceIo();
-    dbg.io.mask("acme/private");
-    stubFetch([() => new Response(null, { status: 204 })]);
-    await api(dbg.io).tryRequest("PUT", "/orgs/acme/teams/secret-team/repos/acme/private", {
-      permission: "push",
-    });
-    const trace = dbg.lines.join("");
+    const traced = async (mask?: string) => {
+      const dbg = traceIo();
+      if (mask !== undefined) {
+        dbg.io.mask(mask);
+      }
+      stubFetch([() => new Response(null, { status: 204 })]);
+      await api(dbg.io).tryRequest("PUT", "/orgs/acme/teams/secret-team/repos/acme/private", {
+        permission: "push",
+      });
+      return dbg.lines.join("");
+    };
+    const trace = await traced("acme/private");
     expect(trace).toContain("PUT <redacted> ->");
-    expect(trace).not.toContain("secret-team");
-    expect(trace).not.toContain("acme/private");
+    expectSealed({ trace }, { trace: await traced() }, ["secret-team", "acme/private"]);
   });
 
   test("redactingOctokitLog routes every level to the debug channel, masked lines collapsed and unmasked lines intact, never to stderr", () => {
@@ -614,15 +619,20 @@ describe("debug-trace hardening for masked values and marked requests", () => {
   test("a rate-limited visibility probe leaks no raw slug in any trace", async () => {
     // The throttle-callback trace fires on the 429 retry, before the probe result exists, so the seal the probe's mark sets is what redacts it.
     const { createVisibilityResolver } = await import("../../src/github/repo-visibility.js");
-    stubFetch([
+    const answers = [
       rateLimited,
       () => new Response('{"private":true}', { headers: { "content-type": "application/json" } }),
-    ]);
+    ];
+    stubFetch(answers);
     const dbg = traceIo();
     expect(await createVisibilityResolver(api(dbg.io))("secret-owner/secret-repo")).toBe("private");
     const trace = dbg.lines.join("");
-    expect(trace).not.toContain("secret-repo");
     expect(trace).toContain("rate limit on GET <redacted>");
+    // The control: the probe's own request, sent unmarked through the same retry.
+    stubFetch(answers);
+    const plain = traceIo();
+    await api(plain.io).tryRequest("GET", "/repos/secret-owner/secret-repo");
+    expectSealed({ trace }, { trace: plain.lines.join("") }, ["secret-repo"]);
   });
 });
 

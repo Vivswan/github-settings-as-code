@@ -8,8 +8,10 @@ import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { run } from "../../src/action/run.js";
-import { type ConfigEnv, collectingIo, type OutputName } from "../../src/index.js";
+import type { ConfigEnv, OutputName } from "../../src/index.js";
 import { INPUT_DECLS, type InputName } from "../../src/internal.js";
+import { captureIo } from "../io/capture.js";
+import { expectSealed, publicSurfaces } from "../io/leak-sweep.js";
 import { MockApi, type Route } from "../mock-api.js";
 import { ROOT } from "../root.js";
 import { withTempDir } from "../temp-dir.js";
@@ -40,7 +42,7 @@ interface Case {
   readonly ends: { readonly code: number; readonly result: string };
 
   /** The private targets both faces must key by placeholder and name nowhere, under the default private-repos: redact. */
-  readonly redacted?: readonly string[];
+  readonly redacted?: readonly [string, ...string[]];
 }
 
 const SINGLE = join(ROOT, "test", "fixtures", "single.yml");
@@ -273,11 +275,17 @@ function writtenFiles(dir: string): Record<string, string> {
   return files;
 }
 
-/** The action's face: the inputs as the runner's INPUT_* variables, the run over a collecting Io. */
-function throughEnv(c: Case): Promise<Observed> {
+/**
+ * The action's face: the inputs as the runner's INPUT_* variables, `extra` laid over them. The run is recorded raw: a
+ * recorder that masks prints a private slug as ***, which hides the leak a redacted case is swept for.
+ */
+function throughEnv(
+  c: Case,
+  extra: Inputs = {},
+): Promise<{ seen: Observed; surfaces: Record<string, string> }> {
   return withTempDir("gsac-equivalence-", async (dir) => {
     scratchFor(dir, c);
-    const inputs = c.inputs(dir);
+    const inputs = { ...c.inputs(dir), ...extra };
     const keys = [...INPUT_KEYS, ...CONTEXT_KEYS];
     const saved = new Map(keys.map((key) => [key, process.env[key]]));
     for (const key of keys) {
@@ -289,10 +297,10 @@ function throughEnv(c: Case): Promise<Observed> {
     for (const [key, value] of Object.entries(c.env)) {
       process.env[key] = value;
     }
-    const collected = collectingIo();
+    const recorded = captureIo();
     let code: number;
     try {
-      code = await run({ api: api(c), io: collected.io });
+      code = await run({ api: api(c), io: recorded.io });
     } finally {
       for (const [key, value] of saved) {
         if (value === undefined) {
@@ -303,17 +311,21 @@ function throughEnv(c: Case): Promise<Observed> {
       }
     }
     const at = fold(dir);
-    return {
+    const files = writtenFiles(dir);
+    const seen = {
       code,
       outputs: Object.fromEntries(
-        Object.entries(collected.outputs).map(([name, value]) => [name, at(value)]),
+        Object.entries(recorded.outputs).map(([name, value]) => [name, at(value)]),
       ),
-      logs: collected.lines.filter((l) => l.level === undefined).map((l) => at(l.line)),
-      annotations: collected.lines
-        .filter((l) => l.level !== undefined)
-        .map((l) => atInstant(at(`${l.level}: ${l.line}`))),
-      files: writtenFiles(dir),
+      logs: recorded.logs.map(at),
+      annotations: recorded.annotations.map((line) => atInstant(at(line))),
+      files,
     };
+    const surfaces = {
+      ...publicSurfaces(recorded),
+      files: Object.entries(files).flat().join("\n"),
+    };
+    return { seen, surfaces };
   });
 }
 
@@ -353,13 +365,14 @@ function throughArgv(c: Case): Promise<Observed> {
 
 describe("the action and the CLI run one arm to one result", () => {
   test.each(cases.map((c) => [c.name, c] as const))("%s", async (_name, c) => {
-    const action = await throughEnv(c);
+    const { seen: action, surfaces: hidden } = await throughEnv(c);
     const cli = await throughArgv(c);
     expect(cli).toEqual(action);
     expect({ code: action.code, result: action.outputs.result }).toEqual(c.ends);
-    for (const slug of c.redacted ?? []) {
+    if (c.redacted !== undefined) {
       expect(action.outputs["repos-result"]).toContain("private repository #");
-      expect(JSON.stringify(action)).not.toContain(slug);
+      const shown = await throughEnv(c, { "private-repos": "show" });
+      expectSealed(hidden, shown.surfaces, c.redacted);
     }
     // A writing arm wrote something on both sides, or the byte comparison above compared nothing.
     if (
