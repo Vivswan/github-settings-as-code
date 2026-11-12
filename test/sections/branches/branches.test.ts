@@ -2084,6 +2084,7 @@ describe("branches snapshot", () => {
         key: "branches",
         status: "skipped",
         detail: [expect.stringContaining('To fix, grant "Administration"')],
+        httpStatus: 404,
       },
     ]);
     expect(

@@ -1,0 +1,35 @@
+# "Nothing exists on the repository" is a claim about the repository, so only a
+# section that read everything and found nothing may make it. Here the token
+# reads the interaction limit (none is set) and is denied the two reads GitHub
+# gates at write, so the section's closing line points at its two denial notes
+# instead. milestones is the control: its list read back empty.
+name: snapshot-omitted-says-why
+description: >-
+  A snapshot under on-missing-permission: warn with read-only Administration: interaction_limits
+  reads no limit and is denied its cap and its bypass list, so it is omitted under a closing line
+  that points at the denial notes, never "nothing exists"; milestones, read in full and empty,
+  keeps "nothing exists".
+settings: {}
+denial_style: 403
+token_permissions:
+  administration: read
+inputs:
+  mode: snapshot
+  snapshot_file: snapshot.yml
+  on_missing_permission: warn
+  sections: interaction_limits,milestones
+expect:
+  exit_code: 0
+  result: snapshot
+  skipped_sections: []
+  outcomes:
+    interaction_limits: snapshot
+    milestones: snapshot
+  snapshot: {}
+  stdout_contains:
+    - "::notice::interaction_limits.pull_request_creation_cap: left out of the snapshot - the token was denied GET /repos/e2e-owner/e2e-repo/interaction-limits/pulls/creation-cap"
+    - "::notice::interaction_limits.pull_request_creation_bypass: left out of the snapshot - the token was denied GET /repos/e2e-owner/e2e-repo/interaction-limits/pulls/bypass-list"
+  summary_contains:
+    - "under the PAT's Repository permissions<br>nothing was read back to declare, so the section is omitted; its notes above say why |"
+    - "| milestones | :white_check_mark: snapshot | nothing exists on the repository, so the section is omitted |"
+  mutations: []

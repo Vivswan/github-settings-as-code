@@ -1,0 +1,38 @@
+# The control for snapshot-private-denied-status: the same target and the same
+# denied read, in the clear under private-repos: show. Every needle that
+# scenario's leaks_nowhere list forbids is printed here, in the log and in the
+# summary, so its sweep can fail. Keep the two files' inputs identical but for
+# private_repos.
+name: snapshot-private-denied-status-shown
+description: >-
+  The control for the hidden scenario: under private-repos: show the private target's denied
+  section prints the slug, the request path, GitHub's message, the denial, and the grant advice in
+  the log and the summary, the five strings the hidden run must print nowhere.
+settings: {}
+denial_style: 403
+repos:
+  e2e-owner/svc-vault:
+    live_state:
+      repo:
+        private: true
+        visibility: private
+    permissions:
+      issues: none
+inputs:
+  mode: snapshot
+  snapshot_dir: snapshots
+  sections: labels
+  private_repos: show
+expect:
+  exit_code: 1
+  result: failed
+  repos_result:
+    e2e-owner/svc-vault: failed
+  stdout_contains: &needles
+    - svc-vault
+    - /labels
+    - Resource not accessible
+    - the token was denied
+    - To fix, grant
+  summary_contains: *needles
+  mutations: []
