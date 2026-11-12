@@ -8,7 +8,12 @@ import {
   sectionGrant,
   sectionOperations,
 } from "./operations.js";
-import { grantFor, type SectionPermission, samePermission } from "./permissions.js";
+import {
+  coversPermission,
+  grantFor,
+  type SectionPermission,
+  samePermission,
+} from "./permissions.js";
 
 /**
  * What ends a section's work, as a value. `message` is the whole line the loops report; `kind` is read for policy
@@ -87,9 +92,9 @@ function sentence(clause: string): string {
 
 /**
  * `operation` says WHAT was being done in settings-file terms. `op` supplies the hints and denial hint and resolves
- * the EFFECTIVE permission: an override renders its own grant advice, and a public operation ("none") cannot be a
- * missing-grant failure, so its 403/404 takes the generic branch; a GraphQL failure renders `GRAPHQL <opName>` in
- * the method/path slot.
+ * the EFFECTIVE permission: an override the section's grant does not cover renders its own grant advice, and a
+ * public operation ("none") cannot be a missing-grant failure, so its 403/404 takes the generic branch; a GraphQL
+ * failure renders `GRAPHQL <opName>` in the method/path slot.
  */
 interface FailureContext {
   readonly operation?: string;
@@ -117,14 +122,19 @@ function requestLines(
   };
 }
 
-/** The denial's advice: the grant of the EFFECTIVE permission at the level the section needs, or the section's own, then the endpoint's hint. */
+/**
+ * The denial's advice: the section's own grant whenever it covers the EFFECTIVE permission, else that permission's
+ * grant at the level the section needs; then the endpoint's hint. An override the section's grant covers (the team
+ * list, gated at the repository half alone) is no second grant to ask for: advising only its own read would pass
+ * the preflight and be denied at the section's first write.
+ */
 function denialAdvice(
   section: SectionMeta,
   effective: SectionPermission | undefined,
   op: FailingOp | undefined,
 ): string {
   const grant =
-    effective !== undefined && !samePermission(effective, section.permission)
+    effective !== undefined && !coversPermission(section.permission, effective)
       ? grantFor(effective, undefined, overrideAdviceLevel(section, effective))
       : sectionGrant(section);
   const denialHint = op?.denialHint ? `. Note: ${op.denialHint}` : "";

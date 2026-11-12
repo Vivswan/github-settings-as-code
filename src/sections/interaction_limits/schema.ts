@@ -50,6 +50,9 @@ const InteractionLimits = z
           .min(CAP_MIN, CAP_RULE)
           .max(CAP_MAX, CAP_RULE)
           .optional(),
+        // Named so a snapshot keeps it (the projection reads back the named keys alone); its value is as
+        // unchecked as any key the open mapping passes through, which is how it has always parsed.
+        include_drafts: z.unknown().optional(),
       }).optional(),
       pull_request_creation_bypass: z.array(z.string()).optional(),
     },

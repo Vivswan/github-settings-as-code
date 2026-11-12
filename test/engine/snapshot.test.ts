@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, spyOn, test } from "bun:test";
-import { ok } from "neverthrow";
+import { err, ok } from "neverthrow";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { SectionSelection } from "../../src/engine/section-selection.js";
@@ -16,6 +16,7 @@ import {
   snapshotRepository,
 } from "../../src/engine/snapshot.js";
 import type { GitHubClient } from "../../src/github/api.js";
+import { sectionFailure } from "../../src/sections/contract/errors.js";
 import type { SectionMeta } from "../../src/sections/contract/module.js";
 import { endpointPermission, sectionOperations } from "../../src/sections/contract/operations.js";
 import { labelsSection } from "../../src/sections/labels/index.js";
@@ -352,6 +353,26 @@ describe("snapshotRepository", () => {
       });
       expect(result.outcomes.find((o) => o.key === "actions_variables")?.status).toBe("snapshot");
       expect(annotations).toContain("error: labels: boom");
+    } finally {
+      stubbed.mockRestore();
+    }
+  });
+
+  test("a failed read whose message already leads with the section's key is reported under that key once", async () => {
+    // A section names the entry it could not read (`labels[bug]: ...`); prefixing that names the section twice.
+    const message = "labels[bug]: GitHub reported no color, so it cannot be read back";
+    const stubbed = spyOn(labelsSection, "snapshot").mockResolvedValue(
+      err(sectionFailure("live-shape", message)),
+    );
+    try {
+      const { io, annotations } = captureIo();
+      const result = await snapshotRepository(registryFake(LIVE), opts(), io);
+      expect(result.outcomes.find((o) => o.key === "labels")).toEqual({
+        key: "labels",
+        status: "failed",
+        detail: [message],
+      });
+      expect(annotations).toContain(`error: ${message}`);
     } finally {
       stubbed.mockRestore();
     }

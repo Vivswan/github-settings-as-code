@@ -12,7 +12,7 @@ import { ok, safeTry } from "neverthrow";
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import { agree } from "../../text.js";
-import { requirePlainMapping } from "../contract/declared.js";
+import { type PlainTyped, requirePlainMapping } from "../contract/declared.js";
 import { cannotVerifyNote } from "../contract/drift.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import type { SectionModule } from "../contract/module.js";
@@ -23,13 +23,15 @@ import {
   type PlannedOp,
   type Read,
   type SectionPlan,
+  type SnapshotContext,
 } from "../contract/plan.js";
-import { leftOutOfSnapshot, projectOntoSchema } from "../shared/snapshot-helpers.js";
+import { leftOutOfSnapshot, projectOntoSchema, readOrNote } from "../shared/snapshot-helpers.js";
 import { BYPASS_MAX, InteractionLimitsConfig } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["administration"] };
 
-type DeclaredInteractionLimits = NonNullable<InteractionLimitsConfig>;
+/** The validated declaration: the cap's unchecked include_drafts reads as the plain data the engine's walk proved it. */
+type DeclaredInteractionLimits = PlainTyped<NonNullable<InteractionLimitsConfig>>;
 
 const ORG_OVERRIDE = "an organization- or user-level interaction limit overrides this repository's";
 
@@ -68,7 +70,7 @@ const ENDPOINTS = {
     route: "PATCH /repos/{owner}/{repo}/interaction-limits/pulls/creation-cap",
     statuses: { 200: "pull request creation cap updated", 405: CAP_UNAVAILABLE },
     hints: {
-      422: "enabled must be a boolean and max_open_pull_requests a whole number from 1 to 1000; see the pull request creation cap endpoint documentation",
+      422: "enabled and include_drafts must be booleans and max_open_pull_requests a whole number from 1 to 1000; see the pull request creation cap endpoint documentation",
     },
   },
   // The bypass routes document no 405 (only the cap pair does), so on a repository without the cap
@@ -357,6 +359,58 @@ function planBypassList(
   });
 }
 
+/**
+ * The cap and its bypass list as a snapshot declares them; a disabled cap is GitHub's default. Each is its
+ * own write-gated read, so a token that reads the limit can be denied either.
+ *
+ *   cap answers 405                        -> cap and bypass both omitted, noted
+ *   cap or bypass read denied              -> that key left out and noted under warn; the section fails under fail
+ *   cap disabled, or nobody on the bypass  -> omitted
+ */
+function snapshotPullRequestKeys(
+  ctx: SnapshotContext<typeof ENDPOINTS>,
+  notes: string[],
+): Read<Record<string, unknown>> {
+  return safeTry(async function* () {
+    const keys: Record<string, unknown> = {};
+    const cap = yield* await readOrNote(
+      ctx,
+      notes,
+      "interaction_limits.pull_request_creation_cap",
+      () =>
+        ctx.read.capGet.tryCall(LiveCreationCap, {
+          describe: "reading the pull request creation cap",
+        }),
+    );
+    if ("value" in cap) {
+      if ("error" in cap.value) {
+        notes.push(
+          `interaction_limits: ${CAP_UNAVAILABLE} (405), so pull_request_creation_cap and pull_request_creation_bypass are omitted`,
+        );
+        return ok(keys);
+      }
+      // Parsed at the port: a body off the shape (a null, a quoted flag) fails the section instead of reading as "no cap".
+      if (cap.value.data.enabled) {
+        keys.pull_request_creation_cap = projectOntoSchema(
+          InteractionLimitsConfig.unwrap().shape.pull_request_creation_cap,
+          cap.value.data,
+        );
+      }
+    }
+
+    const bypass = yield* await readOrNote(
+      ctx,
+      notes,
+      "interaction_limits.pull_request_creation_bypass",
+      () => liveBypassLogins(ctx),
+    );
+    if ("value" in bypass && bypass.value.length > 0) {
+      keys.pull_request_creation_bypass = bypass.value;
+    }
+    return ok(keys);
+  });
+}
+
 export const interactionLimitsSection = {
   key: "interaction_limits",
   undeclaredDefault: "untouched",
@@ -388,11 +442,7 @@ export const interactionLimitsSection = {
   },
   /**
    * Only what the repository itself owns reads back; an inherited limit is the org's or user's
-   * setting, and a disabled cap is GitHub's default.
-   *
-   *   limit inherited (org or user origin)   -> noted, not declared
-   *   cap answers 405                        -> cap and bypass both omitted, noted
-   *   cap disabled, or nobody on the bypass  -> omitted
+   * setting, noted and not declared.
    */
   async snapshot(ctx) {
     return safeTry(async function* () {
@@ -412,26 +462,7 @@ export const interactionLimitsSection = {
           ),
         );
       }
-      const cap = yield* ctx.read.capGet.tryCall(LiveCreationCap, {
-        describe: "reading the pull request creation cap",
-      });
-      if ("error" in cap) {
-        notes.push(
-          `interaction_limits: ${CAP_UNAVAILABLE} (405), so pull_request_creation_cap and pull_request_creation_bypass are omitted`,
-        );
-      } else {
-        // Parsed at the port: a body off the shape (a null, a quoted flag) fails the section instead of reading as "no cap".
-        if (cap.data.enabled) {
-          value.pull_request_creation_cap = projectOntoSchema(
-            InteractionLimitsConfig.unwrap().shape.pull_request_creation_cap,
-            cap.data,
-          );
-        }
-        const bypass = yield* liveBypassLogins(ctx);
-        if (bypass.length > 0) {
-          value.pull_request_creation_bypass = bypass;
-        }
-      }
+      Object.assign(value, yield* snapshotPullRequestKeys(ctx, notes));
       if (Object.keys(value).length === 0) {
         return ok({ value: undefined, notes });
       }

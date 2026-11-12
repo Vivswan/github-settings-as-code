@@ -2,12 +2,18 @@ import { describe, expect, test } from "bun:test";
 import { executePlan } from "../../../src/engine/execute.js";
 import type { GitHubClient } from "../../../src/github/api.js";
 import type { SectionInput } from "../../../src/sections/contract/declared.js";
-import { type PlannedOp, planContext } from "../../../src/sections/contract/plan.js";
+import { sectionGrant } from "../../../src/sections/contract/operations.js";
+import {
+  type OnMissingPermission,
+  type PlannedOp,
+  planContext,
+  snapshotContext,
+} from "../../../src/sections/contract/plan.js";
 import { interactionLimitsSection } from "../../../src/sections/interaction_limits/index.js";
 import type { InteractionLimitsConfig } from "../../../src/sections/interaction_limits/schema.js";
 import { MockApi, withListing } from "../../mock-api.js";
 import { provePlanIdempotent } from "../plan-idempotence.js";
-import { deniedDetail, REPO, SectionFailed, unwrap } from "../section-run.js";
+import { deniedDetail, REPO, rejectsDenied, SectionFailed, unwrap } from "../section-run.js";
 import { validatedInput } from "../validated-input.js";
 
 const BASE = "/repos/o/r/interaction-limits";
@@ -17,6 +23,9 @@ const BYPASS_GET = `GET ${BASE}/pulls/bypass-list`;
 const LIVE = { limit: "existing_users", origin: "repository", expires_at: "2026-01-02T00:00:00Z" };
 const CAP_LIVE = { enabled: false, max_open_pull_requests: 1 };
 const CAP_405 = { error: { status: 405, message: "Method Not Allowed", body: "" } } as const;
+const DENIED_403 = {
+  error: { status: 403, message: "Resource not accessible by personal access token", body: "" },
+} as const;
 const CONFLICT = { error: { status: 409, message: "Conflict", body: "" } } as const;
 const TOOLS = { resolveSecret: () => "" };
 
@@ -406,5 +415,45 @@ describe("interaction_limits pull request creation bypass list", () => {
     const api = new MockApi({ [GET]: { data: LIVE } });
     await plan(api, null);
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([GET]);
+  });
+});
+
+describe("interaction_limits snapshot", () => {
+  const snapshot = async (api: GitHubClient, policy: OnMissingPermission) =>
+    unwrap(
+      await interactionLimitsSection.snapshot(
+        snapshotContext(interactionLimitsSection, api, REPO, policy),
+      ),
+    );
+  const EXPIRY_NOTE =
+    "interaction_limits.expiry: GitHub reports only the computed expires_at, so the declared duration cannot be read back; " +
+    "apply re-arms the limit with GitHub's default (one_day) unless you declare expiry";
+  const leftOut = (key: string, request: string, hint = "") =>
+    `interaction_limits.${key}: left out of the snapshot - the token was denied ${request}: 403 Resource not accessible by personal access token. ` +
+    `To fix, ${sectionGrant(interactionLimitsSection)}${hint}`;
+
+  test("a read-only grant is denied the write-gated cap and bypass reads: under warn each key is left out by name and the readable limit still reads back", async () => {
+    // Without this, one denied sub-read drops the whole section, the limit the token could read included.
+    const api = new MockApi({
+      [GET]: { data: { limit: "contributors_only", origin: "repository" } },
+      [CAP_GET]: DENIED_403,
+      [BYPASS_GET]: DENIED_403,
+    });
+    expect(await snapshot(api, "warn")).toEqual({
+      value: { limit: "contributors_only" },
+      notes: [
+        EXPIRY_NOTE,
+        leftOut("pull_request_creation_cap", `${CAP_GET} (reading the pull request creation cap)`),
+        leftOut(
+          "pull_request_creation_bypass",
+          BYPASS_GET,
+          ". Note: a 403 or 404 here can also mean the pull request creation cap is not available on this repository",
+        ),
+      ],
+    });
+    // The policy is the run's: under fail the same denial still fails the section, with the grant to add.
+    expect(await rejectsDenied(snapshot(api, "fail"))).toContain(
+      `the token was denied ${CAP_GET} (reading the pull request creation cap): 403`,
+    );
   });
 });

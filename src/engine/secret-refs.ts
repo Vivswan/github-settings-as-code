@@ -30,8 +30,8 @@ export const RESERVED_REF_PREFIXES = ["INPUT_", "GITHUB_", "ACTIONS_", "RUNNER_"
 
 /**
  * Reads no environment, so check mode and preflight run it without touching secrets; `label` names the owning entry
- * (a secret name, a webhook url), never a value. Errors never echo a non-reference value either: a rejected literal,
- * or the text around an embedded `$NAME`, may already be a secret.
+ * (a secret name, a webhook url), never a value. Errors never echo any part of a non-reference value either: a
+ * rejected literal may already be a secret, and so may what reads as an embedded `$NAME` (the tail of `Pa$$W0RD`).
  */
 export function validateSecretRef(
   value: string,
@@ -53,10 +53,9 @@ export function validateSecretRef(
     }
     return ok({ name });
   }
-  const embedded = value.match(EMBEDDED_REFERENCE_RE)?.[0];
-  if (embedded !== undefined) {
+  if (EMBEDDED_REFERENCE_RE.test(value)) {
     return err(
-      `${label} embeds ${embedded} without being a whole-value reference; it would otherwise ship verbatim as the secret. Make the entire value a single $NAME reference`,
+      `${label} embeds a $NAME reference without being a whole-value reference; it would otherwise ship verbatim as the secret. Make the entire value a single $NAME reference`,
     );
   }
   return err(

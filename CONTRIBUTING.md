@@ -11,16 +11,18 @@ The fleet-wide conventions - Conventional Commit titles, squash merges, the `all
 - `bun run test` and `bun run fuzz` run `bun run build:schema` first: the tests and the fuzzer load the built, gitignored `lib/settings.schema.json`.
 - Committed generated output is the table in `.github/scripts/generated.ts`: the whole files under `src/generated/` and the generated regions of `action.yml` and the docs pages.
 - `bun run build:check` regenerates every table entry and fails on drift.
-- `lib/index.js` (the action bundle), `lib/settings.schema.json` (the published schema), and `lib/pkg/` (the npm library) are built where they are needed and never committed on `main`. Every runtime dependency is compiled into the bundle and the library.
+- `lib/index.js` (the action bundle), `lib/settings.schema.json` (the published schema), and `lib/pkg/` (the npm library) are built where they are needed and never committed on `main`.
+- The action bundle compiles every runtime dependency in. The library keeps them external: they are the `dependencies` of `package.json`, installed by the consumer's package manager.
 - [docs/reference/coverage.md](docs/reference/coverage.md) is the inventory of the supported API surface, one link per call. A change that adds or extends a section keeps its `<key>.docs.yml` rows and `.github/scripts/endpoint-docs.yml` in step.
 
 ## Backward compatibility
 
-- A compat path that stays (an alias, a retired input still accepted, an arm for an older artifact) carries a comment `COMPAT(vN): <what stays working and what to delete>`, N the major that deletes it. Compat kept today for a pre-3 shape is marked v3; compat introduced during 3.x for a 3.0 shape is marked v4.
+- A compat path that stays (an alias, a retired input still accepted, an arm for an older artifact) carries a comment `COMPAT(vN): <what stays working and what to delete>`, N the major that deletes it.
+- N is above the current major: compat kept for a shape of the current major is marked with the next one.
 - JSON takes no comments, so compat in a JSON file is marked in the code that reads it.
 - A path that must work forever is not compat and gets no marker.
 - `bun run check:compat` (in `bun run check` and in CI) rejects a malformed marker and any marker whose major is at or below `package.json`'s, and prints the remaining markers grouped by major.
-- A release PR's tree already carries the version it cuts, so the same check makes a major release PR unmergeable until every marker for that major is deleted on `main` first: with 3.0.0 in preparation, every v3-marked path goes before v3 cuts.
+- A release PR's tree already carries the version it cuts, so the same check makes a major release PR unmergeable until every marker for that major is deleted on `main` first.
 
 ## Code conventions
 

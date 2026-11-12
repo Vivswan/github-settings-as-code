@@ -9,13 +9,14 @@ export const row: Row = {
       origin: "repository",
       expires_at: "2027-01-02T00:00:00Z",
     },
-    pull_creation_cap: { enabled: true, max_open_pull_requests: 5 },
+    pull_creation_cap: { enabled: true, max_open_pull_requests: 5, include_drafts: true },
     pull_bypass_list: [{ login: "octocat" }],
   },
   expected: {
     value: {
       limit: "collaborators_only",
-      pull_request_creation_cap: { enabled: true, max_open_pull_requests: 5 },
+      // Every field GitHub documents on the cap reads back, include_drafts beside the two the PATCH has always carried.
+      pull_request_creation_cap: { enabled: true, max_open_pull_requests: 5, include_drafts: true },
       pull_request_creation_bypass: ["octocat"],
     },
     notes: [

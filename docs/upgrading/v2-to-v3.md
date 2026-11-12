@@ -4,7 +4,7 @@ order: 20
 
 # Upgrading from v2 to v3
 
-Sixty-two breaks. Twenty-seven are for library consumers (sections 9, 22 to 29, 34, 35, 37 to 41, 45, 47, 49, 51, 54 to 56, 58, 60, 61, and 62), ten of those also refusals below, and two are for anyone pinning a sha or installing `@next` (sections 21 and 59).
+Sixty-three breaks. Twenty-eight are for library consumers (sections 9, 22 to 29, 34, 35, 37 to 41, 45, 47, 49, 51, 54 to 56, 58, and 60 to 63), ten of those also refusals below, and two are for anyone pinning a sha or installing `@next` (sections 21 and 59).
 
 Eighteen are parse-time refusals (sections 36 to 52 and 55): a declaration GitHub would reject, or that could never converge, now fails before any request. Sections 53 and 57 are silent: YAML merge keys resolve, and one validation message is respelled.
 
@@ -12,7 +12,7 @@ The library sections describe the public entry, `@vivswan/github-settings-as-cod
 
 The silent ones include the fallback, the renamed `GSAC_RETRY_BASE_MS`, the rendered file (it reorders once), and the snapshot file (it reorders once and no longer dates itself). Run `mode: check` before the first v3 apply and diff the first v3 rendered file.
 
-The changelog entry for 3.0.0 will carry the release-please footers in the [CHANGELOG](https://github.com/Vivswan/github-settings-as-code/blob/main/CHANGELOG.md).
+The changelog entry for 3.0.0 carries the release-please footers in the [CHANGELOG](https://github.com/Vivswan/github-settings-as-code/blob/main/CHANGELOG.md).
 
 ## Run inputs and outputs
 
@@ -122,6 +122,7 @@ The detail is in [v2-to-v3/library.md](v2-to-v3/library.md).
 | Library: `GitHubClient` and `ArtifactUploader` answer, never reject   | `tryRequest()` and `tryGraphql()` rejected for a request with no HTTP answer (not sent, the transport failed, a GraphQL body off the wire contract); `upload()` rejected to report a failed upload | Both port methods resolve to a `ClientAnswer` whose third arm is `{ failed }`, the whole line; `upload()` resolves to `{ uploaded: true }` or `{ failed }`. A test double that still throws is read as a broken contract: the failure is reported, never classified | A double returning `void` from `upload()`, or a caller reading `.data` off a `ClientAnswer` without narrowing `failed`, fails to compile; [section 58](v2-to-v3/library.md#58-library-githubclient-and-artifactuploader-answer-never-reject)     |
 | Library: a target carries its parsed `RepoRef`                        | `CentralTarget` and `RemoteTarget` carried `slug: string`, and `parseReposInput` resolved to `{ slugs: string[], discover }`                                                                       | Both carry `repo: RepoRef` (`owner`, `name`, `slug`), parsed once where the input is read; `parseReposInput` resolves to `{ repos: RepoRef[], discover }`                                                                                                           | Reading `.slug` off a target or `.slugs` off the parsed input fails to compile (`TS2339`); read `target.repo.slug` and `parsed.repos`; [section 62](v2-to-v3/library.md#62-library-a-target-carries-its-parsed-reporef)                          |
 | Library: `GitHubClient` lists through `tryList()`                     | The verbs walked a list page by page through `tryRequest("GET", path?per_page=100&page=N)` and stopped on a short page                                                                             | The port has a third member, `tryList(path, {perPage, until})`, resolving to a `ClientAnswer<unknown[]>` of page bodies; `GitHubApi` follows GitHub's `Link` header through `@octokit/plugin-paginate-rest`                                                         | A double or client without `tryList` fails to compile, naming the missing member; [section 60](v2-to-v3/library.md#60-library-githubclient-lists-through-trylist)                                                                                |
+| Library: `SettingsFile` applies a section schema as the action does   | In the pre-release v3 builds `SettingsFile.parse` dropped a label's undeclared `owner` and the refused `actions.selected_actions_url` without a word, so both documents parsed                     | A key the action passes through survives the parse, and a key the section's schema refuses fails it with the key named; the checks beside the schema (unknown sections, a closed section's entry keys, duplicates) stay with `validateSettings`                     | A document that parsed fails naming the refused key, and a parsed label carries the `owner` it used to lose; [section 63](v2-to-v3/library.md#63-library-settingsfile-applies-a-section-schema-as-the-action-does)                               |
 
 ## Releases and tags
 

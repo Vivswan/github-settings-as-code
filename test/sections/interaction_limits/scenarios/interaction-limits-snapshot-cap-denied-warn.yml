@@ -1,0 +1,47 @@
+# GitHub gates the creation-cap and bypass-list GETs at write, so a read-only
+# Administration grant reads the base limit and is denied those two. Under
+# on-missing-permission: warn each denied key is a notice naming it and the
+# grant, the limit still reads back, and the file is written with result
+# snapshot (a noted key is not a skipped section, so the run is not partial).
+name: interaction-limits-snapshot-cap-denied-warn
+settings: {}
+live_state:
+  interaction_limits:
+    limit: contributors_only
+    origin: repository
+    expires_at: 2027-01-02T00:00:00Z
+  pull_creation_cap:
+    enabled: true
+    max_open_pull_requests: 5
+  pull_bypass_list:
+    - login: octocat
+inputs:
+  mode: snapshot
+  snapshot_file: snapshot.yml
+  sections: interaction_limits
+  on_missing_permission: warn
+denial_style: 403
+token_permissions:
+  administration: read
+expect:
+  exit_code: 0
+  result: snapshot
+  skipped_sections: []
+  outcomes:
+    interaction_limits: snapshot
+  snapshot:
+    interaction_limits:
+      limit: contributors_only
+  stdout_contains:
+    - "::notice::interaction_limits.pull_request_creation_cap: left out of the snapshot - the token was denied GET /repos/e2e-owner/e2e-repo/interaction-limits/pulls/creation-cap"
+    - "::notice::interaction_limits.pull_request_creation_bypass: left out of the snapshot - the token was denied GET /repos/e2e-owner/e2e-repo/interaction-limits/pulls/bypass-list"
+    - 'grant "Administration" (read and write)'
+    - snapshot written to snapshot.yml
+  stdout_lacks:
+    - "::error::"
+  never:
+    - POST /
+    - PATCH /
+    - PUT /
+    - DELETE /
+  snapshot_converges: true

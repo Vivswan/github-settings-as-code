@@ -6,9 +6,9 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+import { closeSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { type CliIoOptions, cliIo, maskedStreams } from "../../src/cli/io.js";
+import { type CliIoOptions, cliIo, maskedStreams, openSummaryFile } from "../../src/cli/io.js";
 import { withTempDir } from "../temp-dir.js";
 import { memoryStream } from "./streams.js";
 
@@ -69,6 +69,14 @@ describe("the CLI Io", () => {
     );
   });
 
+  test("a masked value that spans lines is redacted before its line breaks are escaped", () => {
+    // Escaped first, the value in the line would no longer equal the value in the registry, and it would print.
+    const { io, stdout } = open();
+    io.mask("first half\nsecond half");
+    io.log("deploy key: first half\nsecond half\ndone");
+    expect(stdout()).toBe("deploy key: ***%0Adone\n");
+  });
+
   test("--verbose shows the debug trace on stderr; without it the trace is dropped", () => {
     const quiet = open();
     quiet.io.debug("GET /repos/o/r -> 200");
@@ -87,9 +95,11 @@ describe("the CLI Io", () => {
   test("summary blocks append to the named file and are dropped without one", () =>
     withTempDir("gsac-io-", async (dir) => {
       const summary = join(dir, "summary.md");
-      const named = open({ summaryFile: summary });
+      const summaryFd = openSummaryFile(summary)._unsafeUnwrap();
+      const named = open({ summaryFd });
       named.io.summary("## first");
       named.io.summary("## second");
+      closeSync(summaryFd);
       expect(readFileSync(summary, "utf8")).toBe("## first\n## second\n");
       // Without a file the block goes nowhere: no stream carries it, and the working
       // directory (where a defaulted path would land) stays empty.

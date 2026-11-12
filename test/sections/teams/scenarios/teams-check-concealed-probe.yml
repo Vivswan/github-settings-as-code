@@ -1,0 +1,31 @@
+name: teams-check-concealed-probe
+description: >-
+  A fine-grained token holds Administration but not the Members organization
+  permission, so the repository's team list names the declared team while its
+  access probe is answered 404. The team already holds the declared role, and
+  check mode cannot tell: the drift line names both readings of the 404 and
+  the grant that settles it, where a plain "no access" line would be false.
+settings:
+  teams:
+    - name: platform
+      permission: push
+inputs:
+  mode: check
+owner_kind: org
+token_permissions:
+  org_members: none
+live_state:
+  teams:
+    platform:
+      role_name: write
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    teams: drift
+  never:
+    - "PUT /orgs/e2e-owner/teams/platform/repos/{repo}"
+  stdout_contains:
+    - "teams[platform]: listed with access to"
+    - 'but the access probe answered 404, read here as no access, so apply will grant "push". A fine-grained token missing the grant gets the same answer'
+    - 'grant "Members" (read) under the PAT''s Organization permissions and "Administration" (read and write) under its Repository permissions, then check again'
