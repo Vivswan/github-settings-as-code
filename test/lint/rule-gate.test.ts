@@ -18,10 +18,10 @@ const MESSAGE =
 /** The file the plugin exempts: rule() itself is a bare refinement. */
 const EXEMPT_FILE = "src/sections/shared/schema-helpers.ts";
 
-/** A line ending in `// bare` is one the plugin must flag; every other refinement here is authored through rule(). */
+/** A line ending in `// bare` is one the plugin must flag; every other line passes its check through rule(), through a helper, or by name. */
 const BARE = /\/\/ bare$/;
 
-/** A src/ module of refinements, every one through rule() but the lines marked bare. */
+/** A src/ module of refinements: the forms zod skips after a nested failure, each marked bare, beside the forms the tree writes. */
 const REFINEMENTS = `
 import { z } from "zod";
 import { maxLength, rule } from "./sections/shared/schema-helpers.js";
@@ -33,8 +33,13 @@ export const sup = z.object({ n: z.string() }).superRefine(fn); // bare
 export const supParams = z.object({ n: z.string() }).superRefine(fn, { when: () => true }); // bare
 export const supTyped = z.object({ n: z.string() }).superRefine<{ n: string }>(fn); // bare
 export const composed = z.object({ n: z.string() }).check(z.superRefine(fn)); // bare
+export const inline = z.object({ n: z.string() }).check((ctx) => { ctx.issues.push({ code: "custom", message: "x", input: ctx.value }); }); // bare
+export const inlineFunction = z.object({ n: z.string() }).check(function whole(ctx) { ctx.issues.push({ code: "custom", message: "x", input: ctx.value }); }); // bare
+export const inlineBesideHelper = z.array(z.string()).check(maxLength(1, "x"), (ctx) => { ctx.issues.push({ code: "custom", message: "x", input: ctx.value }); }); // bare
 export const gated = z.object({ n: z.string() }).check(rule(fn));
+export const gatedInline = z.object({ n: z.string() }).check(rule((value, ctx) => { ctx.addIssue({ code: "custom", message: String(value) }); }));
 export const bounded = z.array(z.string()).check(maxLength(1, "x"));
+export const named = z.string().check(fn);
 `.trimStart();
 
 describe("the rule-gate plugin", () => {

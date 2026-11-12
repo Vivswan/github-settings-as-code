@@ -4,8 +4,8 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { err } from "neverthrow";
 import {
   ARCHITECTURE_PATH,
@@ -56,6 +56,42 @@ describe("architecture.yml against src/", () => {
     expect(arrows).toHaveLength(Object.values(arch.edges).flat().length);
     expect(arrows).toContain("  engine --> plain_data");
   });
+});
+
+describe("lintArchitecture over a scratch tree", () => {
+  const DECLARATION = [
+    "layers:",
+    "  library: [src/index.ts]",
+    "  cli: [src/cli.ts]",
+    "  sections: [src/sections/]",
+    "exclude: []",
+    "edges: {}",
+  ].join("\n");
+
+  test.each<[form: string, importer: string, specifier: string, layer: string]>([
+    ['a bare ".."', "src/sections/s.ts", "..", "sections"],
+    ['a bare "."', "src/cli.ts", ".", "cli"],
+    ["the same file spelled out (control)", "src/sections/s.ts", "../index.js", "sections"],
+  ])(
+    "a directory's index imported through %s draws its edge",
+    (_form, importer, specifier, layer) =>
+      withTempDir("arch-lint-tree-", (dir) => {
+        // tsc and bun both resolve a bare "." or ".." to the directory's index.ts, so a scan that keeps only the
+        // specifiers with a slash would let this forbidden import pass.
+        const files = {
+          [ARCHITECTURE_PATH]: `${DECLARATION}\n`,
+          "src/index.ts": "export const run = 1;\n",
+          [importer]: `import type { run } from "${specifier}";\nexport type Run = typeof run;\n`,
+        };
+        for (const [path, text] of Object.entries(files)) {
+          mkdirSync(dirname(join(dir, path)), { recursive: true });
+          writeFileSync(join(dir, path), text);
+        }
+        expect(lintArchitecture(dir)).toEqual([
+          `forbidden import ${layer} -> library: ${importer} -> src/index.ts; move it or declare the edge`,
+        ]);
+      }),
+  );
 });
 
 describe("importSpecifiers", () => {
