@@ -32,6 +32,7 @@ expect:
   summary_contains:
     - "| private repository #1 | remote | :x: failed | - |"
     - "| labels | :x: failed | hidden (private repository), HTTP 403 |"
+  # snapshot-private-denied-status-shown pins each of these as printed in the clear; change both lists together.
   leaks_nowhere:
     - svc-vault
     - /labels
