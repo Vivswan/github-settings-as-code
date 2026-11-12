@@ -50,15 +50,14 @@ export interface GraphqlOp {
   readonly query: string;
 }
 
-/**
- * What a caller knows about a request that the client cannot read off it.
- *
- * `carriesSecret` marks a request whose payload or variables hold a resolved secret. The engine sets it from the act of
- * resolving (engine/execute.ts) and withholds the request's error on its own side of this port whatever the client
- * answers (sections/contract/requests.ts), so a caller-supplied client cannot leak an echoed value into an outcome or
- * a report; GitHubApi honors the mark too, beside its field-name scan, for its direct callers.
- */
+/** What a caller knows about a request that the client cannot read off it. */
 export interface RequestMark {
+  /**
+   * The payload or variables hold a resolved secret. The engine sets it from the act of resolving (engine/execute.ts)
+   * and withholds the request's error on its own side of this port whatever the client answers
+   * (sections/contract/requests.ts), so a caller-supplied client cannot leak an echoed value into an outcome or a
+   * report; GitHubApi honors the mark too, beside its field-name scan, for its direct callers.
+   */
   carriesSecret?: boolean;
 
   /** The request serves a redacted target, so its route and payload stay out of the trace; redactedClient() sets it. */
