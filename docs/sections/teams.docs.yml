@@ -14,6 +14,10 @@ coverage:
         Both modes probe each declared team's access with the v3.repository media type to read
         role_name, and the grant is issued only when the team lacks access or its live role diverges.
       - >-
+        A declared team the repository's team list names, whose probe answers 404, is still planned
+        as a grant, and its check line names both readings of the 404 (no access, or a fine-grained
+        token missing the grant), as the snapshot's note does.
+      - >-
         The repository's team list (GET /repos/{owner}/{repo}/teams) names the undeclared teams: kept
         by default and noted (a team is often granted by the org for reasons outside one repository's
         file).

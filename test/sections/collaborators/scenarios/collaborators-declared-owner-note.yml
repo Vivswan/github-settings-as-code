@@ -1,0 +1,31 @@
+name: collaborators-declared-owner-note
+description: >-
+  The settings file names the repository owner beside a collaborator already
+  at the declared role, on a user-owned repository whose list carries the
+  owner as admin. Settled like any other entry the owner would be re-granted
+  at the declared "push"; instead apply plans no write for it, the entry
+  earns a note saying to remove it, and a check rerun converges.
+settings:
+  collaborators:
+    - username: e2e-owner
+      permission: push
+    - username: e2e-keeper
+      permission: push
+owner_kind: user
+live_state:
+  collaborators:
+    - login: e2e-owner
+      role_name: admin
+    - login: e2e-keeper
+      role_name: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    collaborators: applied
+  never:
+    - "PUT /repos/{repo}/collaborators/"
+    - "DELETE /repos/{repo}/collaborators/"
+  stdout_contains:
+    - 'collaborator "e2e-owner" is the repository owner, whose access is implicit and never managed; the entry is ignored - remove it from the settings file to silence this note'
+  fixpoint: converges

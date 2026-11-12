@@ -1,0 +1,23 @@
+name: teams-list-denied-advice
+description: >-
+  A token without Administration is denied the repository's team list, the
+  section's first gated read, so the apply preflight fails the run before
+  any write. The advice names the whole grant the section's writes need:
+  advice for the list's own gate alone (Administration, read) would pass the
+  next preflight and be denied at the grant PUT.
+settings:
+  teams:
+    - name: platform
+      permission: push
+owner_kind: org
+token_permissions:
+  administration: none
+denial_style: 403
+expect:
+  exit_code: 1
+  result: failed
+  never:
+    - "PUT /orgs/e2e-owner/teams/platform/repos/{repo}"
+  stdout_contains:
+    - "teams: the token was denied GET /repos/"
+    - 'To fix, grant "Members" (read) under the PAT''s Organization permissions and "Administration" (read and write) under its Repository permissions'
