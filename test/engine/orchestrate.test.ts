@@ -10,6 +10,7 @@ import {
   validateSettingsDoc,
 } from "../../src/engine/orchestrate.js";
 import { SectionSelection } from "../../src/engine/section-selection.js";
+import { publicDetail, redactedChannel } from "../../src/flows/redact.js";
 import { silentIo } from "../../src/io.js";
 import {
   describeProblem,
@@ -19,6 +20,7 @@ import {
   unknownSectionsIssue,
 } from "../../src/problem.js";
 import { SECTION_KEYS, type SettingsFile } from "../../src/schema.js";
+import { sectionFailure } from "../../src/sections/contract/errors.js";
 import type { SectionModule } from "../../src/sections/contract/module.js";
 import type { SectionPlan } from "../../src/sections/contract/plan.js";
 import { interactionLimitsSection } from "../../src/sections/interaction_limits/index.js";
@@ -668,9 +670,7 @@ describe("runForRepo plan sections", () => {
       },
     ]);
     expect(annotations).toEqual([
-      expect.stringMatching(
-        /^notice: workflows: workflows\[missing\.yml\]: declared in the settings file/,
-      ),
+      expect.stringMatching(/^notice: workflows\[missing\.yml\]: declared in the settings file/),
     ]);
   });
 
@@ -713,7 +713,7 @@ describe("runForRepo plan sections", () => {
     expect(api.mutations()).toHaveLength(2);
     expect(logs).toEqual(['workflows: disabled workflow ".github/workflows/ci.yml"']);
     expect(annotations).toEqual([
-      expect.stringMatching(/^notice: workflows: workflows\[missing\.yml\]/),
+      expect.stringMatching(/^notice: workflows\[missing\.yml\]: declared in the settings file/),
       expect.stringContaining("PUT /repos/o/r/actions/workflows/2/enable: 422"),
     ]);
     expect(result.outcomes).toEqual([
@@ -737,16 +737,13 @@ describe("runForRepo plan sections", () => {
     afterEach(() => {
       stubbed?.mockRestore();
     });
-    const stub = (section: SectionModule, ...ops: SectionPlan["ops"]) => {
+    const stubPlan = (section: SectionModule, plan: SectionPlan) => {
       // A restored spy no longer intercepts, so each test arms its own.
-      stubbed = spyOn(section, "plan").mockResolvedValue(
-        ok({
-          ops: ops as never,
-          notes: [],
-          drift: [],
-        }),
-      );
+      stubbed?.mockRestore();
+      stubbed = spyOn(section, "plan").mockResolvedValue(ok(plan as never));
     };
+    const stub = (section: SectionModule, ...ops: SectionPlan["ops"]) =>
+      stubPlan(section, { ops, notes: [], drift: [] });
     const disabling = (workflowId: string): SectionPlan["ops"][number] => ({
       role: "disable",
       params: { workflow_id: workflowId },
@@ -870,6 +867,143 @@ describe("runForRepo plan sections", () => {
       expect(result.outcomes).toEqual([
         { key: "workflows", status: "failed", detail: [partial.slice("error: ".length)] },
       ]);
+    });
+
+    const refusing = (workflowId: string): SectionPlan["ops"][number] => ({
+      ...disabling(workflowId),
+      before: () =>
+        err(sectionFailure("refused", `workflows[${workflowId}]: not applied - refused`)),
+    });
+    const accepting = () =>
+      new MockApi({ [WORKFLOWS_LIST]: { data: live } }, { unroutedMutations: "succeed" });
+
+    test("a section's line that already leads with its key prints under that key once on every path that prefixes; any other line is prefixed", async () => {
+      // A section's own lines lead with its key (`teams: ...`, `repository.enable_git_lfs: ...`, `workflows[ci.yml]: ...`), so prefixing them again
+      // names the section twice. A longer word that merely starts with the key is not the key.
+      const NOTES = [
+        "workflows: the whole section",
+        "workflows.state: a dotted key",
+        "workflows[ci.yml]: an entry",
+        "workflows_extra: another word",
+        "plain words",
+      ];
+      const ONCE = [
+        "annotate notice: workflows: the whole section",
+        "annotate notice: workflows.state: a dotted key",
+        "annotate notice: workflows[ci.yml]: an entry",
+        "annotate notice: workflows: workflows_extra: another word",
+        "annotate notice: workflows: plain words",
+      ];
+      const keyed = { ...disabling("1"), change: "workflows[1]: disabled" };
+      for (const [mode, lines] of [
+        ["check", ["log: drift: workflows[1]: drifted"]],
+        ["apply", ["log: workflows[1]: disabled"]],
+      ] as const) {
+        stubPlan(workflowsSection, { ops: [keyed], notes: NOTES, drift: [] });
+        const { io, events } = captureIo();
+        await runForRepo(accepting(), opts({ mode, settings: drifting }), io);
+        expect(events).toEqual([...ONCE, ...lines]);
+      }
+      // Beside a failure: the notes, the change that landed first, and the failure's own line.
+      stubPlan(workflowsSection, { ops: [keyed, refusing("2")], notes: NOTES, drift: [] });
+      const { io, events } = captureIo();
+      const result = await runForRepo(accepting(), opts({ settings: drifting }), io);
+      expect(events).toEqual([
+        ...ONCE,
+        "log: workflows[1]: disabled",
+        "annotate error: workflows[2]: not applied - refused (1 request landed before this failure, so the repository is partially applied)",
+      ]);
+      expect(result.outcomes).toEqual([
+        {
+          key: "workflows",
+          status: "failed",
+          detail: [
+            ...NOTES,
+            "workflows[1]: disabled",
+            "workflows[2]: not applied - refused (1 request landed before this failure, so the repository is partially applied)",
+          ],
+        },
+      ]);
+    });
+
+    test("a failure that stops a plan says what it left unattempted: the count as a warning, each operation as a log line and a row", async () => {
+      // Without it a refused entry ends the section and every later entry's write is dropped without a word.
+      stub(
+        workflowsSection,
+        refusing("1"),
+        { ...disabling("2"), describe: "disabling workflow 2" },
+        disabling("3"),
+      );
+      const api = accepting();
+      const { io, events } = captureIo();
+      const result = await runForRepo(api, opts({ settings: drifting }), io);
+      expect(result.result).toBe("failed");
+      // The stop stays: a later operation may depend on the one that failed, so none is sent.
+      expect(api.mutations()).toEqual([]);
+      expect(events).toEqual([
+        "annotate error: workflows[1]: not applied - refused",
+        "annotate warning: workflows: 2 operations after this failure were not attempted; re-run once it is fixed",
+        "log: workflows: not attempted - disabling workflow 2",
+        "log: workflows: not attempted - workflows[3]: drifted",
+      ]);
+      expect(result.outcomes).toEqual([
+        {
+          key: "workflows",
+          status: "failed",
+          detail: [
+            "workflows[1]: not applied - refused",
+            "not attempted - disabling workflow 2",
+            "not attempted - workflows[3]: drifted",
+          ],
+        },
+      ]);
+    });
+
+    test("a denial that fails the section says what it left unattempted too; a section skipped under warn lists nothing, since the skip covers every operation", async () => {
+      const denying = () =>
+        new MockApi({
+          [WORKFLOWS_LIST]: { data: live },
+          "PUT /repos/o/r/actions/workflows/1/disable": {
+            error: { status: 403, message: "Resource not accessible", body: "" },
+          },
+        });
+      stub(workflowsSection, disabling("1"), disabling("2"));
+      const failed = captureIo();
+      const refused = await runForRepo(denying(), opts({ settings: drifting }), failed.io);
+      expect(refused.outcomes.map((o) => o.status)).toEqual(["failed"]);
+      expect(failed.events).toEqual([
+        expect.stringMatching(
+          /^annotate error: workflows: not applied - the token was denied PUT /,
+        ),
+        "annotate warning: workflows: 1 operation after this failure was not attempted; re-run once it is fixed",
+        "log: workflows: not attempted - workflows[2]: drifted",
+      ]);
+      expect(refused.outcomes[0]?.detail.at(-1)).toBe("not attempted - workflows[2]: drifted");
+      const skipped = captureIo();
+      const softened = await runForRepo(
+        denying(),
+        opts({ onMissingPermission: "warn", settings: drifting }),
+        skipped.io,
+      );
+      expect(softened.outcomes.map((o) => o.status)).toEqual(["skipped"]);
+      expect(skipped.events).toEqual([
+        expect.stringMatching(/^annotate warning: workflows: skipped - the token was denied PUT /),
+      ]);
+    });
+
+    test("a redacted target prints no unattempted line in the clear: each goes through the run's own sink, and its rows seal with the rest", async () => {
+      stub(workflowsSection, refusing("1"), {
+        ...disabling("2"),
+        describe: "disabling workflow CANARY",
+      });
+      const shown = captureIo();
+      const channel = redactedChannel(shown.io, "o/r", "private repository #1");
+      const result = await runForRepo(accepting(), opts({ settings: drifting }), channel.io);
+      // The control: the line exists, in the row and in the sealed transcript the private report is built from.
+      expect(result.outcomes[0]?.detail).toContain("not attempted - disabling workflow CANARY");
+      const sealed = channel.close({ outcomes: result.outcomes });
+      expect(shown.events).toEqual([]);
+      expect(JSON.stringify(publicDetail(sealed))).not.toMatch(/CANARY|not attempted/);
     });
   });
 

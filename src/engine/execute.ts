@@ -1,7 +1,7 @@
 /**
  * The ONE place a section's operations touch the API. Operations go through the request helpers so error classification
  * (a denial vs a hard failure, the hints) matches the reads'; a failure comes back as the value the section loop
- * classifies, beside what landed before it.
+ * classifies, beside what landed before it and the operations it left unattempted.
  */
 
 import { err, ok, type Result } from "neverthrow";
@@ -10,7 +10,7 @@ import type { GitHubClient } from "../github/api.js";
 import { type EndpointDecl, endpointMethod } from "../sections/contract/endpoints.js";
 import { type SectionFailure, sectionFailure, thrown } from "../sections/contract/errors.js";
 import type { SectionContext, SectionMeta } from "../sections/contract/module.js";
-import type { ExecTools, SectionPlan } from "../sections/contract/plan.js";
+import { driftOf, type ExecTools, type SectionPlan } from "../sections/contract/plan.js";
 import {
   callDeclared,
   callGraphql,
@@ -25,9 +25,14 @@ interface PlanExecutionBase {
   readonly landed: number;
 }
 
+/** A failure ends the plan, since a later operation may depend on an earlier one; `unattempted` names each operation after it, in plan order. */
 type PlanExecution =
   | (PlanExecutionBase & { readonly status: "applied" })
-  | (PlanExecutionBase & { readonly status: "failed"; readonly failure: SectionFailure });
+  | (PlanExecutionBase & {
+      readonly status: "failed";
+      readonly failure: SectionFailure;
+      readonly unattempted: readonly string[];
+    });
 
 type PlannedOp = SectionPlan["ops"][number];
 
@@ -236,6 +241,19 @@ function changeLines(
   return ok(typeof lines === "string" ? [lines] : lines);
 }
 
+/**
+ * An operation that never ran, in its section's own words: its description, else the drift it would have resolved,
+ * else (a write that recurs without drift and describes nothing) its role.
+ */
+function nameOf(op: PlannedOp): string {
+  if (op.describe !== undefined) {
+    return op.describe;
+  }
+
+  const drift = driftOf(op);
+  return drift.length > 0 ? drift.join("; ") : `the "${op.role}" write`;
+}
+
 export async function executePlan(
   plan: SectionPlan,
   section: SectionMeta,
@@ -250,19 +268,20 @@ export async function executePlan(
   const changes: string[] = [];
   const notes: string[] = [];
   let landed = 0;
-  const failed = (failure: SectionFailure): PlanExecution => ({
+  const failed = (failure: SectionFailure, at: number): PlanExecution => ({
     status: "failed",
     changes,
     notes,
     landed,
     failure,
+    unattempted: plan.ops.slice(at + 1).map(nameOf),
   });
-  for (const op of plan.ops) {
+  for (const [at, op] of plan.ops.entries()) {
     const { exec, resolved } = secretRecorder(tools);
     try {
       const requested = await request(run, op, exec, resolved);
       if (requested.isErr()) {
-        return failed(requested.error);
+        return failed(requested.error, at);
       }
 
       if (requested.value.kind === "tolerated") {
@@ -273,13 +292,13 @@ export async function executePlan(
       landed++;
       const rendered = changeLines(section, op, requested.value.response);
       if (rendered.isErr()) {
-        return failed(rendered.error);
+        return failed(rendered.error, at);
       }
 
       changes.push(...rendered.value);
     } catch (error) {
       // The client's own throw on an unmarked request, or a BUG invariant: reported beside what landed.
-      return failed(thrown(error));
+      return failed(thrown(error), at);
     }
   }
 

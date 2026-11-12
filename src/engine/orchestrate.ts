@@ -121,6 +121,7 @@ interface Produced {
   readonly notes: readonly string[];
   readonly changes: readonly string[];
   readonly landed: number;
+  readonly unattempted: readonly string[];
 }
 
 /** A section's plan and execution as a value, beside what it produced on the way. */
@@ -383,7 +384,7 @@ async function runSection(
     );
   }
 
-  let produced: Produced = { notes: [], changes: [], landed: 0 };
+  let produced: Produced = { notes: [], changes: [], landed: 0, unattempted: [] };
   try {
     const planned = await section.plan(planContext(section, run.api, run.repo), desired);
     if (planned.isErr()) {
@@ -400,7 +401,12 @@ async function runSection(
 
     const execution = await executePlan(plan, section, run.api, run.repo, run.tools);
     const notes = [...plan.notes, ...plan.drift, ...execution.notes];
-    produced = { notes, changes: execution.changes, landed: execution.landed };
+    produced = {
+      notes,
+      changes: execution.changes,
+      landed: execution.landed,
+      unattempted: execution.status === "failed" ? execution.unattempted : [],
+    };
     if (execution.status === "failed") {
       return { step: err(execution.failure), produced };
     }
@@ -409,6 +415,34 @@ async function runSection(
   } catch (error) {
     return { step: err(thrown(error)), produced };
   }
+}
+
+/** A section's line under its key, prefixed once: a section's own lines already lead with the key (`teams: ...`, `repository.enable_git_lfs: ...`, `environments[prod]: ...`). */
+export function underKey(key: SectionKey, line: string): string {
+  const own = line.startsWith(key) && /^[:.[]/.test(line.slice(key.length));
+  return own ? line : `${key}: ${line}`;
+}
+
+/**
+ * What the stop at a failed operation cost, said after the failure: the count as a warning, each operation the plan
+ * still held as a log line, and those lines as the rows they add. The stop itself stays, since a later operation can
+ * depend on the one that failed.
+ */
+function reportUnattempted(io: Io, key: SectionKey, unattempted: readonly string[]): string[] {
+  const count = unattempted.length;
+  if (count === 0) {
+    return [];
+  }
+
+  io.annotate(
+    "warning",
+    `${key}: ${countNoun(count, "operation", "operations")} after this failure ${agree(count, "was", "were")} not attempted; re-run once it is fixed`,
+  );
+  const rows = unattempted.map((name) => `not attempted - ${name}`);
+  for (const row of rows) {
+    io.log(`${key}: ${row}`);
+  }
+  return rows;
 }
 
 /** Why a denial fails the run whatever the policy: a request landed, or the section is required. */
@@ -422,12 +456,15 @@ function denialWhy(landed: number, required: boolean): string {
   return "";
 }
 
-/** A denied section: skipped under warn when nothing landed and the section is not required, else failed, the line saying why the policy did not spare it. */
+/**
+ * A denied section: skipped under warn when nothing landed and the section is not required, else failed, the line
+ * saying why the policy did not spare it. A skip covers every operation of the section, so it lists none unattempted.
+ */
 function deniedOutcome(
   run: SectionRun,
   key: SectionKey,
   failure: Denied,
-  landed: number,
+  { landed, unattempted }: Produced,
   before: readonly string[],
 ): SectionOutcome {
   const required = run.opts.sections.required.has(key);
@@ -444,10 +481,16 @@ function deniedOutcome(
 
   const applied = landed > 0 ? "partially applied" : "not applied";
   run.io.annotate("error", `${key}: ${applied}${denialWhy(landed, required)} - ${failure.detail}`);
-  return { key, status: "failed", detail: [...before, failure.detail], httpStatus: failure.status };
+  const after = reportUnattempted(run.io, key, unattempted);
+  return {
+    key,
+    status: "failed",
+    detail: [...before, failure.detail, ...after],
+    httpStatus: failure.status,
+  };
 }
 
-/** A section that failed: what it produced first (its notes and change lines), then the failure as its row. */
+/** A section that failed: what it produced first (its notes and change lines), then the failure as its row, then what the failure left unattempted. */
 function failedOutcome(
   run: SectionRun,
   key: SectionKey,
@@ -455,28 +498,27 @@ function failedOutcome(
   produced: Produced,
 ): SectionOutcome {
   for (const note of produced.notes) {
-    run.io.annotate("notice", `${key}: ${note}`);
+    run.io.annotate("notice", underKey(key, note));
   }
   for (const line of produced.changes) {
-    run.io.log(`${key}: ${line}`);
+    run.io.log(underKey(key, line));
   }
 
   const before = [...produced.notes, ...produced.changes];
   if (failure.kind === "permission-denied") {
-    return deniedOutcome(run, key, failure, produced.landed, before);
+    return deniedOutcome(run, key, failure, produced, before);
   }
 
-  // failureFor() messages already carry section, cause, and fix; anything else gets the section prefixed. A landed
-  // request is a real mutation with or without its line, so say so.
-  const prefixed = failure.message.startsWith(`${key}:`)
-    ? failure.message
-    : `${key}: ${failure.message}`;
+  // failureFor() messages already carry section, cause, and fix, and a refusal leads with its entry; anything else gets
+  // the section prefixed. A landed request is a real mutation with or without its line, so say so.
+  const prefixed = underKey(key, failure.message);
   const annotated =
     produced.landed > 0
       ? `${prefixed} (${countNoun(produced.landed, "request", "requests")} landed before this failure, so the repository is partially applied)`
       : prefixed;
   run.io.annotate("error", annotated);
-  return { key, status: "failed", detail: [...before, annotated] };
+  const after = reportUnattempted(run.io, key, produced.unattempted);
+  return { key, status: "failed", detail: [...before, annotated, ...after] };
 }
 
 /** A section that changed nothing but left notes (a tolerated 409, a personal-account skip) is NOT "already in the desired state"; the notes are shown instead of claiming no changes were needed. */
@@ -493,7 +535,7 @@ function appliedDetail(changes: string[], notes: string[]): string[] {
 /** A section that ran: its notes, then its drift lines (check) or change lines (apply) as its row. */
 function ranOutcome(io: Io, key: SectionKey, outcome: Outcome): SectionOutcome {
   for (const note of outcome.notes) {
-    io.annotate("notice", `${key}: ${note}`);
+    io.annotate("notice", underKey(key, note));
   }
 
   if (outcome.check) {
@@ -507,7 +549,7 @@ function ranOutcome(io: Io, key: SectionKey, outcome: Outcome): SectionOutcome {
   }
 
   for (const line of outcome.changes) {
-    io.log(`${key}: ${line}`);
+    io.log(underKey(key, line));
   }
   return { key, status: "applied", detail: appliedDetail(outcome.changes, outcome.notes) };
 }

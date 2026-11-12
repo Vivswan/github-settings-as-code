@@ -183,6 +183,52 @@ describe("executePlan", () => {
     );
   });
 
+  test("a failed execution names every operation the stop left unattempted, in plan order, and sends none of them", async () => {
+    // Without the names a refused entry ends the plan and the later entries' writes vanish without a word. Each is named by its description, else by the
+    // drift it would have resolved, else (a write that recurs without drift and describes nothing) by its role.
+    const api = new MockApi({}, { unroutedMutations: "succeed" });
+    const plan: SectionPlan = {
+      ops: [
+        {
+          role: "create",
+          before: () => err(sectionFailure("refused", "labels[first]: not applied")),
+          drift: ["labels[first]: missing"],
+          change: 'created label "first"',
+        },
+        {
+          role: "create",
+          describe: 'creating label "second"',
+          drift: ["labels[second]: missing"],
+          change: 'created label "second"',
+        },
+        {
+          role: "write",
+          variables: {},
+          drift: ["toggle off", "toggle unarmed"],
+          change: "flipped the toggle",
+        },
+        {
+          role: "resend",
+          params: { name: "x" },
+          drift: { unverifiable: "GitHub never echoes the value back", lines: [] },
+          change: "re-sent",
+        },
+      ],
+      notes: [],
+      drift: [],
+    };
+    const execution = await executePlan(plan, SECTION, api, REPO, TOOLS);
+    expect(execution).toEqual({
+      status: "failed",
+      changes: [],
+      notes: [],
+      landed: 0,
+      failure: { kind: "refused", message: "labels[first]: not applied" },
+      unattempted: ['creating label "second"', "toggle off; toggle unarmed", 'the "resend" write'],
+    });
+    expect(api.calls).toEqual([]);
+  });
+
   test("an operation's describe label leads the failure message, REST and GraphQL alike", async () => {
     const api = new MockApi({
       "POST /repos/o/r/labels": { error: REJECTED },
@@ -268,6 +314,7 @@ describe("executePlan", () => {
           /BUG: labels: operation "create" rendered no change line for a request that landed/,
         ),
       },
+      unattempted: [],
     });
   });
 
@@ -291,6 +338,7 @@ describe("executePlan", () => {
       notes: [],
       landed: 1,
       failure: { kind: "unverified", message: "the write did not take" },
+      unattempted: [],
     });
     expect(api.mutations().map((m) => `${m.method} ${m.path}`)).toEqual(["POST /repos/o/r/labels"]);
     expect(captured).toBe(false);
@@ -333,6 +381,7 @@ describe("executePlan", () => {
       notes: [],
       landed: 2,
       failure: { kind: "live-shape", message: "the response carried no node id" },
+      unattempted: ["labels[next]: missing"],
     });
     expect(api.mutations().map((m) => `${m.method} ${m.path}`)).toEqual([
       "POST /repos/o/r/labels",
@@ -396,6 +445,7 @@ describe("executePlan", () => {
           kind: "thrown",
           message: `BUG: labels: the ${hook} of operation "create" returned a promise; it must be synchronous`,
         },
+        unattempted: [],
       });
     },
   );
@@ -459,6 +509,7 @@ describe("executePlan", () => {
       notes: [],
       landed: 1,
       failure: { kind: "refused", message: "the actor does not exist" },
+      unattempted: [],
     });
     expect(seen).toEqual(['[{"name":"live"}]']);
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
@@ -514,6 +565,7 @@ describe("executePlan", () => {
         message:
           "labels: POST answered 409 Conflict; a label run is in progress, re-run after it finishes",
       },
+      unattempted: [],
     });
   });
 
@@ -559,6 +611,7 @@ describe("executePlan", () => {
           /^labels: POST \/repos\/o\/r\/labels: 422 Validation Failed\. /,
         ),
       },
+      unattempted: [],
     });
     const denied = await executePlan(
       planOf({ role: "create", tolerate: { outcome } }),
@@ -579,6 +632,7 @@ describe("executePlan", () => {
         ),
         status: 403,
       }),
+      unattempted: [],
     });
     // The control: a tolerated operation that succeeds records its line.
     const succeeded = await executePlan(
