@@ -13,7 +13,7 @@ import { valueDrift } from "../../contract/drift.js";
 import type { SectionFailure } from "../../contract/errors.js";
 import type { SectionMeta } from "../../contract/module.js";
 import { type PlainData, paramsWith, type SectionPlan } from "../../contract/plan.js";
-import { reportedKeyNote } from "../reported-key-note.js";
+import { reportedKeyNote, UPDATE_NEVER_CONVERGES } from "../reported-key-note.js";
 import {
   type AnyPlannedOp,
   missingNamedDrift,
@@ -48,8 +48,7 @@ type _ReportedKeysComplete = MustBeNever<
 const REPORTED = {
   keys: REPORTED_KEYS,
   write: "neither the POST nor the PATCH takes",
-  outcome:
-    "so a declared value that differs from the live one drifts on every check and its update re-runs on every apply without converging",
+  outcome: UPDATE_NEVER_CONVERGES,
 };
 
 /** The index signature types the passthrough fields as plain data, so spreading them into a body needs no cast. */

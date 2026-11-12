@@ -37,7 +37,7 @@ import {
   type SectionPlan,
   type Unverifiable,
 } from "../../contract/plan.js";
-import { reportedKeyNote } from "../reported-key-note.js";
+import { reportedKeyNote, UPDATE_NEVER_CONVERGES } from "../reported-key-note.js";
 import { projectOntoSchema, replaceSweep } from "../snapshot-helpers.js";
 import {
   type ErasedDecl,
@@ -367,8 +367,7 @@ function reportedNotes<Key extends string>(
         }
       : {
           write: `neither the ${create} nor the ${endpointMethod(update.route)} takes`,
-          outcome:
-            "so a declared value that differs from the live one drifts on every check and its update re-runs on every apply without converging",
+          outcome: UPDATE_NEVER_CONVERGES,
         };
   return reportedKeyNote(label, entry.write, { keys: Object.keys(decl.reported), ...words }).notes;
 }
@@ -414,6 +413,7 @@ async function compareWithLive<Key extends string>(
       remedies,
     );
   const notes = [...compared.notes];
+  // COMPAT(v4): this filter keeps a reported key out of the unechoed-key note while reportedNotes names it; delete the filter with that note, once validateList refuses the key.
   const phantom = phantomPaths(
     found.filter((delta) => !Object.hasOwn(decl.reported, String(delta.path[0]))),
   );

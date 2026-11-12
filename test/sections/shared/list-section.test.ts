@@ -726,7 +726,8 @@ describe("listSection reported keys", () => {
       ],
     );
     expect(autolinks.notes).toEqual([
-      'autolinks[JIRA-]: "id", "updated_at" are values GitHub reports, not settings it accepts (the GET returns them, the POST does not take them), so every apply deletes and recreates the autolink while a declared value differs from the live one; remove them from the settings file',
+      'autolinks[JIRA-]: "id", "updated_at" are values GitHub reports, not settings it accepts (the GET returns them, the POST does not take them), ' +
+        "so every apply deletes and recreates the autolink while a declared value differs from the live one; remove them from the settings file",
     ]);
     // The same declaration without its update role changes both halves: the write it names and what a differing value costs.
     const recreated = await sectionRunners(immutable).check(
@@ -734,7 +735,8 @@ describe("listSection reported keys", () => {
       { _undeclared: "keep", entries: [{ name: "bug", id: 5 } as never] },
     );
     expect(recreated.notes).toEqual([
-      'labels[bug]: "id" is a value GitHub reports, not a setting it accepts (the GET returns it, the POST does not take it), so every apply deletes and recreates the label while a declared value differs from the live one; remove it from the settings file',
+      'labels[bug]: "id" is a value GitHub reports, not a setting it accepts (the GET returns it, the POST does not take it), ' +
+        "so every apply deletes and recreates the label while a declared value differs from the live one; remove it from the settings file",
     ]);
   });
 

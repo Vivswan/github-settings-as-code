@@ -37,7 +37,9 @@ The field GitHub reports but cannot set is the case that motivated the rule:
 | Before | The GET reports `has_downloads`, the PATCH cannot set it, so every check saw drift and every apply re-sent it without converging.                        |
 | Now    | The parse refuses the file with an error naming `repository.has_downloads` and telling you to remove the key. No section reads or writes the repository. |
 
-Three passthrough entry shapes name such a key in a note instead, until the next major refuses it there: an environment entry, one of its `deployment_branch_policies` patterns, and a variable (`actions_variables`, `agents_variables`, an environment's `variables`). The key still parses and rides the write, and the note, drawn from the declaration alone in check and in apply, says to remove it.
+Some passthrough entries name such a key in a note instead, until the next major refuses it there: an environment entry, one of its `deployment_branch_policies` patterns, a variable (`actions_variables`, `agents_variables`, an environment's `variables`), and an entry of `labels`, `milestones`, `rulesets`, `webhooks`, `autolinks`, or `deploy_keys`. The key still parses and rides the write, and the note, drawn from the declaration alone in check and in apply, says to remove it.
+
+On those six sections the note covers an entry's own keys, not one nested in a ruleset's rule or bypass actor or a webhook's `config`. It states what a declared value that differs from the live one costs. On `labels`, `milestones`, `rulesets`, and `webhooks` that is drift on every check and an update that every apply re-runs, and on `autolinks` and `deploy_keys` a delete and recreate on every apply.
 
 An unknown key has two fates, decided by the shape it sits in:
 
