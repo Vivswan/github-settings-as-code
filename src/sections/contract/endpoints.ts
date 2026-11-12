@@ -1,3 +1,9 @@
+/**
+ * A REST endpoint as a section declares it: the route, checked at compile time, the statuses its handler treats as
+ * normal, and what a denial or a rejection on it means. Also the path half of every request: the template match
+ * and the one expansion of a declared route into a concrete path.
+ */
+
 import type { Endpoints } from "@octokit/types";
 import type { RepoRef } from "../../discovery/targets.js";
 import type { SupplementalRoute } from "../../generated/upstream-gaps.js";

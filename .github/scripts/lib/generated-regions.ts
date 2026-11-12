@@ -1,7 +1,9 @@
-// The marker grammar every generator splices through: `BEGIN GENERATED: <name> (hint)` to
-// `END GENERATED: <name>`, each written in the comment syntax of the file's own language, and
-// the two checks each region passes before its splice: its placement, and the parse-render round
-// trip over its body that GeneratedRegion.of() and GeneratedRegion.markdown() are the two ways to declare.
+/**
+ * The marker grammar every generator splices through: `BEGIN GENERATED: <name> (hint)` to
+ * `END GENERATED: <name>`, each written in the comment syntax of the file's own language, and
+ * the two checks each region passes before its splice: its placement, and the parse-render round
+ * trip over its body that GeneratedRegion.of() and GeneratedRegion.markdown() are the two ways to declare.
+ */
 
 import { extname } from "node:path";
 import { fromMarkdown } from "mdast-util-from-markdown";

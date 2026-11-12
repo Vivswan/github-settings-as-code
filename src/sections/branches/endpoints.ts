@@ -1,3 +1,9 @@
+/**
+ * The `branches:` REST endpoint dictionary, apart from index.ts because graphql-ops.ts derives its plan context from
+ * it too, and the one definitive rejection the section declares: a protection call on a missing branch, whose body
+ * no denial spells.
+ */
+
 import type { DefinitiveRejection, EndpointDecl } from "../contract/endpoints.js";
 
 /** GitHub's one body for a protection call on a missing branch; no denial spells it (a fine-grained read says "Not Found", a write "Resource not accessible"), so the match is definitive at the PUT here and at index.ts's advisory probe. */

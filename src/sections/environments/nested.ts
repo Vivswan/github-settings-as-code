@@ -1,3 +1,10 @@
+/**
+ * The plan half of the nested seam: an environment's sub-resource lists (variables, secrets, branch policies,
+ * protection rules), each split off the PUT body and planned through its own planner after the PUT. Each key states
+ * its own undeclared default, since the section's "untouched" describes sibling environments, not the resources
+ * inside one. An environment the run creates lists nothing, so every entry plans as a create.
+ */
+
 import { ok, okAsync, type Result } from "neverthrow";
 import { z } from "zod";
 import type { MustBeNever, UndeclaredPolicy, UndeclaredPolicyList } from "../../types.js";

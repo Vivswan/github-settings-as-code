@@ -1,3 +1,10 @@
+/**
+ * `environments:` section: deployment environments by name. The PUT replaces an environment's settings whole, so a
+ * non-empty live setting the entry omits is drift in check and a refused write in apply. Each entry plans its PUT
+ * where its settings drift, then its nested lists (./nested.ts); the pins plan after every environment, since a
+ * created one has no node id until its PUT lands.
+ */
+
 import { ok, type Result, safeTry } from "neverthrow";
 import { z } from "zod";
 import {

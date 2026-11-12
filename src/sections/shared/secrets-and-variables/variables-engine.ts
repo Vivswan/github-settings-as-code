@@ -34,7 +34,7 @@ type ReportedVariableKey = Exclude<
   keyof operations["actions/create-repo-variable"]["requestBody"]["content"]["application/json"]
 >;
 
-/** Named by a note in every run; the satisfies and the MustBeNever below pin the list both ways to the vendored spec. */
+/** An entry declaring one draws a note in every plan: in check and in apply, never in a snapshot, which plans nothing. The satisfies and the MustBeNever below pin the list both ways to the vendored spec. */
 const REPORTED_KEYS = [
   "created_at",
   "updated_at",

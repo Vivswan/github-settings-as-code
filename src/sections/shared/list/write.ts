@@ -1,3 +1,9 @@
+/**
+ * A list entry seen as the write it becomes: the dotted paths into it, the identities it claims, its secret
+ * fields, and the drift line a differing field renders as. plan() and snapshot() share these; identityClaimSites
+ * is also what the layered merge pairs entries by, so it is total over records no schema has validated yet.
+ */
+
 import { ok, type Result } from "neverthrow";
 import { type Delta, renderDelta } from "../../../engine/diff.js";
 import { isPlainObject } from "../../../plain-data.js";

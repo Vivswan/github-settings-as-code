@@ -1,3 +1,10 @@
+/**
+ * The snapshot() that listSection() (./section.ts) gives a section from its declaration: the live list read back as
+ * the entries a settings file would declare. It reads through ./reads.ts as plan() does, so both judge the same
+ * live set; an item the file could not declare whole (a foreign one, one with a field hidden from the token) is
+ * left out with a note.
+ */
+
 import { ok, Result, safeTry } from "neverthrow";
 import { snapshotSecretReference } from "../../../engine/secrets.js";
 import type { UndeclaredPolicyList } from "../../../types.js";

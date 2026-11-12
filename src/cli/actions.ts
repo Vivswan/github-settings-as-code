@@ -9,12 +9,7 @@ import { randomUUID } from "node:crypto";
 import { EOL } from "node:os";
 import type { AnnotationLevel, OutputName } from "../index.js";
 
-/**
- * `::` where the runner reads it: at the start of a line, after the white space its TrimStart() removes. A line
- * starts at the start of a chunk or after CR or LF, the only characters the runner's reader ends one at. The white
- * space is the 25 characters .NET's Char.IsWhiteSpace accepts: U+0009..U+000D, U+0020, U+0085, U+00A0, U+1680,
- * U+2000..U+200A, U+2028, U+2029, U+202F, U+205F, U+3000.
- */
+/** `::` where the runner reads it: at the start of a line (the start of a chunk, or after CR or LF, the only characters its reader ends one at), after the white space its TrimStart() removes: the 25 characters .NET's Char.IsWhiteSpace accepts. */
 const LINE_OPENING_COMMAND =
   /(^|[\r\n])([\t-\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]*)::/g;
 

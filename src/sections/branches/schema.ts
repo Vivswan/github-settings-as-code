@@ -243,6 +243,7 @@ const ReviewToggles = {
 /** The keys of the block above; the PUT answers 422 to a null under each. */
 const REVIEW_TOGGLES = Object.keys(ReviewToggles);
 
+/** The `required_pull_request_reviews` mapping of the PUT body; open, so a key outside its shape passes through (PROTECTION_MAPPING_KEYS, below). */
 const RequiredPullRequestReviews = z.looseObject(
   {
     required_approving_review_count: z
@@ -264,6 +265,7 @@ const RequiredPullRequestReviews = z.looseObject(
   },
 );
 
+/** Per GET-only echo key (GET_ONLY_KEYS in ./keys.ts), why removing it loses nothing; the refusal quotes it. */
 const ECHO_CARRIER: Readonly<Record<string, string>> = {
   name: "the entry's name already names the branch",
   enabled: "the control's own key carries the toggle",
@@ -402,6 +404,7 @@ export type BranchProtectionConfig = z.infer<typeof BranchProtectionConfig>;
 /** What makes a name a wildcard pattern: git refnames forbid `*`, `?`, and `[`, so one can never collide with a literal branch. */
 export const WILDCARD_NAME = /[*?[]/;
 
+/** One `branches:` entry: a branch name or a wildcard pattern (WILDCARD_NAME), and its protection, where null removes it. */
 export const BranchConfig = open({
   name: z.string(),
   protection: BranchProtectionConfig.nullable(),
@@ -441,9 +444,9 @@ export const BranchConfig = open({
       }
     }),
   )
-  // The conditional is the null refusal's published twin, read from the same two lists: a refinement does not reach z.toJSONSchema.
   .meta({
     id: "BranchConfig",
+    // The null refusal's published twin, read from the same two lists: a refinement does not reach z.toJSONSchema.
     ...conditional(
       { properties: { name: { not: { pattern: WILDCARD_NAME.source } } } },
       {
@@ -458,6 +461,7 @@ export const BranchConfig = open({
       },
     ),
   });
+
 export type BranchConfig = z.infer<typeof BranchConfig>;
 
 export const BranchesConfig = z.array(BranchConfig);

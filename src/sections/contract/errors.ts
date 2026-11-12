@@ -1,3 +1,9 @@
+/**
+ * What ends a section's work, as a value, and failureFor(), the one classifier from an API error to it. The order of
+ * its branches is the policy: a rate limit and a definitive rejection are judged ahead of the permission branch, so
+ * neither can be skipped as a missing grant under on-missing-permission.
+ */
+
 import { type ApiError, classifyApiError } from "../../github/api-error.js";
 import { definitiveRejection, type HintableStatus } from "./endpoints.js";
 import { toleratedGraphqlErrors } from "./graphql.js";
@@ -21,8 +27,7 @@ import {
  * carries more: its `status` is the safe code the redacted view shows.
  *
  *   live-shape  -> GitHub's answer parsed but cannot be reconciled (an item without an id, a repeated rule type)
- *   refused     -> the section declines to proceed: the settings file conflicts with live state, an actor cannot be
- *                  resolved, a write would drop live values the file omits
+ *   refused     -> the section declines to proceed: the settings file conflicts with live state, an actor cannot be resolved, a write would drop live values the file omits
  *   unverified  -> a write landed but its echo disagrees with what was set
  *   thrown      -> an exception escaped a section: the client's own throw on an unmarked request, or a BUG invariant
  */

@@ -60,15 +60,12 @@ export type MatchKey = string | readonly string[];
  *
  *   a list not named here  -> object items pair by shape, others by value
  *   matchBy omitted        -> lists fall back to the default `type` pairing subsetDiff callers use
- *
- * `replace` says the write replaces the live object whole, so a non-empty live value at a path the declaration omits
- * is an `omitted` delta; callers project the live object onto the write's keys first, or server-assigned fields count.
  */
 export interface DeltaOptions {
   /** The item key each nested list pairs by, under the rules above. */
   readonly matchBy?: Readonly<Record<string, MatchKey>>;
 
-  /** The write replaces the live object whole, so what the declaration omits is swept into `omitted` deltas. */
+  /** The write replaces the live object whole, so a non-empty live value at a path the declaration omits is an `omitted` delta; callers project the live object onto the write's keys first, or server-assigned fields count. */
   readonly replace?: ReplaceSweep;
 }
 

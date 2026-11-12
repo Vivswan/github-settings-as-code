@@ -1,3 +1,9 @@
+/**
+ * `labels:` section: labels on the shared list engine, matched by name without regard to case. Undeclared labels
+ * are deleted by default (Probot parity), `new_name` renames in place, and both sides of the comparison carry the
+ * color as GitHub stores it (lowercase, no "#"), so a declared "#D73A4A" does not drift.
+ */
+
 import { ok } from "neverthrow";
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";

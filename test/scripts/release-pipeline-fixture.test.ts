@@ -22,8 +22,7 @@ import {
 
 setDefaultTimeout(60_000);
 
-/** Two variables a launcher can leave in the environment (git exports GIT_DIR to a hook); each redirects every git
- * run below it. */
+/** Two variables a launcher can leave in the environment (git exports GIT_DIR to a hook); each redirects every git run below it. */
 const LAUNCHER = ["GIT_CONFIG", "GIT_DIR"] as const;
 
 /** What the suite itself was launched with, put back when the file ends. */

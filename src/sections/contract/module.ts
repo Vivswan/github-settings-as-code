@@ -50,9 +50,7 @@ export const ORG_PROBE = {
  * `${key}.${role}` unions from them, and the e2e mock's handler tables are typed by those unions.
  *
  * `undeclaredDefault` is what the section does with the live resources the file omits; the wrapped
- * `{_undeclared, entries}` form overrides it per run, and the conditional type pins "untouched" to a section
- * outside UNDECLARED_POLICY_SECTIONS:
- *
+ * `{_undeclared, entries}` form overrides it per run:
  *   "delete"     -> lists live resources and DELETES undeclared ones; `_undeclared: keep` softens to notes
  *   "keep"       -> lists live resources and KEEPS undeclared ones as notes; `_undeclared: delete` hardens
  *   "untouched"  -> takes no `_undeclared` knob; the section applies no undeclared policy

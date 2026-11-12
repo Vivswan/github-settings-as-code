@@ -1,3 +1,9 @@
+/**
+ * The action's output boundary: the Io port over @actions/core, and the declarations action.yml's outputs are
+ * generated from. Its log sink is the one console call under src/ (biome.local.jsonc): it redacts the registered
+ * masks, then rewrites what the runner would read as a workflow command.
+ */
+
 import { appendFileSync } from "node:fs";
 import * as core from "@actions/core";
 import { type Io, maskRegistry, type OutputName, redactRanges } from "../index.js";
@@ -21,11 +27,7 @@ export const OUTPUT_DECLS = {
   },
 } as const satisfies Record<OutputName, { readonly description: string }>;
 
-/**
- * `::` at the start of a line, after the white space the runner's TrimStart() removes: the 25 characters .NET's
- * Char.IsWhiteSpace accepts (U+0009..U+000D, U+0020, U+0085, U+00A0, U+1680, U+2000..U+200A, U+2028, U+2029,
- * U+202F, U+205F, U+3000).
- */
+/** `::` at the start of a line, after the white space the runner's TrimStart() removes: the 25 characters .NET's Char.IsWhiteSpace accepts. */
 const LEADING_COMMAND =
   /^([\t-\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]*)::/;
 

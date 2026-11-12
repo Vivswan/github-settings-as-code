@@ -1,3 +1,9 @@
+/**
+ * `pages:` section: the repository's GitHub Pages site, one mapping; `pages: null` disables it. GitHub enables a
+ * site from build_type or source alone, so enabling is a create POST followed by an update PUT for the rest. A 404
+ * on the read means no site or a token without the Pages grant, so a plan with no write says both.
+ */
+
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
@@ -68,8 +74,7 @@ const PUBLIC_VISIBILITY_NOTE =
 
 type PagesPlan = SectionPlan<PlannedOp<typeof ENDPOINTS>>;
 
-// A 404 is ambiguous: no Pages site, or a fine-grained token without the Pages permission. A plan that
-// creates stays loud either way (the POST would fail); a plan with no write must say so itself.
+// A 404 is ambiguous: no Pages site, or a fine-grained token without the Pages permission. A plan that creates stays loud either way (the POST would fail); a plan with no write must say so itself.
 const CONCEALED_SITE =
   "A fine-grained token missing the Pages permission gets the same answer; if this repo does have a Pages site, grant the token Pages read and write";
 

@@ -1,3 +1,9 @@
+/**
+ * The list-input grammar (entries separated by a newline or a comma) and the `repos` input built on it: owner/name
+ * slugs, or "*" alone for discovery. A wildcard beside explicit entries is refused as such; a list without one
+ * names every malformed or repeated entry in one problem.
+ */
+
 import { err, ok, type Result } from "neverthrow";
 import { type SlugKey, slugKey } from "../github/slug.js";
 import type { ProblemOf } from "../problem.js";

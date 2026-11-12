@@ -77,6 +77,7 @@ describe("every list section's validate hook reaches the engine", () => {
 // The contract makes validate mandatory on a list section and optional on a mapping section; the census above pins the runtime half, these declarations the compile-time half.
 const { validate: _dropped, ...withoutValidate } = labelsSection;
 
+/** A list section without validate does not register. */
 // @ts-expect-error labels is a list section, so registering it without validate is flagged by name
 const _list: SectionModule<"labels", typeof labelsSection.endpoints> = withoutValidate;
 

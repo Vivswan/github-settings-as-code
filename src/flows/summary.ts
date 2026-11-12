@@ -1,3 +1,9 @@
+/**
+ * The step summary's Markdown for each run shape: one target, a render, a fleet, a snapshot directory. A target
+ * reaches a writer only as its PUBLIC view (./redact.ts), so a redacted target's cells are hidden before they
+ * arrive here.
+ */
+
 import type { SectionOutcome } from "../engine/orchestrate.js";
 import type { RunOutcome } from "../engine/outcome.js";
 import type { SectionSnapshotOutcome } from "../engine/snapshot.js";

@@ -1,3 +1,10 @@
+/**
+ * The request helpers every section read and write goes through, each taking a declared endpoint or operation. An
+ * API error the declaration does not tolerate becomes a SectionFailure through failureFor (./errors.ts), which is
+ * what classifies a denial for the permission policy. The page and cursor loops live here too, and a
+ * secret-carrying request's failure is rebuilt with its free text withheld.
+ */
+
 import { err, ok, type Result } from "neverthrow";
 import type { ClientAnswer, RequestMark } from "../../github/api.js";
 import {

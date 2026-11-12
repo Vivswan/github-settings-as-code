@@ -1,3 +1,13 @@
+/**
+ * `repository:` section: the repository's own settings, one mapping. Most keys ride the repository PATCH as
+ * written; the keys in SPECIAL_KEYS cannot, and each kind goes to the endpoint GitHub gives it.
+ *
+ * topics                                      -> their own PUT, compared as a set
+ * a feature toggle with a GET                 -> its PUT or DELETE, planned only on drift
+ * enable_git_lfs                              -> no read endpoint, so the declared state is re-sent on every apply
+ * enable_sponsorships, issue_creation_policy  -> GraphQL only; the mutation's echo verifies each value took
+ */
+
 import { err, ok, Result, safeTry } from "neverthrow";
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
