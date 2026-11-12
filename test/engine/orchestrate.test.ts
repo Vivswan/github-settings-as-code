@@ -379,7 +379,9 @@ describe("validateSettingsDoc", () => {
       const doc = { _layering: value, labels: [{ name: "bug" }] };
       expect(validateSettingsDoc(doc, "s.yml", SectionSelection.ALL, io).isOk()).toBe(true);
       expect(annotations).toEqual([
-        `warning: s.yml: _layering must be one of "replace", "shallow", "deep"; got ${got}. A single document is not folded, so the directive is not read and the run goes on; mode: render refuses this file as a layer. Write one of the values, or remove the key; the next major version refuses it here too`,
+        `warning: s.yml: _layering must be one of "replace", "shallow", "deep"; got ${got}. ` +
+          "A single document is not folded, so the directive is not read and the run goes on; mode: render refuses this file as a layer. " +
+          "Write one of the values, or remove the key; the next major version refuses it here too",
       ]);
     },
   );
@@ -545,12 +547,20 @@ describe("validateSettingsDoc", () => {
 
   // The class the removal walk passed over: a list of mappings the registry does not key. The marker removes nothing
   // there, and it rode to GitHub as a field named _remove with nothing said.
+  test("the warning for a marker no list keys says what becomes of it and the fix, and the validated document keeps the entry as written", () => {
+    const { io, annotations } = captureIo();
+    const doc = ruleset({ bypass_actors: [{ ...TEAM_ACTOR, _remove: true }] });
+    const validated = validateSettingsDoc(doc, "s.yml", SectionSelection.ALL, io);
+    expect(annotations).toEqual([
+      "warning: s.yml: rulesets[0].bypass_actors[0]._remove: _remove belongs on an entry of a keyed list, and this list is not keyed, so it removes nothing and passes through as a field of the entry. Remove the key; the next major version refuses it",
+    ]);
+    expect(JSON.stringify(validated._unsafeUnwrap())).toContain(
+      '"bypass_actors":[{"actor_id":1,"actor_type":"Team","bypass_mode":"always","_remove":true}]',
+    );
+  });
+
+  // The rest of the class, one list each: the same warning by its own path.
   test.each<[list: string, doc: Record<string, unknown>, site: string]>([
-    [
-      "a ruleset's bypass_actors",
-      ruleset({ bypass_actors: [{ ...TEAM_ACTOR, _remove: true }] }),
-      "rulesets[0].bypass_actors[0]._remove",
-    ],
     [
       "a rule's required_status_checks, below a nested keyed entry",
       ruleset({
@@ -656,43 +666,65 @@ describe("validateSettingsDoc", () => {
     },
   );
 
-  test("the warning for a marker no list keys says what becomes of it and the fix; a keyed removal earlier in the list is still refused, and each is named by its index as written", () => {
-    const { io, annotations } = captureIo();
-    const doc = {
-      rulesets: [
-        { name: "old", _remove: true },
-        ...ruleset({ bypass_actors: [{ ...TEAM_ACTOR, _remove: true }] }).rulesets,
-      ],
-    };
-    expect(validateSettingsDoc(doc, "s.yml", SectionSelection.ALL, io)).toEqual(
-      err({
-        code: "settings-malformed-sections",
-        source: "s.yml",
-        issues: [singleDocumentRemovalIssue("rulesets[0]._remove")],
-      }),
-    );
-    expect(annotations).toEqual([
-      "warning: s.yml: rulesets[1].bypass_actors[0]._remove: _remove belongs on an entry of a keyed list, and this list is not keyed, so it removes nothing and passes through as a field of the entry. Remove the key; the next major version refuses it",
-    ]);
-  });
+  // The warnings speak of a document that runs. Beside a refusal the marker's one said "passes through" of a key a
+  // closed shape had just refused, and promised for the next major what this run already did.
+  test.each<[what: string, doc: Record<string, unknown>, issue: string | RegExp]>([
+    [
+      "a closed entry shape names the marker itself",
+      {
+        branches: [
+          {
+            name: "main",
+            protection: {
+              required_status_checks: { strict: true, checks: [{ context: "ci", _remove: true }] },
+            },
+          },
+        ],
+      },
+      /^branches\[0\]\.protection\.required_status_checks\.checks\[0\]: .* remove "_remove"$/,
+    ],
+    [
+      "a keyed removal stops it, a bad top-level _layering beside it",
+      {
+        _layering: "union",
+        rulesets: [
+          { name: "old", _remove: true },
+          ...ruleset({ bypass_actors: [{ ...TEAM_ACTOR, _remove: true }] }).rulesets,
+        ],
+      },
+      singleDocumentRemovalIssue("rulesets[0]._remove"),
+    ],
+  ])(
+    "a refused document draws no warning for a directive nothing reads: %s",
+    (_what, doc, issue) => {
+      const { io, annotations } = captureIo();
+      expect(validateSettingsDoc(doc, "s.yml", SectionSelection.ALL, io)).toEqual(
+        err({
+          code: "settings-malformed-sections",
+          source: "s.yml",
+          issues: [typeof issue === "string" ? issue : expect.stringMatching(issue)],
+        }),
+      );
+      expect(annotations).toEqual([]);
+    },
+  );
 
   // The way back reads a path's steps, so a key that only looks like one must not be read as one: unquoted, the
   // `[0]` of the key below was renumbered with the rules list the removal shifted.
   test("a passthrough key spelled like a list step is quoted in the path a warning names, as an issue's is, so a removal in the list it resembles never renumbers it", () => {
     const { io, annotations } = captureIo();
-    const doc = ruleset({
-      rules: [{ type: "creation", _remove: true }, { type: "deletion" }],
-      "rules[0]": [{ _remove: true }],
-    });
-    expect(validateSettingsDoc(doc, "s.yml", SectionSelection.ALL, io)).toEqual(
-      err({
-        code: "settings-malformed-sections",
-        source: "s.yml",
-        issues: [singleDocumentRemovalIssue("rulesets[0].rules[0]._remove")],
+    const view = standaloneView(
+      ruleset({
+        rules: [{ type: "creation", _remove: true }, { type: "deletion" }],
+        "rules[0]": [{ _remove: true }],
       }),
     );
+    const options = { asWritten: view.asWritten };
+    expect(
+      validateSettingsDoc(view.doc, "repo.yml", SectionSelection.ALL, io, options).isOk(),
+    ).toBe(true);
     expect(annotations).toEqual([
-      `warning: ${unkeyedRemovalNote("s.yml", 'rulesets[0]["rules[0]"][0]._remove')}`,
+      `warning: ${unkeyedRemovalNote("repo.yml", 'rulesets[0]["rules[0]"][0]._remove')}`,
     ]);
   });
 

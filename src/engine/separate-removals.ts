@@ -35,7 +35,7 @@ interface Gathered {
   /** Where each kept entry of a shifted list sat in the document as written. */
   readonly sources: SourceIndices;
 
-  /** Each marker on an entry no list keys, by its path as validation spells one over the document minus its removals. */
+  /** Each marker on an entry no list keys, by its path as validation spells one over the kept entries. */
   readonly unkeyed: string[];
 }
 
@@ -195,7 +195,7 @@ export interface SeparatedRemovals {
   /** Each removal's site (`labels[0]._remove`): list sections in LIST_SECTIONS order, each list as written, nested lists under their entry. */
   readonly sites: readonly string[];
 
-  /** Each `_remove` on an entry no list keys, which stays in `rest` with its marker: by its path as validation spells one (`rulesets.entries[0].bypass_actors[0]._remove`), indices as written, the list sections first. */
+  /** Each `_remove` on an entry no list keys, which stays in `rest`: by its path over `rest` as validation spells one (`rulesets.entries[0].bypass_actors[0]._remove`), the list sections first; `asWritten` is its way back. */
   readonly unkeyed: readonly string[];
 
   /** A validation issue over `rest`, its leading path renumbered to the document as written: a removal dropped from the list shifts every entry after it, so `labels[0].color` in `rest` is the reader's `labels[1].color`. */
@@ -235,6 +235,5 @@ export function separateRemovals(doc: unknown): SeparatedRemovals {
     gatherUnkeyed(doc[key], [key], gathered.unkeyed, new Set());
   }
 
-  const asWritten = renumbering(gathered.sources);
-  return { rest, sites, unkeyed: gathered.unkeyed.map(asWritten), asWritten };
+  return { rest, sites, unkeyed: gathered.unkeyed, asWritten: renumbering(gathered.sources) };
 }

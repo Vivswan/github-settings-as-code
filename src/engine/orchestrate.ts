@@ -209,15 +209,6 @@ export function validateSettingsDoc(
   // key, so judged as written it would fail every other required field, and a closed shape would name the marker again.
   const removals = separateRemovals(settings);
   issues.push(...removals.sites.map(singleDocumentRemovalIssue));
-  // COMPAT(v4): a single document whose top-level _layering is outside its values still runs, under a warning; delete the warning and refuse the value as _undeclared's is refused above
-  // COMPAT(v4): a _remove on an entry no list keys still runs and passes through as a field, under a warning; delete the warning and refuse each path with the removal sites above
-  unreadDirectiveNotes(sourceLabel, {
-    layering: (settings as Record<string, unknown>)._layering,
-    unkeyed: removals.unkeyed,
-    asWritten: options.asWritten,
-  }).forEach((note) => {
-    io.annotate("warning", note);
-  });
   const shapes = validateSectionShapes(
     (removals.sites.length === 0 ? settings : removals.rest) as Record<string, unknown>,
     sourceLabel,
@@ -229,6 +220,16 @@ export function validateSettingsDoc(
   if (issues.length > 0) {
     return err({ code: "settings-malformed-sections", source: sourceLabel, issues });
   }
+  // Only a document that runs is warned: in a refused one a closed shape may have named the marker itself.
+  // COMPAT(v4): a single document whose top-level _layering is outside its values still runs, under a warning; delete the warning and refuse the value as _undeclared's is refused above
+  // COMPAT(v4): a _remove on an entry no list keys still runs and passes through as a field, under a warning; delete the warning and refuse each path with the removal sites above
+  unreadDirectiveNotes(sourceLabel, {
+    layering: (settings as Record<string, unknown>)._layering,
+    unkeyed: removals.unkeyed,
+    asWritten: options.asWritten,
+  }).forEach((note) => {
+    io.annotate("warning", note);
+  });
   return shapes.map((parsed) => mintValidatedSettings(parsed, policy ?? options.undeclared));
 }
 
