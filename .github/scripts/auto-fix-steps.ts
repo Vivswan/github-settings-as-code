@@ -22,7 +22,7 @@ import { dispatch } from "./lib/entry.js";
 import { configureBotIdentity, leasePush } from "./lib/pr-branch.js";
 import { capture, requireEnv, run, setOutput, status } from "./lib/workflow-step.js";
 
-/** In generated.ts table order, each generator after its sources: the descriptor-derived files and the gaps index are imported through src/, and the inputs table reads action.yml. */
+/** In generated.ts table order, each generator after its sources: the descriptor-derived files and the gaps index are imported through src/, and the inputs table reads INPUT_DECLS from src/flows/inputs.ts. */
 export const GENERATORS = [
   "build:openapi",
   "build:gaps-index",

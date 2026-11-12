@@ -2,15 +2,18 @@ import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import {
   copyFileSync,
+  cpSync,
   existsSync,
   mkdirSync,
   readdirSync,
   readFileSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { gapFileBases, generateIndex } from "../../.github/scripts/gen-gaps-index.js";
+import { ARCHITECTURE_PATH, lintArchitecture } from "../../.github/scripts/arch-lint.js";
+import { gapFileBases, generateIndex, INDEX_PATH } from "../../.github/scripts/gen-gaps-index.js";
 import {
   isGapFile,
   isSpecOnly,
@@ -18,13 +21,31 @@ import {
   planGraduation,
   toSpecOnlyGapSource,
 } from "../../.github/scripts/graduate-upstream-gaps.js";
-import type { Diagnostic } from "../../.github/scripts/lib/tsc-diagnostics.js";
+import { type Diagnostic, parseDiagnostics } from "../../.github/scripts/lib/tsc-diagnostics.js";
 import type { UnshippedGraphqlSdl } from "../../src/upstream-gaps/gap.js";
 import { ROOT } from "../root.js";
 import { withTempDir } from "../temp-dir.js";
 
 const TRIPWIRE_MESSAGE =
   "Type '\"GET /repos/{owner}/{repo}/merge-queue\"' does not satisfy the constraint 'never'.";
+
+/** Compiles the gaps index under `dir` and what it imports, with the repository's compiler options and the one line
+ * per diagnostic the graduate script reads. */
+function compileIndex(dir: string): { status: number | null; output: string } {
+  writeFileSync(
+    join(dir, "tsconfig.json"),
+    JSON.stringify({ extends: join(ROOT, "tsconfig.json"), include: [], files: [INDEX_PATH] }),
+  );
+  const tsc = spawnSync(
+    join(ROOT, "node_modules", ".bin", "tsc"),
+    ["-p", dir, "--pretty", "false"],
+    { cwd: dir, encoding: "utf8" },
+  );
+  if (tsc.error) {
+    throw tsc.error;
+  }
+  return { status: tsc.status, output: tsc.stdout + tsc.stderr };
+}
 
 describe("isGapFile", () => {
   // Only a .ts file directly under src/upstream-gaps/ is a gap. gap.ts and the generated index carry no tripwire;
@@ -125,10 +146,10 @@ describe("generateIndex", () => {
     "the index generated for %s type-checks beside its gap files, loads, and its SDL entries name them",
     (_label, bases) =>
       withTempDir("gaps-index-", async (dir) => {
-        // A src/ mirror: every sibling of upstream-gaps/ and generated/ symlinked (a gap may import ../types.js),
-        // the gap files copied, the generated index written at its own path. The empty row matters on its own: the
-        // committed index compiles under the project typecheck only while a gap file exists, so a derivation written
-        // for a populated GAPS (say `(typeof GAPS)["lfs"]`) would first break the day the last gap graduates.
+        // A src/ mirror: every sibling of upstream-gaps/ and generated/ symlinked, the gap files copied, the generated
+        // index written at its own path. The empty row matters on its own: the committed index compiles under the
+        // project typecheck only while a gap file exists, so a derivation written for a populated GAPS (say
+        // `(typeof GAPS)["lfs"]`) would first break the day the last gap graduates.
         const gapsDir = join(dir, "src", "upstream-gaps");
         const index = join(dir, "src", "generated", "upstream-gaps.ts");
         mkdirSync(gapsDir, { recursive: true });
@@ -143,24 +164,7 @@ describe("generateIndex", () => {
           copyFileSync(join(GAPS_DIR, `${file}.ts`), join(gapsDir, `${file}.ts`));
         }
         writeFileSync(index, generateIndex(bases));
-        writeFileSync(
-          join(dir, "tsconfig.json"),
-          JSON.stringify({
-            extends: join(ROOT, "tsconfig.json"),
-            include: [],
-            files: ["src/generated/upstream-gaps.ts"],
-          }),
-        );
-        const tsc = spawnSync(
-          join(ROOT, "node_modules", ".bin", "tsc"),
-          ["-p", dir, "--pretty", "false"],
-          { cwd: dir, encoding: "utf8" },
-        );
-        if (tsc.error) {
-          throw tsc.error;
-        }
-        expect(tsc.stdout + tsc.stderr).toBe("");
-        expect(tsc.status).toBe(0);
+        expect(compileIndex(dir)).toEqual({ status: 0, output: "" });
         // Loading resolves every import. The GAPS key, not the import, is what names a gap file downstream:
         // unshippedGraphqlSdl() renders it as the file to retire, and a camelCase key would compile yet name a
         // file that does not exist.
@@ -324,4 +328,86 @@ describe("spec-only sources never reach the deletion branch", () => {
   ])("the gap source %j is spec-only: %p", (source, specOnly) => {
     expect(isSpecOnly(source)).toBe(specOnly);
   });
+});
+
+describe("a graduation on a copy of src/", () => {
+  /** `body` over a scratch root holding what a graduation rewrites and what judges it: a copy of src/ and of
+   * architecture.yml, with node_modules linked for the compiler. */
+  const withSrcCopy = <T>(body: (dir: string) => T): Promise<T> =>
+    withTempDir("gaps-graduation-", (dir) => {
+      cpSync(join(ROOT, "src"), join(dir, "src"), { recursive: true });
+      copyFileSync(join(ROOT, ARCHITECTURE_PATH), join(dir, ARCHITECTURE_PATH));
+      symlinkSync(join(ROOT, "node_modules"), join(dir, "node_modules"), "dir");
+      return body(dir);
+    });
+
+  const gapPath = (dir: string, base: string): string =>
+    join(dir, "src", "upstream-gaps", `${base}.ts`);
+  const gapBases = (dir: string): string[] =>
+    gapFileBases(readdirSync(join(dir, "src", "upstream-gaps")));
+  const regenerateIndex = (dir: string): void =>
+    writeFileSync(join(dir, INDEX_PATH), generateIndex(gapBases(dir)));
+
+  // Without these rows a gap file that alone draws a declared edge passes every check until the day it graduates:
+  // the fix commit then leaves a stale allowance in architecture.yml, a file the bot may not write.
+  test.each<[state: string, graduate: (dir: string) => void]>([
+    ["no gap file touched (control)", () => undefined],
+    [
+      "every spec-pinned gap rewritten to spec-only",
+      (dir) => {
+        for (const base of gapBases(dir)) {
+          const source = readFileSync(gapPath(dir, base), "utf8");
+          if (isSpecPinned(source)) {
+            writeFileSync(
+              gapPath(dir, base),
+              toSpecOnlyGapSource(source, `src/upstream-gaps/${base}.ts`),
+            );
+          }
+        }
+      },
+    ],
+    [
+      "every gap file deleted",
+      (dir) => {
+        for (const base of gapBases(dir)) {
+          rmSync(gapPath(dir, base));
+        }
+      },
+    ],
+  ])("with %s, architecture.yml declares exactly the imports src/ draws", (_state, graduate) =>
+    withSrcCopy((dir) => {
+      graduate(dir);
+      regenerateIndex(dir);
+      expect(lintArchitecture(dir)).toEqual([]);
+    }),
+  );
+
+  /** A spec-pinned gap over a route the pinned @octokit/types already carries: any gap file, the day octokit catches up. */
+  const SHIPPED_GAP = [
+    'import { defineGap, type OctokitLacks } from "./gap.js";',
+    "",
+    "/** GitHub shipped the repository read; @octokit/types does not carry this route yet, nor does the published OpenAPI description. */",
+    "export const GAP = defineGap({",
+    '  routes: ["GET /repos/{owner}/{repo}"],',
+    "  documentedInSpec: false,",
+    "});",
+    "",
+    "type _GraduateThisFileOnceOctokitShipsIt = OctokitLacks<typeof GAP>;",
+    "",
+  ].join("\n");
+
+  test("a gap whose route octokit ships fires TS2344 in its own file, plans as a graduation, and its rewrite compiles with lint:arch green", () =>
+    withSrcCopy((dir) => {
+      // The control the tripwire's constraint needs: one that stopped firing would keep every gap forever, build green.
+      const gapFile = "src/upstream-gaps/shipped.ts";
+      writeFileSync(join(dir, gapFile), SHIPPED_GAP);
+      regenerateIndex(dir);
+      const { diagnostics, unparsed } = parseDiagnostics(compileIndex(dir).output);
+      expect(unparsed).toEqual([]);
+      expect(planGraduation(diagnostics)).toEqual({ gapFiles: [gapFile], foreign: [] });
+      writeFileSync(join(dir, gapFile), toSpecOnlyGapSource(SHIPPED_GAP, gapFile));
+      regenerateIndex(dir);
+      expect(compileIndex(dir)).toEqual({ status: 0, output: "" });
+      expect(lintArchitecture(dir)).toEqual([]);
+    }));
 });

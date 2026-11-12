@@ -3,7 +3,7 @@
 import type { Endpoints } from "@octokit/types";
 
 /**
- * Routes the pinned @octokit/types does not carry yet. The gap file carries a MustBeNever tripwire that
+ * Routes the pinned @octokit/types does not carry yet. The gap file carries an OctokitLacks tripwire that
  * fails typecheck when octokit ships a route; the graduate script then deletes the file
  * (documentedInSpec: true) or rewrites it spec-only (documentedInSpec: false). `documentedInSpec` is false
  * only for features GitHub's OpenAPI descriptor ALSO lags; those are excluded from the descriptor slice the
@@ -47,6 +47,18 @@ export function defineGap<const G extends Omit<OctokitGap, "kind">>(
 ): G & { readonly kind: "octokit" } {
   return { ...gap, kind: "octokit" };
 }
+
+/**
+ * The tripwire a defineGap file declares over its own GAP: `type _X = OctokitLacks<typeof GAP>`. The constraint
+ * admits only routes the pinned @octokit/types lacks, so once octokit ships one, TS2344 fires inside that gap
+ * file: the one diagnostic the graduate script acts on.
+ *
+ * A gap file imports nothing but this file, so no layer edge in architecture.yml hangs on which gap files
+ * exist, and a graduation cannot leave one stale.
+ */
+export type OctokitLacks<
+  G extends { readonly routes: readonly Exclude<G["routes"][number], keyof Endpoints>[] },
+> = G;
 
 /**
  * Routes are constrained to keyof Endpoints (octokit already ships them), so a typo or a not-yet-shipped

@@ -37,6 +37,8 @@ on:
       - "architecture.yml"
       - "docs/operate/check-mode.md"
       - "docs/start/getting-started.md"
+      - "docs/sections/*.docs.yml"
+      - "docs/schema.docs.yml"
       - ".github/scripts/gen-action-docs.ts"
       - ".github/scripts/gen-inputs-table.ts"
       - "docs/reference/coverage.md"
@@ -55,6 +57,11 @@ on:
       - ".github/scripts/endpoint-docs.ts"
       - ".github/scripts/endpoint-docs.yml"
       - "test/e2e/openapi/validate.ts"
+      - "test/e2e/openapi/paths.ts"
+      # The formatter's config: every generator but the gaps index pipes its output through biome. Listed by hand: the
+      # trigger test (test/scripts/auto-fix-steps.test.ts) follows what a generator imports and loads, not what a subprocess opens.
+      - "biome.json"
+      - "biome.local.jsonc"
 
 permissions:
   contents: read
