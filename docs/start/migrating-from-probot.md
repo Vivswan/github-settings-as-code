@@ -54,7 +54,9 @@ Rulesets are first class. Your `branches` section keeps working, and you can opt
 
 Deletions still exist where the app had them: undeclared labels are deleted by default (Probot parity), and so are undeclared autolinks, collaborators, Actions variables, and Copilot agents variables, plus, within a declared per-environment key, that environment's variables and deployment branch-policy patterns.
 
-Nothing else is ever deleted implicitly; the [Sections table](../reference/sections.md#the-undeclared-default-column) states each section's default in its Undeclared default column, and the check run lists everything an apply would delete before you let it.
+Nothing else is ever deleted implicitly; the [Sections table](../reference/sections.md#the-undeclared-default-column) states each section's default in its Undeclared default column. The check run lists what an apply would delete before you let it: each undeclared entry draws its own drift line.
+
+A live key that a ruleset entry omits inside a rule it declares draws no line: it is not compared, and that ruleset's next update resets it ([Semantics](../reference/semantics.md)).
 
 ## Step by step
 

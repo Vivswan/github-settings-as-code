@@ -77,7 +77,7 @@ The `@v3` pin <!-- x-release-please-major --> is the moving major tag, stable wi
 
 `mode: check` compares the declared settings against the live repository, makes no settings changes, and exits 1 when anything differs. Trigger the workflow from the Actions tab.
 
-On a repository with existing labels the run will fail with drift, and that is the point: the report lists exactly what an apply would change or delete. The log shows one line per difference:
+On a repository with existing labels the run will fail with drift, and that is the point: the report lists what an apply would change or delete. The log shows one line per difference:
 
 ```text
 drift: repository.description: "Payments service" != ""
@@ -86,6 +86,8 @@ drift: labels[wontfix]: undeclared - not in the settings file, so apply will DEL
 ```
 
 Work through the deletions first: add the labels you want to keep to the settings file, and leave out the ones you are happy to lose. Re-run check until the only remaining drift is change you intend.
+
+A check shows no drift for a value GitHub does not read back once it is in place, though every apply rewrites it. A declared secret that already exists and the Git LFS toggle are two examples, each under a [cannot verify note](../operate/check-mode.md#what-a-cannot-verify-note-means). Nor can the report list a live key that a ruleset entry omits inside a rule it declares: that ruleset's next update resets the key ([Semantics](../reference/semantics.md)).
 
 ## 5. Switch to apply
 

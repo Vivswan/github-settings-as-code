@@ -41,12 +41,23 @@ Some passthrough entries name such a key in a note instead, until the next major
 
 On those six sections the note covers an entry's own keys, not one nested in a ruleset's rule or bypass actor or a webhook's `config`. It states what a declared value that differs from the live one costs. On `labels`, `milestones`, `rulesets`, and `webhooks` that is drift on every check and an update that every apply re-runs, and on `autolinks` and `deploy_keys` a delete and recreate on every apply.
 
+Four more mistakes that the file alone proves still parse today. Each draws a line naming the fix, until the next major refuses it:
+
+| Still parses                                                                                                             | What the run prints                                                                                  |
+| ------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| `repository.private` beside a `repository.visibility` that means the other value (`private: true`, `visibility: public`) | A note in check and in apply: `repository.private: true contradicts repository.visibility: "public"` |
+| `repository.security_and_analysis: null`                                                                                 | A note in check and in apply: `repository.security_and_analysis: null names no feature to turn off`  |
+| A top-level `_layering` outside its three values, in the document a check or an apply runs                               | A warning: `the directive is not read and the run goes on`                                           |
+| `_remove` on an entry of a list that is not keyed, where the entry's shape is open (a ruleset's `bypass_actors`)         | A warning: `it removes nothing and passes through as a field of the entry`                           |
+
+The [layering guide](../operate/layering.md#four-knobs) says where each of the two directives belongs.
+
 An unknown key has two fates, decided by the shape it sits in:
 
-| Shape                                                                                                     | Unknown key      | What you see                                                                                                                                                 |
-| --------------------------------------------------------------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Closed: the write carries only the fields the shape names, so an extra key has nowhere to go              | refused at parse | the error names the key and the shape it sits in                                                                                                             |
-| Open passthrough: extra fields ride into the write verbatim, so a field GitHub ships tomorrow works today | kept and sent    | on the sections that already print it, a check-time note when GitHub does not echo the key: if GitHub ignores it, every apply re-sends it without converging |
+| Shape                                                                                                     | Unknown key      | What you see                                                                                                                                                                                                                                                                                            |
+| --------------------------------------------------------------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Closed: the write carries only the fields the shape names, so an extra key has nowhere to go              | refused at parse | the error names the key and the shape it sits in                                                                                                                                                                                                                                                        |
+| Open passthrough: extra fields ride into the write verbatim, so a field GitHub ships tomorrow works today | kept and sent    | on the sections that already print it, a check-time note when GitHub does not echo the key: if GitHub ignores it, every apply re-sends it without converging (a `deployment_branch_policies` pattern aside: its key rides a create call alone, so the pattern is unaffected and no check reports drift) |
 
 The [forward compatibility page](forward-compatibility.md#the-closed-sections) lists which sections and nested shapes are closed.
 
@@ -65,6 +76,8 @@ Within the six sections built on the list-section factory (`labels`, `milestones
 ## Null is the empty state
 
 A `null` in the settings file is a declared value: the EMPTY or OFF state on GitHub (`pages: null` turns Pages off, `cname: null` removes the custom domain, `protection: null` strips a branch's protection). A key with no empty state refuses it at validation, naming the values that exist: `repository.enable_git_lfs has no empty state; write true or false`.
+
+`repository.security_and_analysis` has no empty state either, and its `null` still parses until the next major: it draws a note in check and in apply instead ([the table above](#what-the-parse-refuses)).
 
 A whole section takes `null` only where `null` is its off state (`pages`, `interaction_limits`).
 

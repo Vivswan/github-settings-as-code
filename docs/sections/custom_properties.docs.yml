@@ -35,10 +35,11 @@ schema:
     are organization-scoped and out of scope); organization repos only, skipped with a note on
     personal accounts. `value: null` unsets a property (reverting to the org default, if any), and
     booleans/numbers are normalized to their string form (GitHub transports true_false values as the
-    strings "true"/"false"). Undeclared live values are kept by default - an unset can revert to an
-    org default this action does not model, and a property whose values only org actors may edit
-    would reject the write - and the wrapped form can set `_undeclared: delete` to opt into unsetting
-    them.
+    strings "true"/"false").
+
+    Undeclared live values are kept by default - an unset can revert to an org default this action
+    does not model, and a property whose values only org actors may edit would reject the write -
+    and the wrapped form can set `_undeclared: delete` to opt into unsetting them.
   CustomPropertyConfig: >-
     One custom property value, matched by the API's property_name verbatim. Keys other than
     property_name and value are rejected: the bulk PATCH body is built from exactly these two
@@ -49,5 +50,6 @@ schema:
     (multi_select, compared as a set - list each option once), or a boolean (true_false, normalized
     to the "true"/"false" string GitHub transports). Numbers are likewise sent as their string form
     - through YAML's parsed number, so quote any numeric value you want sent verbatim (unquoted,
-    1.10 arrives as "1.1" and 1e21 as "1e+21"). `null` unsets the property, reverting to the org
-    default, if any.
+    1.10 arrives as "1.1" and 1e21 as "1e+21").
+
+    `null` unsets the property, reverting to the org default, if any.
