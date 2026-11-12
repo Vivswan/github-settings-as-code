@@ -123,6 +123,20 @@ Under `shallow` a same-key entry is swapped whole, its nested lists with it: onl
 
 Under `deep` a lower entry that two higher entries both claim (a lower label renaming into a name one higher entry declares while another declares its old name) is superseded by both as written: only a one-to-one pair merges field by field, so the rendered document never carries two entries claiming one key.
 
+Under `deep` a higher entry that names a label by the `new_name` a lower layer gives it adds to that rename. The pair is written under the lower entry's `name` where the higher one would leave the label's old name unclaimed, so apply still renames the live label:
+
+```text
+lower layer      {name: bug, new_name: defect, color: d73a4a}
+higher layer     {name: defect, description: a defect}
+
+deep renders     {name: bug, new_name: defect, color: d73a4a, description: a defect}
+shallow renders  {name: defect, description: a defect}
+```
+
+Under `shallow` the swap drops the rename with the lower entry: against a repository that still holds `bug`, apply creates `defect` and, under `_undeclared: delete`, deletes `bug`.
+
+The exception is a higher entry that itself renames from one name to a different one (`{name: defect, new_name: flaw}`): it is written under its own two names, under both directives.
+
 The rules above decide the content. The written file's order is the canonical one every rendered document has, the same order `mode: snapshot` writes:
 
 - sections in the order the action applies them
@@ -133,7 +147,8 @@ Reordering keys, or the entries of a keyed list, in a layer changes nothing in t
 
 - `branches`: GitHub applies overlapping wildcard rules in creation order, so the union keeps the lower order and appends
 - the `pinned: true` environments: their order is the pin rank
-- `bypass_actors`, the mapping list with no layering identity, so a higher list replaces the lower one and never unions with it (the planner still pairs actors by `actor_type` plus `actor_id` for its drift lines); `reviewers` is not kept as written, since the fold unions it by type and id
+- `bypass_actors`, the mapping list with no layering identity, so a higher list replaces the lower one and never unions with it (the planner still pairs actors by `actor_type` plus `actor_id` for its drift lines)
+- an environment's `reviewers`: the fold unions them by type and id, keeping the lower order and appending, and a reviewer has no one identity field to sort by
 - every scalar list: `topics`, `include` patterns
 
 The `_undeclared` knob across layers:
@@ -401,6 +416,7 @@ The per-layer validation catches what a standalone settings file could not say, 
 | Two entries under one key in one list (`labels: [{name: bug}, {name: docs}, {name: Bug}]`)                                                                                                | Validation: `labels[2].name: "Bug" names the same label as "bug" declared earlier; keep exactly one entry per label`                                                                                                                                                                                  |
 | Two milestones under one title in one list (`milestones: [{title: v1}, {title: v1, state: closed}]`)                                                                                      | Validation: `milestones[1].title: "v1" names the same milestone as "v1" declared earlier; keep exactly one entry per milestone`                                                                                                                                                                       |
 | Two rules of one type in one ruleset (`rulesets: [{name: main, rules: [{type: deletion}, {type: deletion}]}]`)                                                                            | Validation: `rulesets[0].rules: the ruleset "main" lists the rule type "deletion" more than once, and GitHub keeps one rule per type - declare each type once`                                                                                                                                        |
+| One bypass actor listed twice in one ruleset (`rulesets: [{name: main, bypass_actors: [{actor_type: Team, actor_id: 1}, {actor_type: Team, actor_id: 1}]}]`)                              | Validation: `rulesets[0].bypass_actors[1]: "Team 1 (bypass_actors[1])" names the same bypass actor of the "main" ruleset as "Team 1 (bypass_actors[0])" declared earlier; keep exactly one entry per bypass actor of the "main" ruleset`                                                              |
 | Two variables of one environment under one uppercased name, in either form (`environments: [{name: prod, variables: {entries: [{name: region, value: eu}, {name: REGION, value: us}]}}]`) | Validation: `environments[0].variables.entries[1].name: "REGION" names the same variable of the "prod" environment as "region" declared earlier; keep exactly one entry per variable of the "prod" environment`                                                                                       |
 | A workflow named by its file and its path in one list (`workflows: [{path: ci.yml, state: active}, {path: .github/workflows/ci.yml, state: disabled}]`)                                   | Validation: `workflows[1].path: ".github/workflows/ci.yml" names the same workflow as "ci.yml" declared earlier; keep exactly one entry per workflow`                                                                                                                                                 |
 

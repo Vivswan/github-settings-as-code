@@ -302,6 +302,41 @@ function placementsOf(
 }
 
 /**
+ * A one-to-one pair under deep, merged field by field. The key field is the higher entry's, like any field, unless
+ * that drops a key the pair claimed and the lower entry's key field keeps them all. A label met from above through
+ * the name a lower rename writes (`{name: defect}` over `{name: bug, new_name: defect}`) adds to that rename, which
+ * keeps the name it renames from: under the higher name the entry would rename `defect` to itself and no longer own
+ * `bug`, which the planner then deletes as undeclared.
+ */
+function mergedPair(
+  union: Union,
+  below: unknown,
+  lowerKeys: readonly string[],
+  placement: Placed,
+  site: string,
+): unknown {
+  const { keys, keyField } = union.keyed;
+  const merged = mergeValue(below, placement.item, site, union.step, entryScope(union.keyed));
+  const lowerKey = isPlainObject(below) ? own(below, keyField) : undefined;
+  if (!isPlainObject(merged) || lowerKey === undefined) {
+    return merged;
+  }
+
+  const claimed = [...lowerKeys, ...placement.keys];
+  const keepsEveryClaim = (entry: Readonly<Record<string, unknown>>): boolean => {
+    const held = keys(entry) ?? [];
+    return claimed.every((key) => held.includes(key));
+  };
+  if (keepsEveryClaim(merged)) {
+    return merged;
+  }
+
+  const underLowerKey = { ...merged };
+  put(underLowerKey, keyField, lowerKey);
+  return keepsEveryClaim(underLowerKey) ? underLowerKey : merged;
+}
+
+/**
  * A lower entry under the higher entries placed on it: kept when none claims it; else, per claimant, dropped by a
  * removal (noticed), merged field by field as a one-to-one pair under deep, or the claimant as written.
  */
@@ -330,7 +365,7 @@ function placeOver(union: Union, below: unknown, index: number): unknown[] {
       ) === 1 && claims(placement.keys, union.lowerKeys) === 1;
     out.push(
       union.directive === "deep" && paired
-        ? mergeValue(below, placement.item, site, union.step, entryScope(union.keyed))
+        ? mergedPair(union, below, keys, placement, site)
         : copiedAsWritten(placement.item, union.keyed, site, "swapped", union.step),
     );
   }

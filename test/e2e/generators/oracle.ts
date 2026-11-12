@@ -1129,6 +1129,29 @@ function sameResource(a: readonly string[], b: readonly string[]): boolean {
 }
 
 /**
+ * A deep pair names one resource, so its merged entry should answer to every name either entry answered to. The
+ * candidates are the merged entry as the higher layer keyed it, then the same entry keyed as the lower layer did: the
+ * first that answers to all is written, and the higher layer's when neither does. So a label declared above a lower
+ * rename by the rename's target folds into the rename, which keeps the name it starts from.
+ */
+function pairAnsweringToAll(
+  merged: Json,
+  below: Json,
+  names: readonly string[],
+  keyed: KeyedList,
+): Json {
+  const field = keyed.keyField;
+  const candidates = Object.hasOwn(below, field)
+    ? [merged, { ...merged, [field]: below[field] }]
+    : [merged];
+  const answersToAll = (entry: Json): boolean => {
+    const answers = keyed.keysOf(entry) ?? [];
+    return names.every((name) => answers.includes(name));
+  };
+  return candidates.find(answersToAll) ?? merged;
+}
+
+/**
  * The higher entries claiming the lower entry at `index`, in their order: a removal drops it and is a notice naming
  * the removal's INDEX in the higher list, never a key value; a one-to-one pair merges field by field under deep; any
  * other claimant is placed as written and may carry no removal in its nested lists.
@@ -1150,12 +1173,12 @@ function placeClaimants(union: KeyedUnion, index: number): Json[] {
     ).length;
     const paired = claimedBy === 1 && claimsLower === 1;
     if (union.directive === "deep" && paired) {
-      return [
-        mergeTrees(below, entry, `${union.path}[${h}]`, union.site, {
-          keyed: union.keyed,
-          prefix: "",
-        }),
-      ];
+      const merged = mergeTrees(below, entry, `${union.path}[${h}]`, union.site, {
+        keyed: union.keyed,
+        prefix: "",
+      });
+      const names = [...keys, ...(union.higherKeys[h] ?? [])];
+      return [pairAnsweringToAll(merged, below, names, union.keyed)];
     }
     if (carriesNestedRemoval(entry, union.keyed)) {
       throw new FoldRefused(union.site.layer);
