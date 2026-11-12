@@ -37,6 +37,8 @@ on:
       - "architecture.yml"
       - "docs/operate/check-mode.md"
       - "docs/start/getting-started.md"
+      - "docs/sections/*.docs.yml"
+      - "docs/schema.docs.yml"
       - ".github/scripts/gen-action-docs.ts"
       - ".github/scripts/gen-inputs-table.ts"
       - "docs/reference/coverage.md"
@@ -55,6 +57,11 @@ on:
       - ".github/scripts/endpoint-docs.ts"
       - ".github/scripts/endpoint-docs.yml"
       - "test/e2e/openapi/validate.ts"
+      - "test/e2e/openapi/paths.ts"
+      # The formatter's config, listed by hand since no test can see a subprocess's reads: every generator but the gaps
+      # index pipes what it writes through biome, so a formatter option moves generated output.
+      - "biome.json"
+      - "biome.local.jsonc"
 
 permissions:
   contents: read

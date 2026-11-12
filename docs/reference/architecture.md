@@ -400,7 +400,6 @@ graph TD
   problem --> text
   schema --> sections
   schema --> types
-  upstream_gaps --> types
 ```
 <!-- END GENERATED: architecture-map -->
 
