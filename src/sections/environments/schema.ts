@@ -43,7 +43,10 @@ const MAX_REVIEWERS = 6;
 /** GitHub's cap on pinned environments per repository. */
 export const MAX_PINNED_ENVIRONMENTS = 10;
 
-/** A branch pattern entry; an absent type is GitHub's own default, "branch". */
+/**
+ * A branch pattern entry; an absent type is GitHub's own default, "branch".
+ * COMPAT(v4): a key GitHub only reports (BRANCH_POLICY_REPORTED_KEYS in reported-keys.ts) still parses, rides the create POST, and is named by a note; delete the note and refuse the key here, the rule the actions section's reported-only sweep applies.
+ */
 export const DeploymentBranchPolicyConfig = open({
   name: z.string(),
   type: z.enum(DEPLOYMENT_BRANCH_POLICY_TYPES).optional(),
@@ -102,7 +105,10 @@ const DeploymentBranchPolicy = open(DeploymentBranchPolicyFlags.unwrap().shape)
     ),
   });
 
-/** One environment entry: the PUT body's keys, plus the routed scalar and the nested lists nested.ts strips before the PUT. */
+/**
+ * One environment entry: the PUT body's keys, plus the routed scalar and the nested lists nested.ts strips before the PUT.
+ * COMPAT(v4): a key GitHub only reports (ENVIRONMENT_REPORTED_KEYS in reported-keys.ts) still parses, rides the PUT, and is named by a note; delete the note and refuse the key here, the rule the actions section's reported-only sweep applies.
+ */
 export const EnvironmentConfig = open({
   name: z.string(),
   // Routed (see EnvironmentRoutedScalars): stripped from the PUT body and applied through the

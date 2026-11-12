@@ -1,0 +1,21 @@
+# The settings hold nothing but a null on a control GitHub's protection PUT
+# does not mark nullable, on a literal branch: the PUT answers 422 to it. The
+# published schema and the runtime both refuse the file, so this is the
+# document that would show the two disagreeing on the literal-only rule.
+name: branches-literal-null-control-rejected
+settings:
+  branches:
+    - name: main
+      protection:
+        allow_deletions: null
+live_state:
+  branches: ["main"]
+token_permissions:
+  administration: write
+  contents: read
+expect:
+  exit_code: 1
+  result: failed
+  zero_requests: true
+  stdout_contains:
+    - "branches[0].protection.allow_deletions has no empty state; write true or false"

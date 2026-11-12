@@ -7,6 +7,7 @@ import {
   flattenEnvironment,
 } from "../../../src/sections/environments/index.js";
 import {
+  type DeploymentBranchPolicyConfig,
   EnvironmentConfig,
   type EnvironmentVariableConfig,
 } from "../../../src/sections/environments/schema.js";
@@ -691,6 +692,110 @@ describe("environments deployment branch policies check mode", () => {
       "environments[prod].deployment_branch_policies: patterns are not verifiable until custom_branch_policies is true; apply will set the flag and create the declared patterns, and any pattern already behind the flag reconciles on the next run",
     ]);
     expect(api.calls.some((c) => c.path.includes("/deployment-branch-policies"))).toBe(false);
+  });
+});
+
+describe("environments keys outside the entry shapes", () => {
+  const ENV = "GET /repos/o/r/environments/prod";
+
+  test.each([
+    ["the environment is missing", {}, 1],
+    ["the live id equals the declared one", { [ENV]: liveEnv("prod", { id: 1 }) }, 1],
+    ["the live id differs", { [ENV]: liveEnv("prod", { id: 99 }) }, 1],
+    ["the live body carries no id", { [ENV]: liveEnv("prod") }, 1],
+    // A reported key declared null is not inert: it drifts against the live id and rides the PUT.
+    ["it is declared null", { [ENV]: liveEnv("prod", { id: 99 }) }, null],
+  ] as Array<[string, Record<string, Route>, number | null]>)(
+    "an entry's id, which GitHub only reports, is named once when %s",
+    async (_state, routes, id) => {
+      // Without the note an id equal to the live one reads clean in every run, until another key drifts and the PUT that carries it answers 422.
+      const checked = await check(new MockApi(routes), [{ name: "prod", id } as EnvironmentConfig]);
+      expect(checked.notes).toEqual([
+        'environments[prod]: "id" is a value GitHub reports, not a setting it accepts (the GET returns it, the PUT does not take it), so GitHub answers this environment\'s PUT with a 422 whenever apply sends one; remove it from the settings file',
+      ]);
+    },
+  );
+
+  test("two reported keys on one entry share one note, worded for several", async () => {
+    // Without it a note per key, or the one-key grammar over two keys, would print unnoticed.
+    const checked = await check(new MockApi({}), [
+      { name: "prod", node_id: "EN_1", html_url: "https://github.com/o/r" } as EnvironmentConfig,
+    ]);
+    expect(checked.notes).toEqual([
+      'environments[prod]: "node_id", "html_url" are values GitHub reports, not settings it accepts ' +
+        "(the GET returns them, the PUT does not take them), so GitHub answers this environment's PUT with a 422 whenever apply sends one; remove them from the settings file",
+    ]);
+  });
+
+  test("control: a key the entry shape declares draws no note", async () => {
+    const checked = await check(new MockApi({ [ENV]: liveEnv("prod") }), [
+      { name: "prod", wait_timer: 5 },
+    ]);
+    expect(checked.drift).toEqual(["environments[prod].wait_timer: 5 != 0"]);
+    expect(checked.notes).toEqual([]);
+  });
+
+  test.each([
+    ["the variable is missing", []],
+    [
+      "the live variable carries another timestamp",
+      [{ name: "X", value: "v", updated_at: "2026-07-01T00:00:00Z" }],
+    ],
+    [
+      "the live variable carries the same timestamp",
+      [{ name: "X", value: "v", updated_at: "2026-01-01T00:00:00Z" }],
+    ],
+    ["the live variable carries no timestamp", [{ name: "X", value: "v" }]],
+  ] as Array<[string, Array<{ name: string; value: string }>]>)(
+    "a variable's updated_at, which GitHub only reports, is named once when %s",
+    async (_state, live) => {
+      // Without the note a timestamp that differs drifts on every check and re-sends its PATCH on every apply, and one that matches reads clean, with no line saying why.
+      const api = new MockApi({ [ENV]: liveEnv("prod"), [VARIABLES_LIST]: variablesBody(live) });
+      const variable = { name: "X", value: "v", updated_at: "2026-01-01T00:00:00Z" };
+      const checked = await check(api, [
+        { name: "prod", variables: [variable as EnvironmentVariableConfig] },
+      ]);
+      expect(checked.notes).toEqual([
+        'environments[prod].variables[X]: "updated_at" is a value GitHub reports, not a setting it accepts ' +
+          "(the GET returns it, neither the POST nor the PATCH takes it), so a declared value that differs from the live one drifts on every check and its update re-runs on every apply without converging; remove it from the settings file",
+      ]);
+    },
+  );
+
+  test.each([
+    ["the pattern is missing", []],
+    ["the pattern is live under another id", [{ id: 41, name: "main", type: "branch" }]],
+    ["the live pattern carries no id", [{ name: "main", type: "branch" }]],
+  ] as Array<[string, Array<{ id?: number; name: string; type: string }>]>)(
+    "a pattern's id, which GitHub only reports, is named once when %s",
+    async (_state, live) => {
+      // Without the note the id rides the create call, is never compared, and the check reads clean.
+      const api = new MockApi({
+        [ENV]: liveProdWithFlag(true),
+        [POLICIES_LIST]: policiesBody(live),
+      });
+      const pattern = { name: "main", id: 7 } as DeploymentBranchPolicyConfig;
+      const checked = await check(api, [envWithPolicies([pattern])]);
+      expect(checked.notes).toEqual([
+        'environments[prod].deployment_branch_policies[main]: "id" is a value GitHub reports, not a setting it accepts ' +
+          "(the GET returns it, the POST does not take it), so the pattern is unaffected and no check reports that as drift; remove it from the settings file",
+      ]);
+    },
+  );
+
+  test("a pattern key the live pattern does not echo is named beside a clean check", async () => {
+    // A typo of `type`: GitHub creates a branch pattern, nothing compares the key afterwards, and without the note no run says so.
+    const api = new MockApi({
+      [ENV]: liveProdWithFlag(true),
+      [POLICIES_LIST]: policiesBody([{ id: 41, name: "v*", type: "branch" }]),
+    });
+    const pattern = { name: "v*", typ: "tag" } as DeploymentBranchPolicyConfig;
+    const checked = await check(api, [envWithPolicies([pattern])]);
+    expect(checked.drift).toEqual([]);
+    expect(checked.notes).toEqual([
+      'environments[prod].deployment_branch_policies[v*]: declared key "typ" does not exist on the live deployment branch policy, ' +
+        "so if GitHub ignores it the pattern is unaffected and no check reports that as drift. Fix the key name, or remove it from the settings file",
+    ]);
   });
 });
 

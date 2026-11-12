@@ -182,6 +182,9 @@ The side-by-side comparison with the Probot Settings app lives in the migration 
 - GET /repos/{owner}/{repo}/branches/{branch} probes whether a literal branch exists, so check mode can tell a missing branch from an unprotected one; the probe needs Contents: read.
 - What the settings file alone shows wrong is refused before any request, naming the key and the fix: required_status_checks without strict or without a check list (contexts or checks), required_approving_review_count outside 0-6, and the GET-only vocabulary a copied GET response carries (name, enabled, enforcement_level, url and *_url keys, at any depth).
 - Also refused at parse: an actor object copied from the GET into restrictions, dismissal_restrictions, or bypass_pull_request_allowances, where the PUT takes login/slug strings (the refusal names the string to write).
+- Every boolean of the PUT body is typed: the eight controls (enforce_admins through allow_fork_syncing) and the review settings dismiss_stale_reviews, require_code_owner_reviews, and require_last_push_approval. A quoted value ("yes", "no") is refused at parse on a literal branch and a wildcard rule alike, and a copied {url, enabled} wrapper at its control, naming the boolean to declare.
+- null means off under enforce_admins and allow_force_pushes, the two controls whose PUT schema spells off that way: check compares it as false and both the PUT and a wildcard rule's mutation are sent false, so a check right after an apply is clean.
+- Under any other of those booleans a literal branch refuses null at parse (the PUT answers 422 to it). A wildcard rule still takes it, since the mutation's Boolean inputs are nullable; write false there to turn a control off. required_signatures and required_status_checks.strict refuse null on every entry.
 - Check mode flattens the GET shape ({enabled} wrappers, actor objects -> login/slug strings, *_url dropped) to compare like with like (src/sections/branches/index.ts flattenProtection).
 - Check mode notes a declared key outside the PUT vocabulary that the GET never echoes as never converging; a documented key the GET omits, such as an off control, is drift the PUT resolves.
 - Actor logins and slugs compare case-insensitively (GitHub matches them in any case and reads back its own spelling), and a live review block without dismissal_restrictions or bypass_pull_request_allowances compares as the all-empty holder, which is how GitHub reads an empty one back.
@@ -227,6 +230,7 @@ The side-by-side comparison with the Probot Settings app lives in the migration 
 - PUT /repos/{owner}/{repo}/environments/{name} passthrough; check mode flattens GET's protection_rules[] back into the PUT shape.
 - A live wait timer or reviewers list the entry omits is drift, and apply refuses the PUT (the [replace-write rule](semantics.md)).
 - Undeclared environments are left untouched.
+- A key the entry shape does not declare rides the PUT. One the GET reports and the PUT does not take (id, node_id, url, html_url, created_at, updated_at, protection_rules) is named by a note in every run. Any other, unless declared null or as an empty string, is named by a note once the environment exists and its GET does not echo the key.
 - In check mode against a missing environment the declared variables, secrets, patterns, and protection rules cannot be listed, so notes say they are unverifiable until it exists; against a live environment whose custom_branch_policies flag is off, the patterns earn the same note while the flag drift comes from the environment diff.
 - Snapshot lists the environments (GET /repos/{owner}/{repo}/environments) and reads each one back as an entry: the PUT-shape settings off its GET body, and every nested list that has live items in its wrapped form under that list's default policy.
 - The snapshot writes variables with their values, branch-policy patterns while the custom_branch_policies flag is on, and the enabled protection rules by App slug; those two lists sit behind the Actions grant: under on-missing-permission: warn a denial leaves the key out with a note and the rest of the environment reads back, under fail it fails the section.
@@ -236,6 +240,7 @@ The side-by-side comparison with the Probot Settings app lives in the migration 
 
 - A declared per-environment `variables` key reconciles that environment's Actions variables AFTER the PUT, through GET/POST /repos/{owner}/{repo}/environments/{name}/variables and PATCH/DELETE .../variables/{name}: create missing, update divergent values, and delete undeclared ones by default (the wrapped `_undeclared: keep` form keeps them as notes).
 - Names match case-insensitively, values are plain text by design.
+- A declared created_at or updated_at, which the GET reports and neither write takes, is named by a note in every run.
 
 **Environment secrets** (`environments`)
 
@@ -248,6 +253,7 @@ The side-by-side comparison with the Probot Settings app lives in the migration 
 
 - A declared per-environment `deployment_branch_policies` key reconciles that environment's custom branch-policy patterns through GET/POST .../environments/{name}/deployment-branch-policies and DELETE .../deployment-branch-policies/{branch_policy_id}: create missing patterns, delete undeclared ones by default (`_undeclared: keep` softens to notes), and replace a matching pattern whose type differs.
 - Type is immutable upstream, so the change is delete + recreate; the upstream PUT is deliberately unused - its body is the name alone, and the name is the pattern's identity, so it can never help reconciliation.
+- A pattern key outside name and type rides the create call and no run compares it, so it adds no drift. One the GET reports (id, node_id) is named by a note in every run. Any other, unless declared null or as an empty string, is named by a note once the live pattern exists and does not echo the key.
 - Declaring the key requires the singular `deployment_branch_policy` sibling with custom_branch_policies: true (rejected upfront otherwise, since the pattern writes would 404 only after the environment PUT landed).
 - These endpoints sit outside the Environments PAT permission: the list read needs Actions read, the writes need Administration write.
 

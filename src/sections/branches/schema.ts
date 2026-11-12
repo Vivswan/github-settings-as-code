@@ -3,8 +3,8 @@
 import { z } from "zod";
 import { isPlainObject } from "../../plain-data.js";
 import { stringItems } from "../shared/raw-values.js";
-import { open, rule } from "../shared/schema-helpers.js";
-import { BOOLEAN_CONTROL_SET, isGetOnlyKey, isUrlKey } from "./keys.js";
+import { conditional, open, rule } from "../shared/schema-helpers.js";
+import { type BooleanControl, isGetOnlyKey, isUrlKey, NULLABLE_CONTROLS } from "./keys.js";
 
 export type BypassActor =
   | { kind: "user"; login: string }
@@ -186,6 +186,63 @@ const RequiredStatusChecks = z
     anyOf: [{ required: ["contexts"] }, { required: ["checks"] }],
   });
 
+/** The one wording for a toggle that is not a boolean; `site` is its path under protection. */
+function toggleError(site: string): string {
+  return `${site} must be an unquoted true or false (YAML parses "no"/"off"/"yes" as strings, not booleans), so the toggle direction is unambiguous`;
+}
+
+function toggle(site: string) {
+  return z.boolean({ error: toggleError(site) });
+}
+
+/** The controls the protection PUT carries; required_signatures rides its own sub-endpoint. */
+type PutControl = Exclude<BooleanControl, "required_signatures">;
+
+/** The GET wraps each of these as {url, enabled}, so a copied wrapper is refused naming the boolean to declare. */
+function control(key: PutControl) {
+  return z.boolean({
+    error: (issue) => {
+      const enabled = isPlainObject(issue.input) ? issue.input.enabled : undefined;
+      return typeof enabled === "boolean"
+        ? `protection.${key} is GitHub's GET wrapper around the toggle, which the protection PUT takes as a bare boolean; declare ${key}: ${enabled} instead`
+        : toggleError(key);
+    },
+  });
+}
+
+/** The booleans of the PUT body; each takes null here, since the one shape serves both kinds of entry (refuseNullsThePutRefuses states the two contracts). */
+const PutControls = {
+  enforce_admins: control("enforce_admins").nullable().optional(),
+  required_linear_history: control("required_linear_history").nullable().optional(),
+  allow_force_pushes: control("allow_force_pushes").nullable().optional(),
+  allow_deletions: control("allow_deletions").nullable().optional(),
+  block_creations: control("block_creations").nullable().optional(),
+  required_conversation_resolution: control("required_conversation_resolution")
+    .nullable()
+    .optional(),
+  lock_branch: control("lock_branch").nullable().optional(),
+  allow_fork_syncing: control("allow_fork_syncing").nullable().optional(),
+} satisfies Record<PutControl, z.ZodType>;
+
+/** The controls of the block above that the PUT answers 422 to a null under: all but the two it marks nullable. */
+const NON_NULLABLE_CONTROLS = Object.keys(PutControls).filter((key) => !NULLABLE_CONTROLS.has(key));
+
+/** The review settings the PUT takes as a bare boolean, under the same two contracts; the GET serves them bare too. */
+const ReviewToggles = {
+  dismiss_stale_reviews: toggle("required_pull_request_reviews.dismiss_stale_reviews")
+    .nullable()
+    .optional(),
+  require_code_owner_reviews: toggle("required_pull_request_reviews.require_code_owner_reviews")
+    .nullable()
+    .optional(),
+  require_last_push_approval: toggle("required_pull_request_reviews.require_last_push_approval")
+    .nullable()
+    .optional(),
+};
+
+/** The keys of the block above; the PUT answers 422 to a null under each. */
+const REVIEW_TOGGLES = Object.keys(ReviewToggles);
+
 const RequiredPullRequestReviews = z.looseObject(
   {
     required_approving_review_count: z
@@ -199,6 +256,7 @@ const RequiredPullRequestReviews = z.looseObject(
     bypass_pull_request_allowances: reviewActorHolder(
       "required_pull_request_reviews.bypass_pull_request_allowances",
     ).optional(),
+    ...ReviewToggles,
   },
   {
     error:
@@ -212,22 +270,9 @@ const ECHO_CARRIER: Readonly<Record<string, string>> = {
   enforcement_level: "strict and the check list carry the requirement",
 };
 
-/**
- * The fix for each GET-only key a copied GET response carries. The bare-boolean advice is offered
- * only under a control the PUT takes as a boolean: under a mapping-valued one such as
- * required_pull_request_reviews, "declare required_pull_request_reviews: true" would itself be refused.
- */
-function getOnlyKeyError(path: readonly (string | number)[], key: string, value: unknown): string {
+/** The fix for a GET-only key; a wrapper under a control never reaches here, since the control's own type refuses it (control(), above). */
+function getOnlyKeyError(path: readonly (string | number)[], key: string): string {
   const site = ["protection", ...path, key].join(".");
-  const parent = path.at(-1);
-  if (
-    key === "enabled" &&
-    typeof parent === "string" &&
-    BOOLEAN_CONTROL_SET.has(parent) &&
-    typeof value === "boolean"
-  ) {
-    return `${site} is GitHub's GET wrapper around the toggle, which the protection PUT takes as a bare boolean; declare ${parent}: ${value} instead`;
-  }
   if (isUrlKey(key)) {
     return `${site} is a link GitHub's GET response carries and the protection PUT has no word for; remove it`;
   }
@@ -262,7 +307,7 @@ function refuseGetOnlyKeys(
         refineCtx.addIssue({
           code: "custom",
           path: [...path, key],
-          message: getOnlyKeyError(path, key, inner),
+          message: getOnlyKeyError(path, key),
         });
         continue;
       }
@@ -272,7 +317,47 @@ function refuseGetOnlyKeys(
   ancestors.delete(value);
 }
 
-/** The schema's keys under each open protection mapping, by dotted path; index.ts adds the pass-through controls to complete the PUT vocabulary and notes a declared key outside it that the GET never echoes. */
+/** zod's own issue for a null where a boolean goes, so validation words the refusal like any null with no empty state. */
+const NULL_FOR_BOOLEAN = { code: "invalid_type", expected: "boolean", input: null } as const;
+
+/**
+ * GitHub states two contracts for a null under a boolean of the PUT body. One shape serves both kinds of entry, so
+ * the shape takes the null and this refuses it on a literal entry:
+ *
+ *   the protection PUT (a literal entry)  -> 422, except under the two controls it marks nullable, where null is off
+ *   the rule mutation (a wildcard entry)  -> every twin is a nullable Boolean input, so GitHub can accept the null
+ */
+function refuseNullsThePutRefuses(
+  protection: Record<string, unknown>,
+  refineCtx: z.RefinementCtx,
+): void {
+  for (const key of NON_NULLABLE_CONTROLS) {
+    if (protection[key] === null) {
+      refineCtx.addIssue({ ...NULL_FOR_BOOLEAN, path: ["protection", key] });
+    }
+  }
+
+  const reviews = protection.required_pull_request_reviews;
+  if (!isPlainObject(reviews)) {
+    return;
+  }
+
+  for (const key of REVIEW_TOGGLES) {
+    if (reviews[key] === null) {
+      refineCtx.addIssue({
+        ...NULL_FOR_BOOLEAN,
+        path: ["protection", "required_pull_request_reviews", key],
+      });
+    }
+  }
+}
+
+/** A JSON Schema `properties` map typing each key a boolean. */
+function booleans(keys: readonly string[]): Record<string, unknown> {
+  return Object.fromEntries(keys.map((key) => [key, { type: "boolean" }]));
+}
+
+/** The schema's keys under each open protection mapping, by dotted path: the PUT's vocabulary there. index.ts notes a declared key outside it that the GET never echoes. */
 export const PROTECTION_MAPPING_KEYS = {
   required_status_checks: Object.keys(RequiredStatusChecks.shape),
   required_pull_request_reviews: Object.keys(RequiredPullRequestReviews.shape),
@@ -287,12 +372,8 @@ export const BranchProtectionConfig = z
     required_status_checks: RequiredStatusChecks.nullable().optional(),
     required_pull_request_reviews: RequiredPullRequestReviews.nullable().optional(),
     restrictions: Restrictions.nullable().optional(),
-    required_signatures: z
-      .boolean({
-        error:
-          'required_signatures must be an unquoted true or false (YAML parses "no"/"off"/"yes" as strings, not booleans), so the toggle direction is unambiguous',
-      })
-      .optional(),
+    ...PutControls,
+    required_signatures: toggle("required_signatures").optional(),
     force_push_bypassers: z
       .array(
         z.string().check(
@@ -317,6 +398,9 @@ export const BranchProtectionConfig = z
   .meta({ id: "BranchProtectionConfig" });
 
 export type BranchProtectionConfig = z.infer<typeof BranchProtectionConfig>;
+
+/** What makes a name a wildcard pattern: git refnames forbid `*`, `?`, and `[`, so one can never collide with a literal branch. */
+export const WILDCARD_NAME = /[*?[]/;
 
 export const BranchConfig = open({
   name: z.string(),
@@ -348,7 +432,32 @@ export const BranchConfig = open({
       }
     }),
   )
-  .meta({ id: "BranchConfig" });
+  .check(
+    rule((entry, refineCtx) => {
+      // The name or the protection may be raw beside its own shape issue; a regex would coerce a raw name.
+      const literal = typeof entry.name === "string" && !WILDCARD_NAME.test(entry.name);
+      if (literal && isPlainObject(entry.protection)) {
+        refuseNullsThePutRefuses(entry.protection, refineCtx);
+      }
+    }),
+  )
+  // The conditional is the null refusal's published twin, read from the same two lists: a refinement does not reach z.toJSONSchema.
+  .meta({
+    id: "BranchConfig",
+    ...conditional(
+      { properties: { name: { not: { pattern: WILDCARD_NAME.source } } } },
+      {
+        properties: {
+          protection: {
+            properties: {
+              ...booleans(NON_NULLABLE_CONTROLS),
+              required_pull_request_reviews: { properties: booleans(REVIEW_TOGGLES) },
+            },
+          },
+        },
+      },
+    ),
+  });
 export type BranchConfig = z.infer<typeof BranchConfig>;
 
 export const BranchesConfig = z.array(BranchConfig);

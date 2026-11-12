@@ -4,13 +4,16 @@
  * (../../environments/nested.ts) plan through it; the frame is ./named-scope.ts.
  */
 
+import type { components, operations } from "@octokit/openapi-types";
 import type { Result } from "neverthrow";
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../../engine/diff.js";
+import type { MustBeNever } from "../../../types.js";
 import { valueDrift } from "../../contract/drift.js";
 import type { SectionFailure } from "../../contract/errors.js";
 import type { SectionMeta } from "../../contract/module.js";
 import { type PlainData, paramsWith, type SectionPlan } from "../../contract/plan.js";
+import { reportedKeyNote } from "../reported-key-note.js";
 import {
   type AnyPlannedOp,
   missingNamedDrift,
@@ -24,6 +27,30 @@ export const LiveVariable = z.looseObject({ name: z.string(), value: z.string() 
 export type LiveVariable = z.infer<typeof LiveVariable>;
 
 type PlainPayload = PlainData;
+
+/** A field the variable GET reports that neither write takes; every scope serves the one variable object. */
+type ReportedVariableKey = Exclude<
+  keyof components["schemas"]["actions-variable"],
+  keyof operations["actions/create-repo-variable"]["requestBody"]["content"]["application/json"]
+>;
+
+/** Named by a note in every run; the satisfies and the MustBeNever below pin the list both ways to the vendored spec. */
+const REPORTED_KEYS = [
+  "created_at",
+  "updated_at",
+] as const satisfies readonly ReportedVariableKey[];
+
+type _ReportedKeysComplete = MustBeNever<
+  Exclude<ReportedVariableKey, (typeof REPORTED_KEYS)[number]>
+>;
+
+/** The reported keys and the words a variable's note puts around them. */
+const REPORTED = {
+  keys: REPORTED_KEYS,
+  write: "neither the POST nor the PATCH takes",
+  outcome:
+    "so a declared value that differs from the live one drifts on every check and its update re-runs on every apply without converging",
+};
 
 /** The index signature types the passthrough fields as plain data, so spreading them into a body needs no cast. */
 export interface VariableEntry {
@@ -98,6 +125,8 @@ export function planVariables<
       const label = `${scope.label}[${variable.name}]`;
       const existing = liveOf(variable);
       const { name: _name, value: _value, ...extraKeys } = variable;
+      const reported = reportedKeyNote(label, extraKeys, REPORTED);
+      notes.push(...reported.notes);
       if (!existing) {
         ops.push(
           scope.create({
@@ -127,7 +156,9 @@ export function planVariables<
       if (first === undefined) {
         continue;
       }
-      const phantom = phantomKeys(extraKeys, existing);
+      const phantom = phantomKeys(extraKeys, existing).filter(
+        (key) => !reported.keys.includes(key),
+      );
       if (phantom.length > 0) {
         notes.push(phantomNote(label, phantom, "variable", "this update will re-run"));
       }

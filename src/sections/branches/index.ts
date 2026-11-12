@@ -17,7 +17,7 @@ import { matchesRejection } from "../contract/endpoints.js";
 import { type SectionFailure, sectionFailure } from "../contract/errors.js";
 import { identifiedBy } from "../contract/keyed-list.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
-import type { SectionMeta, SectionModule } from "../contract/module.js";
+import type { SectionModule } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import type { PlainData, Read } from "../contract/plan.js";
 import { layeredList, routed, rule } from "../shared/schema-helpers.js";
@@ -51,13 +51,14 @@ import {
   planWildcardEntry,
   resolveActorIds,
 } from "./graphql-writes.js";
-import { BOOLEAN_CONTROL_SET, isGetOnlyKey } from "./keys.js";
+import { isGetOnlyKey, NULLABLE_CONTROLS } from "./keys.js";
 import {
   type BranchConfig,
   BranchesConfig,
   BranchProtectionConfig,
   copiedActorName,
   PROTECTION_MAPPING_KEYS,
+  WILDCARD_NAME,
 } from "./schema.js";
 
 /** The classic PUT rejects a payload missing any of these; null is a valid value for each. */
@@ -72,11 +73,7 @@ export const REQUIRED_PROTECTION_KEYS = [
 const PROTECTION_VOCABULARY: ReadonlyMap<string, ReadonlySet<string>> = new Map(
   Object.entries({
     ...PROTECTION_MAPPING_KEYS,
-    "": [...Object.keys(BranchProtectionConfig.shape), ...BOOLEAN_CONTROL_SET],
-    required_pull_request_reviews: [
-      ...PROTECTION_MAPPING_KEYS.required_pull_request_reviews,
-      ...Object.keys(GRAPHQL_REVIEW_TWINS),
-    ],
+    "": Object.keys(BranchProtectionConfig.shape),
   }).map(([holder, keys]) => [holder, new Set(keys)]),
 );
 
@@ -143,9 +140,9 @@ function undocumentedPhantoms(declared: Record<string, unknown>, live: unknown):
   });
 }
 
-/** Git refnames forbid `*`, `?`, and `[`, so a wildcard entry can never collide with a literal branch. */
+/** Whether an entry's name is a wildcard pattern, which only the rule mutations reach. */
 export function isWildcardPattern(name: string): boolean {
-  return /[*?[]/.test(name);
+  return WILDCARD_NAME.test(name);
 }
 
 // GitHub spells this one list two ways inside required_status_checks and the GET returns both, so a declaration carrying either covers the other.
@@ -506,7 +503,6 @@ function replacingPutDrift(
  */
 async function planProtectionPut(
   ctx: BranchesContext,
-  section: SectionMeta,
   plan: BranchesPlan,
   put: ProtectionPut,
   probe: ProtectionProbe,
@@ -520,9 +516,7 @@ async function planProtectionPut(
       const branchProbe = yield* ctx.read.branchProbe.tryCall(z.unknown(), { params });
       if ("error" in branchProbe && matchesRejection(MISSING_BRANCH, branchProbe.error)) {
         // The same failure the PUT raises without the Contents grant, so the outcome does not depend on it.
-        return err(
-          sectionFailure("refused", `${section.key}: branches[${name}]: ${MISSING_BRANCH.advice}`),
-        );
+        return err(sectionFailure("refused", `branches[${name}]: ${MISSING_BRANCH.advice}`));
       }
       noteUndocumentedKeys(plan, prefix, payload, {});
       plan.ops.push({
@@ -602,7 +596,6 @@ function planSignatureToggle(plan: BranchesPlan, toggle: SignatureToggle): void 
 /** A literal entry's operations in order: the PUT (or the removal), the signatures toggle, the routed update. */
 async function planLiteralEntry(
   ctx: BranchesContext,
-  section: SectionMeta,
   entry: Exclude<ClassifiedEntry, { kind: "wildcard" }>,
   plan: BranchesPlan,
 ): Promise<Result<void, SectionFailure>> {
@@ -635,7 +628,7 @@ async function planLiteralEntry(
       payload: restPayload(branch.protection),
       declared: branch.protection,
     };
-    const { live, putPlanned } = yield* await planProtectionPut(ctx, section, plan, put, probe);
+    const { live, putPlanned } = yield* await planProtectionPut(ctx, plan, put, probe);
     const requiredSignatures = branch.protection.required_signatures;
     // An undeclared toggle leaves the live requirement alone.
     if (requiredSignatures !== undefined) {
@@ -661,6 +654,27 @@ async function planLiteralEntry(
 }
 
 /**
+ * A declared protection as every surface reads it: null under a control whose PUT spelling of off it is
+ * (keys.ts NULLABLE_CONTROLS) is that control off. GitHub's GET answers `false` there and the rule mutation
+ * has no null for off, so the one reading is `false`; the settings file keeps what its author wrote.
+ */
+function nullReadAsOff(
+  protection: PlainTyped<SplitProtection> | null,
+): PlainTyped<SplitProtection> | null {
+  if (protection === null) {
+    return null;
+  }
+
+  const read = { ...protection };
+  for (const control of NULLABLE_CONTROLS) {
+    if (read[control] === null) {
+      read[control] = false;
+    }
+  }
+  return read;
+}
+
+/**
  * The entries by the surface they apply through. The first entry that needs the GraphQL surface
  * starts the one rules read, ahead of every REST probe; a pure-REST declaration never starts it,
  * so no separate predicate gates the fetch.
@@ -673,10 +687,10 @@ async function classifyEntries(
     let graphqlRun: GraphqlRun | null = null;
     const entries: ClassifiedEntry[] = [];
     for (const branch of branches) {
-      const protection: PlainTyped<SplitProtection> | null = branch.protection;
+      const protection = nullReadAsOff(branch.protection);
       if (isWildcardPattern(branch.name)) {
         graphqlRun ??= yield* startGraphqlRun(ctx);
-        entries.push({ kind: "wildcard", branch, graphqlRun });
+        entries.push({ kind: "wildcard", branch: { name: branch.name, protection }, graphqlRun });
       } else if (hasRoutedGraphqlKeys(protection)) {
         graphqlRun ??= yield* startGraphqlRun(ctx);
         entries.push({ kind: "routed", branch: { name: branch.name, protection }, graphqlRun });
@@ -825,7 +839,6 @@ export const branchesSection = {
     }),
   ),
   async plan(ctx, desired): Promise<Result<BranchesPlan, SectionFailure>> {
-    const section = this;
     return safeTry(async function* () {
       const branches = listEntries(desired);
       const plan: BranchesPlan = { ops: [], notes: [], drift: [] };
@@ -838,7 +851,7 @@ export const branchesSection = {
           await planWildcardEntry(ctx, entry.graphqlRun, entry.branch, plan);
           continue;
         }
-        yield* await planLiteralEntry(ctx, section, entry, plan);
+        yield* await planLiteralEntry(ctx, entry, plan);
       }
       if (graphqlRun !== null) {
         plan.ops = withActorsResolvedFirst(ctx, graphqlRun, plan.ops);
