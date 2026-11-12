@@ -63,8 +63,9 @@ export function tryGit(cwd: string, ...args: string[]): string | null {
   }
 }
 
-/** A push as git ran it. A refusal is never read from git's words: the caller re-reads origin, and a ref that
- * moved since it was observed is a lost compare-and-set to retry, an unmoved one a refusal to throw. */
+/** A push as git ran it. A refusal is never read from git's words: the caller re-reads origin. A ref that moved
+ * since it was observed is a lost compare-and-set to retry, an unmoved one a refusal to throw; a refused deletion
+ * whose refs are all gone is done. */
 export function push(cwd: string, ...pushArgs: string[]): Error | null {
   try {
     execFileSync("git", ["push", ...pushArgs], { cwd, encoding: "utf8" });
