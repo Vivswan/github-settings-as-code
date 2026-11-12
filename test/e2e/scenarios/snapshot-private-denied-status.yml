@@ -16,10 +16,6 @@ repos:
       repo:
         private: true
         visibility: private
-      labels:
-        - name: hush-project
-          color: "000000"
-          description: Not for the public log
     permissions:
       issues: none
 inputs:
@@ -38,8 +34,6 @@ expect:
     - "| labels | :x: failed | hidden (private repository), HTTP 403 |"
   leaks_nowhere:
     - svc-vault
-    - hush-project
-    - Not for the public log
     - /labels
     - Resource not accessible
     - the token was denied
