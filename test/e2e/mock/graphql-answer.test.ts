@@ -1,7 +1,7 @@
 /**
  * The pipeline serves a handler's data as graphql-js completes it under the request's own document, and fails the run
- * on data GitHub's schema could never serialize. Without it a handler that stored a null hands it back in a Boolean!
- * field, a key the document never selected reaches the product, and every scenario passes on both.
+ * on data GitHub's schema could never have produced. Without these tests the guard could stop firing and no scenario
+ * would turn red: the corpus holds only answers on the schema.
  */
 
 import { describe, expect, spyOn, test } from "bun:test";
@@ -27,6 +27,7 @@ import { isWriteRequest } from "./dispatch.js";
 import { completedGraphqlAnswer } from "./graphql-answer.js";
 import { type AcceptedGraphqlRequest, acceptedGraphqlRequest } from "./graphql-request.js";
 import { GRAPHQL_HANDLERS } from "./handlers.js";
+import { mintNodeId } from "./node-id.js";
 import { handleGraphqlRequest } from "./routes.js";
 import { mockServerLifecycle, scenario } from "./server-test-support.js";
 import { buildState, completeRule, ruleWireNode } from "./state.js";
@@ -35,6 +36,11 @@ import type { Json } from "./support.js";
 const start = mockServerLifecycle();
 const OPS = allGraphqlOps();
 const READ = { owner: OWNER, repo: REPO };
+const DELETE_RULE = {
+  input: { branchProtectionRuleId: mintNodeId("rule", ADMIN_SLUG, "release/*") },
+};
+const NUMBER_FOR_A_PAYLOAD =
+  'data.deleteBranchProtectionRule: answered 7, the schema serves {"clientMutationId":null}';
 const NULL_ADMIN_ENFORCED =
   "data.repository.branchProtectionRules.nodes.0.isAdminEnforced: Cannot return null for non-nullable field BranchProtectionRule.isAdminEnforced.";
 const NULL_ADMIN_ENFORCED_VIOLATION = `GraphQL BranchProtectionRules was answered off GitHub's schema by the mock handler "branches.rulesQuery": ${NULL_ADMIN_ENFORCED}`;
@@ -173,7 +179,60 @@ describe("data GitHub's schema could never serialize does not complete", () => {
   });
 });
 
-describe("the product receives a handler's data through the request's selection", () => {
+// graphql-js completes each of these without an error: an object of nulls for a non-object, the coerced value for a leaf.
+describe("data that completes to anything but itself is no answer of GitHub's schema", () => {
+  test.each([
+    {
+      name: "a number at an object position",
+      key: "branches.deleteRule",
+      variables: DELETE_RULE,
+      data: { deleteBranchProtectionRule: 7 },
+      line: NUMBER_FOR_A_PAYLOAD,
+    },
+    {
+      name: "an array at an object position",
+      key: "branches.deleteRule",
+      variables: DELETE_RULE,
+      data: { deleteBranchProtectionRule: [] },
+      line: 'data.deleteBranchProtectionRule: answered [], the schema serves {"clientMutationId":null}',
+    },
+    {
+      name: "a string as the whole data",
+      key: "environments.pins",
+      variables: READ,
+      data: "not an object",
+      line: 'data: answered "not an object", the schema serves {"repository":null}',
+    },
+    {
+      name: "a string inside a list of objects",
+      key: "branches.rulesQuery",
+      variables: READ,
+      data: rulesData({
+        ...ruleNode(),
+        bypassForcePushAllowances: { nodes: ["octocat"], pageInfo: { hasNextPage: false } },
+      }),
+      line: 'data.repository.branchProtectionRules.nodes.0.bypassForcePushAllowances.nodes.0: answered "octocat", the schema serves {"actor":null}',
+    },
+    {
+      name: "true for an Int",
+      key: "branches.rulesQuery",
+      variables: READ,
+      data: rulesData(ruleNode({ requiredApprovingReviewCount: true })),
+      line: "data.repository.branchProtectionRules.nodes.0.requiredApprovingReviewCount: answered true, the schema serves 1",
+    },
+    {
+      name: "5 for an ID",
+      key: "repository.featuresQuery",
+      variables: READ,
+      data: { repository: { id: 5, hasSponsorshipsEnabled: false, issueCreationPolicy: "ALL" } },
+      line: 'data.repository.id: answered 5, the schema serves "5"',
+    },
+  ] as const)("$name", ({ key, variables, data, line }) => {
+    expect(completedGraphqlAnswer(accepted(key, variables), data)).toEqual({ errors: [line] });
+  });
+});
+
+describe("the product receives the completed data, and its two differences from the handler's data are no violation", () => {
   test.each([
     {
       name: "a key the document does not select is dropped",
@@ -208,7 +267,7 @@ describe("the product receives a handler's data through the request's selection"
   });
 });
 
-describe("data that does not complete fails the run", () => {
+describe("data off the schema fails the run", () => {
   test("the violation names the operation, the handler, the path, and graphql-js's reason, and the read stays a read in the log", () => {
     const result = served(
       "branches.rulesQuery",
@@ -224,6 +283,16 @@ describe("data that does not complete fails the run", () => {
     // Logged without its GraphQL kind, the POST would count as a write in the runner's check-mode and idempotence rules.
     expect(result.log.graphql).toEqual({ operationName: "BranchProtectionRules", kind: "read" });
     expect(isWriteRequest(result.log)).toBe(false);
+  });
+
+  test("data that completes to another value is a violation naming the path and both values", () => {
+    const result = served("branches.deleteRule", DELETE_RULE, { deleteBranchProtectionRule: 7 });
+    const violation = `GraphQL DeleteBranchProtectionRule was answered off GitHub's schema by the mock handler "branches.deleteRule": ${NUMBER_FOR_A_PAYLOAD}`;
+    expect(result.violation).toBe(violation);
+    expect(result.response).toEqual({
+      status: 400,
+      body: { message: `${VIOLATION_PREFIX} ${violation}` },
+    });
   });
 
   test("inside a run of the product: a handler answering a null in a Boolean! field fails the run and records the violation, and the handlers as they are run clean (the control)", () =>

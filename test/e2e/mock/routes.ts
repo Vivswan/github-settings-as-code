@@ -347,8 +347,8 @@ function graphqlErrorsResponse(
 /**
  * Response guard of a `data` answer. The product receives what graphql-js completes from the handler's data under the
  * request's own document, as from GitHub: no key the document did not select, and null under a selected nullable key
- * the handler left out. Data that does not complete is an answer GitHub's schema could never give, the mock's own
- * fault: a violation, whatever outcome the scenario expected.
+ * the handler left out. Data that does not complete, or differs from its completion in any other way, is the mock's
+ * own fault: a violation, whatever outcome the scenario expected.
  */
 function graphqlDataResponse(
   key: string,
