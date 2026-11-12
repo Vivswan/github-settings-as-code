@@ -37,6 +37,9 @@ interface Gathered {
 
   /** Each marker on an entry no list keys, by its path as validation spells one over the kept entries. */
   readonly unkeyed: string[];
+
+  /** Each mapping or list walked to its end with no such marker found: skipped when another path meets it again. */
+  readonly clean: WeakSet<object>;
 }
 
 /** A keyed list's removals set apart from it, its entries' nested lists likewise, in the form the layer wrote them. */
@@ -48,32 +51,63 @@ interface Partition {
   readonly sites: string[];
 }
 
+/** A list's or a mapping's children, each with the step that reaches it; a list is read by index, since the walk runs before the plainness check that refuses one whose named property shadows a method. */
+function childrenOf(
+  container: readonly unknown[] | Readonly<Record<string, unknown>>,
+): [step: string | number, child: unknown][] {
+  if (!Array.isArray(container)) {
+    return Object.entries(container);
+  }
+  const children: [number, unknown][] = [];
+  for (let index = 0; index < container.length; index += 1) {
+    children.push([index, container[index]]);
+  }
+  return children;
+}
+
 /**
- * The markers below a value no keyed list reaches: a `_remove` on a list's entry there removes nothing (the fold
- * replaces such a list whole), so the entry stays and each marker is gathered by its path. `above` holds the
- * containers on the way down, so a YAML alias cycle ends the descent.
+ * Whether a value no keyed list reaches is known to hold no marker, each one below it gathered by its path: a
+ * `_remove` on a list's entry there removes nothing (the fold replaces such a list whole), so the entry stays.
+ *
+ *   holds no marker  -> remembered, so walked once however many paths a YAML alias gives it, as validate.ts walks one
+ *   holds a marker   -> walked per path, so each path keeps its own line
+ *   closes a cycle   -> the descent ends there (`above`), and no container on the way back up is remembered: what
+ *                       the cut hid is not known
  */
-function gatherUnkeyed(value: unknown, path: Steps, unkeyed: string[], above: Set<object>): void {
-  if ((!Array.isArray(value) && !isPlainObject(value)) || above.has(value)) {
-    return;
+function gatherUnkeyed(
+  value: unknown,
+  path: Steps,
+  gathered: Gathered,
+  above: Set<object>,
+): boolean {
+  if (!Array.isArray(value) && !isPlainObject(value)) {
+    return true;
+  }
+  if (gathered.clean.has(value)) {
+    return true;
+  }
+  if (above.has(value)) {
+    return false;
   }
 
   above.add(value);
-  if (Array.isArray(value)) {
-    // Indexed, as in partitionRemovals: the walk runs before the plainness check.
-    for (let index = 0; index < value.length; index += 1) {
-      const item: unknown = value[index];
-      if (isPlainObject(item) && carriesRemoval(item)) {
-        unkeyed.push(z.core.toDotPath([...path, index, REMOVE_KEY]));
-      }
-      gatherUnkeyed(item, [...path, index], unkeyed, above);
+  const entries = Array.isArray(value);
+  let clean = true;
+  for (const [step, child] of childrenOf(value)) {
+    if (entries && isPlainObject(child) && carriesRemoval(child)) {
+      gathered.unkeyed.push(z.core.toDotPath([...path, step, REMOVE_KEY]));
+      clean = false;
     }
-  } else {
-    for (const [field, child] of Object.entries(value)) {
-      gatherUnkeyed(child, [...path, field], unkeyed, above);
+    if (!gatherUnkeyed(child, [...path, step], gathered, above)) {
+      clean = false;
     }
   }
   above.delete(value);
+
+  if (clean) {
+    gathered.clean.add(value);
+  }
+  return clean;
 }
 
 /** A kept entry with each declared nested list partitioned in turn, and the sites of the removals below it; its other fields are walked for the markers no list keys. */
@@ -107,7 +141,7 @@ function partitionNestedLists(
 
   for (const [field, value] of Object.entries(entry)) {
     if (!partitioned.has(field)) {
-      gatherUnkeyed(value, [...viewSite, field], gathered.unkeyed, new Set());
+      gatherUnkeyed(value, [...viewSite, field], gathered, new Set());
     }
   }
   return { entry: out, sites };
@@ -214,7 +248,7 @@ export function separateRemovals(doc: unknown): SeparatedRemovals {
   }
   const rest: Record<string, unknown> = { ...doc };
   const sites: string[] = [];
-  const gathered: Gathered = { sources: new Map(), unkeyed: [] };
+  const gathered: Gathered = { sources: new Map(), unkeyed: [], clean: new WeakSet() };
   for (const key of LIST_SECTIONS) {
     const form = nestedForm(doc[key]);
     if (form === null) {
@@ -232,7 +266,7 @@ export function separateRemovals(doc: unknown): SeparatedRemovals {
   }
 
   for (const key of MAPPING_SECTIONS) {
-    gatherUnkeyed(doc[key], [key], gathered.unkeyed, new Set());
+    gatherUnkeyed(doc[key], [key], gathered, new Set());
   }
 
   return { rest, sites, unkeyed: gathered.unkeyed, asWritten: renumbering(gathered.sources) };
