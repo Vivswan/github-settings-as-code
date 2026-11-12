@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { err, ok } from "neverthrow";
 
+import { unkeyedRemovalNote } from "../../src/engine/directives.js";
+import { standaloneView } from "../../src/engine/layers.js";
 import {
   preflightProbe,
   type RepoRunOptions,
@@ -299,6 +301,31 @@ describe("validateSettingsDoc secret references", () => {
 });
 
 describe("validateSettingsDoc", () => {
+  const TEAM_ACTOR = { actor_id: 1, actor_type: "Team", bypass_mode: "always" };
+
+  /** One ruleset holding the given fields, as a document. */
+  const ruleset = (fields: Record<string, unknown>) => ({
+    rulesets: [{ name: "r", target: "branch", enforcement: "active", ...fields }],
+  });
+
+  /** One ruleset whose pull_request rule holds the given parameters beside the required ones. */
+  const pullRequestRuleset = (parameters: Record<string, unknown>) =>
+    ruleset({
+      rules: [
+        {
+          type: "pull_request",
+          parameters: {
+            dismiss_stale_reviews_on_push: false,
+            require_code_owner_review: false,
+            require_last_push_approval: false,
+            required_approving_review_count: 1,
+            required_review_thread_resolution: false,
+            ...parameters,
+          },
+        },
+      ],
+    });
+
   test("unknown top-level keys are one collected line naming the known sections", () => {
     const { io } = captureIo();
     expect(validateSettingsDoc({ labls: [] }, "repos/x.yml", SectionSelection.ALL, io)).toEqual(
@@ -341,6 +368,31 @@ describe("validateSettingsDoc", () => {
         io,
       ).isOk(),
     ).toBe(true);
+  });
+
+  // Nothing folds a single document, so nothing read the value: `_layering: union` ran silently, while mode: render refused the same file as a layer.
+  test.each<[what: string, value: unknown, got: string]>([
+    ["a string outside its values", "union", "a string that is none of them"],
+    ["null", null, "null"],
+  ])(
+    "a single document's top-level _layering that is %s draws one warning naming the values, and the document still validates",
+    (_what, value, got) => {
+      const { io, annotations } = captureIo();
+      const doc = { _layering: value, labels: [{ name: "bug" }] };
+      expect(validateSettingsDoc(doc, "s.yml", SectionSelection.ALL, io).isOk()).toBe(true);
+      expect(annotations).toEqual([
+        `warning: s.yml: _layering must be one of "replace", "shallow", "deep"; got ${got}. ` +
+          "A single document is not folded, so the directive is not read and the run goes on; mode: render refuses this file as a layer. " +
+          "Write one of the values, or remove the key; the next major version refuses it here too",
+      ]);
+    },
+  );
+
+  test("control: a top-level _layering of the set is the file's directive as a layer, so a single document carries it without a warning", () => {
+    const { io, annotations } = captureIo();
+    const doc = { _layering: "shallow", labels: [{ name: "bug" }] };
+    expect(validateSettingsDoc(doc, "s.yml", SectionSelection.ALL, io).isOk()).toBe(true);
+    expect(annotations).toEqual([]);
   });
 
   // Each of these once stopped the run alone, so a file with all three took three runs to fix.
@@ -494,6 +546,224 @@ describe("validateSettingsDoc", () => {
       );
     },
   );
+
+  // The class the removal walk passed over: a list of mappings the registry does not key. The marker removes nothing
+  // there, and it rode to GitHub as a field named _remove with nothing said.
+  test("the warning for a marker no list keys says what becomes of it and the fix, and the validated document keeps the entry as written", () => {
+    const { io, annotations } = captureIo();
+    const doc = ruleset({ bypass_actors: [{ ...TEAM_ACTOR, _remove: true }] });
+    const validated = validateSettingsDoc(doc, "s.yml", SectionSelection.ALL, io);
+    expect(annotations).toEqual([
+      "warning: s.yml: rulesets[0].bypass_actors[0]._remove: _remove belongs on an entry of a keyed list, and this list is not keyed, so it removes nothing and passes through as a field of the entry. Remove the key; the next major version refuses it",
+    ]);
+    expect(JSON.stringify(validated._unsafeUnwrap())).toContain(
+      '"bypass_actors":[{"actor_id":1,"actor_type":"Team","bypass_mode":"always","_remove":true}]',
+    );
+  });
+
+  // The rest of the class, one list each: the same warning by its own path.
+  test.each<[list: string, doc: Record<string, unknown>, site: string]>([
+    [
+      "a rule's required_status_checks, below a nested keyed entry",
+      ruleset({
+        rules: [
+          {
+            type: "required_status_checks",
+            parameters: {
+              strict_required_status_checks_policy: false,
+              required_status_checks: [{ context: "ci", _remove: true }],
+            },
+          },
+        ],
+      }),
+      "rulesets[0].rules[0].parameters.required_status_checks[0]._remove",
+    ],
+    [
+      "a rule's workflows",
+      ruleset({
+        rules: [
+          {
+            type: "workflows",
+            parameters: { workflows: [{ path: "ci.yml", repository_id: 1, _remove: true }] },
+          },
+        ],
+      }),
+      "rulesets[0].rules[0].parameters.workflows[0]._remove",
+    ],
+    [
+      "a rule's code_scanning_tools",
+      ruleset({
+        rules: [
+          {
+            type: "code_scanning",
+            parameters: {
+              code_scanning_tools: [
+                {
+                  tool: "CodeQL",
+                  alerts_threshold: "errors",
+                  security_alerts_threshold: "high_or_higher",
+                  _remove: true,
+                },
+              ],
+            },
+          },
+        ],
+      }),
+      "rulesets[0].rules[0].parameters.code_scanning_tools[0]._remove",
+    ],
+    [
+      "a pull_request rule's required_reviewers",
+      pullRequestRuleset({
+        required_reviewers: [
+          {
+            file_patterns: ["*.ts"],
+            minimum_approvals: 1,
+            reviewer: { id: 1, type: "Team" },
+            _remove: true,
+          },
+        ],
+      }),
+      "rulesets[0].rules[0].parameters.required_reviewers[0]._remove",
+    ],
+    [
+      "a pull_request rule's dismissal_restriction.allowed_actors",
+      pullRequestRuleset({
+        dismissal_restriction: {
+          enabled: true,
+          allowed_actors: [{ id: 1, type: "Team", _remove: true }],
+        },
+      }),
+      "rulesets[0].rules[0].parameters.dismissal_restriction.allowed_actors[0]._remove",
+    ],
+    [
+      "a mapping section's list",
+      {
+        check_suite_preferences: {
+          auto_trigger_checks: [{ app_id: 1, setting: true, _remove: true }],
+        },
+      },
+      "check_suite_preferences.auto_trigger_checks[0]._remove",
+    ],
+    [
+      "a list under a passthrough key",
+      { repository: { custom_list: [{ a: 1, _remove: true }] } },
+      "repository.custom_list[0]._remove",
+    ],
+    [
+      "a list of a wrapper's entry, spelled through .entries, the marker's value unjudged",
+      {
+        rulesets: {
+          entries: ruleset({ bypass_actors: [{ ...TEAM_ACTOR, _remove: "yes" }] }).rulesets,
+        },
+      },
+      "rulesets.entries[0].bypass_actors[0]._remove",
+    ],
+  ])(
+    "_remove on an entry of %s draws a warning naming its path, and the entry stays as written",
+    (_list, doc, site) => {
+      const { io, annotations } = captureIo();
+      const validated = validateSettingsDoc(doc, "s.yml", SectionSelection.ALL, io);
+      expect(annotations).toEqual([`warning: ${unkeyedRemovalNote("s.yml", site)}`]);
+      expect(JSON.stringify(validated._unsafeUnwrap())).toContain('"_remove":');
+    },
+  );
+
+  // The warnings speak of a document that runs. Beside a refusal the marker's one said "passes through" of a key a
+  // closed shape had just refused, and promised for the next major what this run already did.
+  test.each<[what: string, doc: Record<string, unknown>, issue: string | RegExp]>([
+    [
+      "a closed entry shape names the marker itself",
+      {
+        branches: [
+          {
+            name: "main",
+            protection: {
+              required_status_checks: { strict: true, checks: [{ context: "ci", _remove: true }] },
+            },
+          },
+        ],
+      },
+      /^branches\[0\]\.protection\.required_status_checks\.checks\[0\]: .* remove "_remove"$/,
+    ],
+    [
+      "a keyed removal stops it, a bad top-level _layering beside it",
+      {
+        _layering: "union",
+        rulesets: [
+          { name: "old", _remove: true },
+          ...ruleset({ bypass_actors: [{ ...TEAM_ACTOR, _remove: true }] }).rulesets,
+        ],
+      },
+      singleDocumentRemovalIssue("rulesets[0]._remove"),
+    ],
+  ])(
+    "a refused document draws no warning for a directive nothing reads: %s",
+    (_what, doc, issue) => {
+      const { io, annotations } = captureIo();
+      expect(validateSettingsDoc(doc, "s.yml", SectionSelection.ALL, io)).toEqual(
+        err({
+          code: "settings-malformed-sections",
+          source: "s.yml",
+          issues: [typeof issue === "string" ? issue : expect.stringMatching(issue)],
+        }),
+      );
+      expect(annotations).toEqual([]);
+    },
+  );
+
+  // The way back reads a path's steps, so a key that only looks like one must not be read as one: unquoted, the
+  // `[0]` of the key below was renumbered with the rules list the removal shifted.
+  test("a passthrough key spelled like a list step is quoted in the path a warning names, as an issue's is, so a removal in the list it resembles never renumbers it", () => {
+    const { io, annotations } = captureIo();
+    const view = standaloneView(
+      ruleset({
+        rules: [{ type: "creation", _remove: true }, { type: "deletion" }],
+        "rules[0]": [{ _remove: true }],
+      }),
+    );
+    const options = { asWritten: view.asWritten };
+    expect(
+      validateSettingsDoc(view.doc, "repo.yml", SectionSelection.ALL, io, options).isOk(),
+    ).toBe(true);
+    expect(annotations).toEqual([
+      `warning: ${unkeyedRemovalNote("repo.yml", 'rulesets[0]["rules[0]"][0]._remove')}`,
+    ]);
+  });
+
+  // A layer is judged as its standalone view, the keyed removals gone, so the view's index is not the file's; the
+  // wrapper form is the one whose path the way back reads through .entries.
+  test("a layer's view hands over its way back, so a warning names the wrapper's entry by its index in the layer as written", () => {
+    const { io, annotations } = captureIo();
+    const view = standaloneView({
+      rulesets: {
+        entries: [
+          { name: "old", _remove: true },
+          ...ruleset({ bypass_actors: [{ ...TEAM_ACTOR, _remove: true }] }).rulesets,
+        ],
+      },
+    });
+    const options = { asWritten: view.asWritten };
+    expect(
+      validateSettingsDoc(view.doc, "repo.yml", SectionSelection.ALL, io, options).isOk(),
+    ).toBe(true);
+    expect(annotations).toEqual([
+      `warning: ${unkeyedRemovalNote("repo.yml", "rulesets.entries[1].bypass_actors[0]._remove")}`,
+    ]);
+  });
+
+  test("control: a cyclic passthrough value still ends in the boundary's refusal, since the marker walk does not follow a cycle", () => {
+    const loop: Record<string, unknown> = { list: [] };
+    (loop.list as unknown[]).push(loop);
+    expect(
+      validateSettingsDoc({ repository: { loop } }, "s.yml", SectionSelection.ALL, silentIo()),
+    ).toEqual(
+      err({
+        code: "settings-malformed-sections",
+        source: "s.yml",
+        issues: [expect.stringContaining("refers back to one of its own containers")],
+      }),
+    );
+  });
 
   test("a list whose named property shadows a method is refused by the plainness check, never met by the removal walk", () => {
     // The walk for removals runs on the raw document, before the shapes; calling the list's own forEach would throw here.

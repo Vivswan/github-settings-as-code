@@ -1,25 +1,46 @@
 /**
- * A document's removal entries set apart from it, and the way back from an issue over the rest to the document as
- * written. validateSettingsDoc (orchestrate.ts) refuses a single document's sites and judges the rest; the fold
- * (layers.ts) builds each layer's standalone view on it.
+ * A document's removal entries set apart from it, the markers no list keys beside them, and the way back from an
+ * issue over the rest to the document as written. validateSettingsDoc (orchestrate.ts) refuses a single document's
+ * sites and judges the rest; the fold (layers.ts) builds each layer's standalone view on it.
  */
 
+import { z } from "zod";
 import { isPlainObject } from "../plain-data.js";
-import { LIST_SECTIONS } from "../schema.js";
+import { LIST_SECTIONS, SECTION_KEYS } from "../schema.js";
 import type { KeyedListLayering } from "../sections/contract/keyed-list.js";
 import { listLayering } from "../sections/registry.js";
 import { nestedForm, REMOVE_KEY } from "./directives.js";
+
+/** The sections the keyed walk never enters: every list below one is a list nothing keys. */
+const MAPPING_SECTIONS = SECTION_KEYS.filter(
+  (key) => !(LIST_SECTIONS as readonly string[]).includes(key),
+);
 
 /** Whether an entry carries the marker at all, whatever its value: what the standalone view drops and a single document refuses. */
 function carriesRemoval(entry: Readonly<Record<string, unknown>>): boolean {
   return entry[REMOVE_KEY] !== undefined;
 }
 
+/** A path as its steps from the section key down, a list index a number; `z.core.toDotPath` spells it as validation spells an issue's, a key that is no plain name quoted. */
+type Steps = readonly (string | number)[];
+
 /**
  * Per list as validation spells it over the document minus its removals (`labels`, `labels.entries`,
  * `environments[0].variables`), the source index of each kept entry; only a list a removal shifted is recorded.
  */
 type SourceIndices = Map<string, readonly number[]>;
+
+/** What one walk of a document gathers beside its partitions. */
+interface Gathered {
+  /** Where each kept entry of a shifted list sat in the document as written. */
+  readonly sources: SourceIndices;
+
+  /** Each marker on an entry no list keys, by its path as validation spells one over the kept entries. */
+  readonly unkeyed: string[];
+
+  /** Each mapping or list walked to its end with no such marker found: skipped when another path meets it again. */
+  readonly clean: WeakSet<object>;
+}
 
 /** A keyed list's removals set apart from it, its entries' nested lists likewise, in the form the layer wrote them. */
 interface Partition {
@@ -30,16 +51,76 @@ interface Partition {
   readonly sites: string[];
 }
 
-/** A kept entry with each declared nested list partitioned in turn, and the sites of the removals below it. */
+/** A list's or a mapping's children, each with the step that reaches it; a list is read by index, since the walk runs before the plainness check that refuses one whose named property shadows a method. */
+function childrenOf(
+  container: readonly unknown[] | Readonly<Record<string, unknown>>,
+): [step: string | number, child: unknown][] {
+  if (!Array.isArray(container)) {
+    return Object.entries(container);
+  }
+  const children: [number, unknown][] = [];
+  for (let index = 0; index < container.length; index += 1) {
+    children.push([index, container[index]]);
+  }
+  return children;
+}
+
+/**
+ * Whether a value no keyed list reaches is known to hold no marker, each one below it gathered by its path: a
+ * `_remove` on a list's entry there removes nothing (the fold replaces such a list whole), so the entry stays.
+ *
+ *   holds no marker  -> remembered, so walked once however many paths a YAML alias gives it, as validate.ts walks one
+ *   holds a marker   -> walked per path, so each path keeps its own line
+ *   closes a cycle   -> the descent ends there (`above`), and no container on the way back up is remembered: what
+ *                       the cut hid is not known
+ */
+function gatherUnkeyed(
+  value: unknown,
+  path: Steps,
+  gathered: Gathered,
+  above: Set<object>,
+): boolean {
+  if (!Array.isArray(value) && !isPlainObject(value)) {
+    return true;
+  }
+  if (gathered.clean.has(value)) {
+    return true;
+  }
+  if (above.has(value)) {
+    return false;
+  }
+
+  above.add(value);
+  const entries = Array.isArray(value);
+  let clean = true;
+  for (const [step, child] of childrenOf(value)) {
+    if (entries && isPlainObject(child) && carriesRemoval(child)) {
+      gathered.unkeyed.push(z.core.toDotPath([...path, step, REMOVE_KEY]));
+      clean = false;
+    }
+    if (!gatherUnkeyed(child, [...path, step], gathered, above)) {
+      clean = false;
+    }
+  }
+  above.delete(value);
+
+  if (clean) {
+    gathered.clean.add(value);
+  }
+  return clean;
+}
+
+/** A kept entry with each declared nested list partitioned in turn, and the sites of the removals below it; its other fields are walked for the markers no list keys. */
 function partitionNestedLists(
   entry: Readonly<Record<string, unknown>>,
   keyed: KeyedListLayering,
   site: string,
-  viewSite: string,
-  sources: SourceIndices,
+  viewSite: Steps,
+  gathered: Gathered,
 ): { entry: Record<string, unknown>; sites: string[] } {
   const out: Record<string, unknown> = { ...entry };
   const sites: string[] = [];
+  const partitioned = new Set<string>();
   for (const [field, nested] of Object.entries(keyed.nested ?? {})) {
     const form = nestedForm(entry[field]);
     if (form === null) {
@@ -50,25 +131,32 @@ function partitionNestedLists(
       form.entries,
       nested,
       `${site}.${field}`,
-      form.knobs === null ? `${viewSite}.${field}` : `${viewSite}.${field}.entries`,
-      sources,
+      form.knobs === null ? [...viewSite, field] : [...viewSite, field, "entries"],
+      gathered,
     );
     sites.push(...below.sites);
     out[field] = form.knobs === null ? below.kept : { ...form.knobs, entries: below.kept };
+    partitioned.add(field);
+  }
+
+  for (const [field, value] of Object.entries(entry)) {
+    if (!partitioned.has(field)) {
+      gatherUnkeyed(value, [...viewSite, field], gathered, new Set());
+    }
   }
   return { entry: out, sites };
 }
 
 /**
- * `path` names the list as the sites do, by the document's own indices; `viewPath` as validation spells the kept
- * entries (`labels.entries`, `environments[1].variables`), the key under which `sources` records their origins.
+ * `path` names the list as the sites do, by the document's own indices; `viewPath` as validation reaches the kept
+ * entries (`labels.entries`, `environments[1].variables`), the key under which `gathered` records their origins.
  */
 function partitionRemovals(
   entries: readonly unknown[],
   keyed: KeyedListLayering,
   path: string,
-  viewPath: string,
-  sources: SourceIndices,
+  viewPath: Steps,
+  gathered: Gathered,
 ): Partition {
   const kept: unknown[] = [];
   const sites: string[] = [];
@@ -89,15 +177,15 @@ function partitionRemovals(
       continue;
     }
 
-    const viewSite = `${viewPath}[${kept.length}]`;
+    const viewSite = [...viewPath, kept.length];
     origins.push(index);
-    const below = partitionNestedLists(entry, keyed, site, viewSite, sources);
+    const below = partitionNestedLists(entry, keyed, site, viewSite, gathered);
     sites.push(...below.sites);
     kept.push(below.entry);
   }
 
   if (origins.some((source, index) => source !== index)) {
-    sources.set(viewPath, origins);
+    gathered.sources.set(z.core.toDotPath(viewPath), origins);
   }
   return { kept, sites };
 }
@@ -141,22 +229,26 @@ export interface SeparatedRemovals {
   /** Each removal's site (`labels[0]._remove`): list sections in LIST_SECTIONS order, each list as written, nested lists under their entry. */
   readonly sites: readonly string[];
 
+  /** Each `_remove` on an entry no list keys, which stays in `rest`: by its path over `rest` as validation spells one (`rulesets.entries[0].bypass_actors[0]._remove`), the list sections first; `asWritten` is its way back. */
+  readonly unkeyed: readonly string[];
+
   /** A validation issue over `rest`, its leading path renumbered to the document as written: a removal dropped from the list shifts every entry after it, so `labels[0].color` in `rest` is the reader's `labels[1].color`. */
   readonly asWritten: (issue: string) => string;
 }
 
 /**
- * Every list section partitioned by the walk the fold uses. A single document has no lower layer to remove from, so
+ * Every section walked once: a list section partitioned by the walk the fold uses, the rest of the document searched
+ * for the markers that walk does not reach. A single document has no lower layer to remove from, so
  * validateSettingsDoc refuses the sites and judges `rest`; a layer of a fold reaches it as its standalone view,
  * `rest` minus the `_layering` directives. Either way what is said about `rest` is said of the document as written.
  */
 export function separateRemovals(doc: unknown): SeparatedRemovals {
   if (!isPlainObject(doc)) {
-    return { rest: doc, sites: [], asWritten: (issue) => issue };
+    return { rest: doc, sites: [], unkeyed: [], asWritten: (issue) => issue };
   }
   const rest: Record<string, unknown> = { ...doc };
   const sites: string[] = [];
-  const sources: SourceIndices = new Map();
+  const gathered: Gathered = { sources: new Map(), unkeyed: [], clean: new WeakSet() };
   for (const key of LIST_SECTIONS) {
     const form = nestedForm(doc[key]);
     if (form === null) {
@@ -166,11 +258,16 @@ export function separateRemovals(doc: unknown): SeparatedRemovals {
       form.entries,
       listLayering(key),
       key,
-      form.knobs === null ? key : `${key}.entries`,
-      sources,
+      form.knobs === null ? [key] : [key, "entries"],
+      gathered,
     );
     sites.push(...below.sites);
     rest[key] = form.knobs === null ? below.kept : { ...form.knobs, entries: below.kept };
   }
-  return { rest, sites, asWritten: renumbering(sources) };
+
+  for (const key of MAPPING_SECTIONS) {
+    gatherUnkeyed(doc[key], [key], gathered, new Set());
+  }
+
+  return { rest, sites, unkeyed: gathered.unkeyed, asWritten: renumbering(gathered.sources) };
 }
