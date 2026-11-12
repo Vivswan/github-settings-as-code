@@ -5,11 +5,13 @@ import { Decrypter, generateX25519Identity, identityToRecipient } from "age-encr
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { run } from "../../src/action/run.js";
 import type { Layering } from "../../src/engine/layers.js";
+import { REDACTED_NOTE, WITHHELD_REPORT_NOTICE } from "../../src/flows/redact.js";
 import { type Io, maskRegistry } from "../../src/io.js";
 import { describeProblem, type Problem } from "../../src/problem.js";
 import type { ArtifactUploader } from "../../src/report/artifact-report.js";
 import { REPORT_HEADING } from "../../src/report/composer.js";
 import { ISSUE_TITLE, MARKER_LABEL } from "../../src/report/issue-report.js";
+import { expectSealed } from "../io/leak-sweep.js";
 import { MockApi } from "../mock-api.js";
 import { ROOT } from "../root.js";
 import { withTempDir } from "../temp-dir.js";
@@ -259,6 +261,18 @@ describe("run in multi-repo mode (env glue)", () => {
     }
   });
 
+  /** The whole public summary of a hidden single-repo target whose one section, repository, ended `status`. */
+  const sealedSummary = (status: string) =>
+    [
+      "## github-settings-as-code (check)",
+      "",
+      `${status} - ${REDACTED_NOTE}`,
+      "",
+      "| Section | Status | Detail |",
+      "|---|---|---|",
+      `| repository | ${status} | hidden (private repository) |`,
+    ].join("\n");
+
   // Check mode; a drifting row has has_wiki: true against single.yml's false.
   const listPath = (state: string) =>
     `GET /repos/o/priv/issues?state=${state}&labels=${MARKER_LABEL}&per_page=100&page=1`;
@@ -357,17 +371,30 @@ describe("run in multi-repo mode (env glue)", () => {
         expect(payload.state).toBe(writes.length > 0 ? "open" : undefined);
         body = payload.body ?? "";
       }
-      if (writes.length > 0 || channel === "artifact") {
-        expect(body).toContain("# settings-as-code private report: o/priv");
-        expect(body).toContain("## Transcript");
-      }
       // The public surfaces stay redacted throughout; only the mask registration names the slug. The summary keeps
       // the per-section statuses and hides the live values behind the placeholder note.
       expect(captured).toContain("mask: o/priv");
-      const publicText = [...captured.filter((line) => !line.startsWith("mask: ")), ...summaries];
-      expect(publicText.join("\n")).not.toContain("o/priv");
-      expect(publicText.join("\n")).not.toContain("has_wiki");
       const summary = summaries.join("\n");
+      if (writes.length > 0 || channel === "artifact") {
+        expect(body).toContain("# settings-as-code private report: o/priv");
+        expect(body).toContain("## Transcript");
+        const hidden = {
+          log: captured.filter((line) => !line.startsWith("mask: ")).join("\n"),
+          summary,
+          outputs: Object.values(outputs).join("\n"),
+        };
+        expectSealed(hidden, { "private report": body }, ["o/priv", "has_wiki"]);
+      } else {
+        // A healthy target delivers no report and prints neither needle even in the clear, so a sweep would have no
+        // control: its surfaces are pinned whole, and text equal to these lines cannot name the slug or a key.
+        expect(captured).toEqual([
+          "mask: o/priv",
+          "report: nothing to deliver for private repository #1",
+          "result: clean",
+        ]);
+        expect(summaries).toEqual([sealedSummary(":white_check_mark: clean")]);
+        expect(outputs).toEqual({ result: "clean", "skipped-sections": "", "repos-result": "{}" });
+      }
       expect(summary).toContain("details hidden");
       expect(summary).toContain("| Section | Status | Detail |");
       expect(summary).toContain(drifts ? ":warning: drift" : ":white_check_mark: clean");
@@ -388,9 +415,16 @@ describe("run in multi-repo mode (env glue)", () => {
     expect(await run({ api: api, io: testIo })).toBe(1); // drift exits 1
     expect(api.calls.some((c) => c.path.includes("/issues"))).toBe(false);
     expect(api.calls.some((c) => c.method === "POST" && c.path.endsWith("/labels"))).toBe(false);
-    const withheld = captured.find((line) => line.includes("visibility could not be verified"));
-    expect(withheld).toStartWith("notice: private repository #1: ");
-    expect(captured.join("\n").replace("mask: o/maybe", "")).not.toContain("o/maybe");
+    // Pinned whole, every surface: no report is delivered and the same run in the clear prints the slug nowhere, so
+    // a sweep for it would have no control. Text equal to these lines cannot name o/maybe.
+    expect(captured).toEqual([
+      "mask: o/maybe",
+      `notice: private repository #1: ${WITHHELD_REPORT_NOTICE}`,
+      `warning: private repository #1: drift - repository. ${REDACTED_NOTE}`,
+      "result: drift",
+    ]);
+    expect(summaries).toEqual([sealedSummary(":warning: drift")]);
+    expect(outputs).toEqual({ result: "drift", "skipped-sections": "", "repos-result": "{}" });
   });
 });
 

@@ -18,6 +18,7 @@ import {
   REDACTED_NOTE,
   redactedChannel,
   type TargetChannel,
+  WITHHELD_REPORT_NOTICE,
 } from "../../src/flows/redact.js";
 import type { Io } from "../../src/io.js";
 import { isPrivate } from "../../src/private.js";
@@ -27,6 +28,7 @@ import { REPORT_HEADING } from "../../src/report/composer.js";
 import type { PrivateReportChannel } from "../../src/report/delivery.js";
 import { ISSUE_TITLE, MARKER_LABEL } from "../../src/report/issue-report.js";
 import { captureIo } from "../io/capture.js";
+import { expectSealed, publicSurfaces } from "../io/leak-sweep.js";
 import { MockApi } from "../mock-api.js";
 
 /** A MockApi whose requests land in the same event log as the port's lines. */
@@ -251,11 +253,11 @@ describe("withDelivery", () => {
           },
           async () => outcome("clean"),
         );
-        expect(events).toHaveLength(1);
-        expect(events[0]).toStartWith(
-          "annotate notice: private repository #2: visibility could not be verified",
-        );
-        expect(events.join("\n")).not.toContain("o/maybe");
+        // Pinned whole: a line equal to this slug-free text cannot name o/maybe. A sweep for the slug would have no
+        // control, since this target closed in the clear prints no line at all.
+        expect(events).toEqual([
+          `annotate notice: private repository #2: ${WITHHELD_REPORT_NOTICE}`,
+        ]);
       },
     );
     const patch = api.calls.find((c) => c.method === "PATCH");
@@ -376,28 +378,35 @@ describe("concludeRun", () => {
   });
 
   test("multi: repos-result keys a redacted target by its placeholder, skipped sections dedupe across targets, worst-of decides", () => {
-    const { io, events, outputs } = captureIo();
-    const hidden = redactedChannel(io, "o/priv", "private repository #1");
-    const shown = publicChannel(io, "o/pub", true);
-    const code = concludeRun(io, {
-      kind: "multi",
-      mode: "apply",
-      targets: [
-        {
-          source: "remote",
-          result: "partial",
-          display: shown.display,
-          detail: shown.close({ outcomes: [applied, skipped] }),
-        },
-        {
-          source: "central",
-          result: "partial",
-          display: hidden.display,
-          detail: hidden.close({ outcomes: [skipped], note: "note with o/priv inside" }),
-        },
-      ],
-    });
-    expect(code).toBe(0);
+    /** The two targets concluded, o/priv closed through the channel `open` gives it. */
+    const concluded = (open: (io: Io) => TargetChannel) => {
+      const recorded = captureIo();
+      const { io } = recorded;
+      const priv = open(io);
+      const shown = publicChannel(io, "o/pub", true);
+      const code = concludeRun(io, {
+        kind: "multi",
+        mode: "apply",
+        targets: [
+          {
+            source: "remote",
+            result: "partial",
+            display: shown.display,
+            detail: shown.close({ outcomes: [applied, skipped] }),
+          },
+          {
+            source: "central",
+            result: "partial",
+            display: priv.display,
+            detail: priv.close({ outcomes: [skipped], note: "note with o/priv inside" }),
+          },
+        ],
+      });
+      expect(code).toBe(0);
+      return recorded;
+    };
+    const hidden = concluded((io) => redactedChannel(io, "o/priv", "private repository #1"));
+    const { events, outputs } = hidden;
     expect(JSON.parse(outputs["repos-result"] ?? "")).toEqual({
       "o/pub": { result: "partial", source: "remote", "skipped-sections": ["rulesets"] },
       "private repository #1": {
@@ -418,7 +427,9 @@ describe("concludeRun", () => {
       "output repos-result",
       "log: result: partial",
     ]);
-    expect(events.join("\n")).not.toContain("o/priv");
+    // Swept over the whole summary: the event log keeps its first line only.
+    const clear = concluded((io) => publicChannel(io, "o/priv", true));
+    expectSealed(publicSurfaces(hidden), publicSurfaces(clear), ["o/priv"]);
   });
 
   test("failRun: the problem's line, then the conclusion a failed target gets, with no summary", () => {

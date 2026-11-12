@@ -14,6 +14,7 @@ import {
   mayHoldMarkerLabel,
 } from "../../src/report/issue-report.js";
 import type { SettingsFile } from "../../src/schema.js";
+import { expectSealed } from "../io/leak-sweep.js";
 import { MockApi, type Route } from "../mock-api.js";
 
 /** The private target every case reports on. */
@@ -357,7 +358,7 @@ describe("deliverIssueReport", () => {
     });
   });
 
-  test("a request with no HTTP answer is the same slug-free warning, on the label create and on the lookup", async () => {
+  test("a request with no HTTP answer is the same warning on the label create and on the lookup, free of the slug the client's own line carried", async () => {
     // The client's line embeds the request path (the private slug), so the warning names neither.
     const failed = `POST /repos/o/private-repo/labels failed: socket hang up. Check network connectivity from the runner to https://api.test, then re-run`;
     const warning =
@@ -378,7 +379,9 @@ describe("deliverIssueReport", () => {
     });
     const result = await deliverIssueReport(onLookup, SLUG, "body", true, "always");
     expect(result).toEqual({ landed: NOTHING_LANDED, warning });
-    expect(JSON.stringify(result)).not.toContain("o/private-repo");
+    expectSealed({ result: JSON.stringify(result) }, { "the client's line": failed }, [
+      "o/private-repo",
+    ]);
   });
 
   test("a client that throws instead of answering never escapes; the warning stays slug-free", async () => {
@@ -470,14 +473,26 @@ describe("deliverIssueReport under mode: on-failure", () => {
       },
       /^could not deliver the private report \(HTTP 403\)\. To fix, grant "Issues"/,
     ],
-  ])("a failing %s is a safe warning, never the slug", async (_failing, routes, warning) => {
-    const result = await deliverIssueReport(new MockApi(routes), SLUG, "body", false, "on-failure");
-    expect(result).toEqual({
-      landed: NOTHING_LANDED,
-      warning: expect.stringMatching(warning),
-    });
-    expect(JSON.stringify(result)).not.toContain("o/private-repo");
-  });
+  ])(
+    "a failing %s is a safe warning, never the slug GitHub's message carried",
+    async (_failing, routes, warning) => {
+      const result = await deliverIssueReport(
+        new MockApi(routes),
+        SLUG,
+        "body",
+        false,
+        "on-failure",
+      );
+      expect(result).toEqual({
+        landed: NOTHING_LANDED,
+        warning: expect.stringMatching(warning),
+      });
+      const messages = Object.values(routes).map((route) => route.error?.message ?? "");
+      expectSealed({ result: JSON.stringify(result) }, { "mocked errors": messages.join("\n") }, [
+        "o/private-repo",
+      ]);
+    },
+  );
 
   test("needs-attention requests are identical to always, on both upsert paths", async () => {
     const sequence = async (routes: Record<string, Route>, mode: IssueReportMode) => {

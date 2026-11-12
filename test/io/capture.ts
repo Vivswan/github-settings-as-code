@@ -1,7 +1,8 @@
 /**
  * The one Io capture fake for tests: every channel lands in its own list and in one ordered event log
  * (`annotate <level>: <message>`, `log: <line>`, `summary: <first line>`, `output <name>=<value>`,
- * `mask: <value>`). Nothing is redacted (collectingIo does that); the debug trace is dropped.
+ * `mask: <value>`). Nothing is redacted (collectingIo does that); the debug trace is dropped. The event log keeps a
+ * summary's first line only, so a test reading a whole summary reads `summaries`.
  */
 
 import { type Io, maskRegistry, type OutputName } from "../../src/io.js";
@@ -15,6 +16,9 @@ export interface CapturedIo {
 
   /** Every log line, in order. */
   logs: string[];
+
+  /** Every summary block, whole, in call order. */
+  summaries: string[];
 
   /** The last value set per output name. */
   outputs: Partial<Record<OutputName, string>>;
@@ -31,11 +35,12 @@ export function captureIo(onMask: (value: string) => void = () => {}): CapturedI
   const captured: Omit<CapturedIo, "io"> = {
     annotations: [],
     logs: [],
+    summaries: [],
     outputs: {},
     masks: [],
     events: [],
   };
-  const { annotations, logs, outputs, masks, events } = captured;
+  const { annotations, logs, summaries, outputs, masks, events } = captured;
   return {
     io: {
       annotate: (level, message) => {
@@ -49,7 +54,9 @@ export function captureIo(onMask: (value: string) => void = () => {}): CapturedI
       debug: () => {},
       summary: (markdown) => {
         // Coerced first: a test forcing an opaque Private box through the port must not crash the fake.
-        events.push(`summary: ${`${markdown}`.split("\n")[0]}`);
+        const text = `${markdown}`;
+        summaries.push(text);
+        events.push(`summary: ${text.split("\n")[0]}`);
       },
       output: (name, value) => {
         outputs[name] = value;

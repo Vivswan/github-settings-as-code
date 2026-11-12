@@ -11,6 +11,7 @@ import {
   SECRET_RESPONSE_WITHHELD,
 } from "../../src/github/api-error.js";
 import { IMMEDIATE_SCHEDULER, TIMERS_SCHEDULER } from "../../src/github/scheduler.js";
+import { expectSealed } from "../io/leak-sweep.js";
 import { api, restoreFetch, stubFetch, traceIo } from "./stub.js";
 
 afterEach(restoreFetch);
@@ -216,30 +217,39 @@ describe("tryGraphql tracing and redaction", () => {
     expect(trace).toContain('variables: {"owner":"o","repo":"publicrepo"}');
   });
 
-  test("a masked slug collapses the WHOLE line (variables carry live state)", async () => {
+  /** The trace lines of one RepoToggles read, with `mask` registered first; no mask is the control of a leak sweep. */
+  async function tracedRead(
+    variables: Record<string, string>,
+    slug: string,
+    mask?: string,
+  ): Promise<string[]> {
     const dbg = traceIo();
-    dbg.io.mask("o/secretrepo");
+    if (mask !== undefined) {
+      dbg.io.mask(mask);
+    }
     stubFetch([() => graphql({ data: {} })]);
-    await api(dbg.io).tryGraphql(
-      READ_OP,
-      { owner: "o", repo: "secretrepo", pattern: "CANARY-live" },
-      "o/secretrepo",
-    );
+    await api(dbg.io).tryGraphql(READ_OP, variables, slug);
+    return dbg.lines;
+  }
+
+  test("a masked slug collapses the WHOLE line (variables carry live state)", async () => {
+    const variables = { owner: "o", repo: "secretrepo", pattern: "CANARY-live" };
+    const lines = await tracedRead(variables, "o/secretrepo", "o/secretrepo");
     // The client's line is the constant alone; the other lines are octokit's own timed chatter, so they are not pinned.
-    expect(dbg.lines).toContain("<redacted>");
-    const trace = dbg.lines.join("\n");
-    expect(trace).not.toContain("RepoToggles");
-    expect(trace).not.toContain("secretrepo");
-    expect(trace).not.toContain("CANARY-live");
+    expect(lines).toContain("<redacted>");
+    const clear = await tracedRead(variables, "o/secretrepo");
+    expectSealed({ trace: lines.join("\n") }, { trace: clear.join("\n") }, [
+      "RepoToggles",
+      "secretrepo",
+      "CANARY-live",
+    ]);
   });
 
   test("a masked slug inside the rendered line fails closed even when the slug param differs", async () => {
-    const dbg = traceIo();
-    dbg.io.mask("acme/private");
-    stubFetch([() => graphql({ data: {} })]);
-    await api(dbg.io).tryGraphql(READ_OP, { owner: "o", repo: "r", source: "acme/private" }, "o/r");
-    const trace = dbg.lines.join("\n");
-    expect(trace).not.toContain("acme/private");
+    const variables = { owner: "o", repo: "r", source: "acme/private" };
+    const lines = await tracedRead(variables, "o/r", "acme/private");
+    const clear = await tracedRead(variables, "o/r");
+    expectSealed({ trace: lines.join("\n") }, { trace: clear.join("\n") }, ["acme/private"]);
   });
 
   test("extensions.warnings surface through the trace, never as errors", async () => {
@@ -324,28 +334,35 @@ describe("tryGraphql tracing and redaction", () => {
 
   test("a mask registered while the request is in flight redacts the trace and withholds the errors[] content", async () => {
     // Redaction is read at emission, never snapshotted at request start: the stub masks the slug after the request went out.
-    const t = traceIo();
-    stubFetch([
-      () => {
-        t.io.mask("o/secretrepo");
-        return graphql({
-          data: null,
-          errors: [{ type: "NOT_FOUND", message: "no repository named 'o/secretrepo'" }],
-        });
-      },
-    ]);
-    const result = await api(t.io).tryGraphql(
-      READ_OP,
-      { owner: "o", repo: "secretrepo", pattern: "CANARY-live" },
-      "o/secretrepo",
-    );
-    expect(t.lines).toContain("<redacted>");
-    const trace = t.lines.join("\n");
-    expect(trace).not.toContain("secretrepo");
-    expect(trace).not.toContain("CANARY-live");
-    expect(trace).not.toContain("RepoToggles");
+    const sent = async (maskInFlight: boolean) => {
+      const t = traceIo();
+      stubFetch([
+        () => {
+          if (maskInFlight) {
+            t.io.mask("o/secretrepo");
+          }
+          return graphql({
+            data: null,
+            errors: [{ type: "NOT_FOUND", message: "no repository named 'o/secretrepo'" }],
+          });
+        },
+      ]);
+      const result = await api(t.io).tryGraphql(
+        READ_OP,
+        { owner: "o", repo: "secretrepo", pattern: "CANARY-live" },
+        "o/secretrepo",
+      );
+      return { lines: t.lines, result };
+    };
+    const { lines, result } = await sent(true);
+    expect(lines).toContain("<redacted>");
     expect("error" in result ? result.error.message : undefined).toBe(REDACTED_RESPONSE_WITHHELD);
-    expect(JSON.stringify(result)).not.toContain("secretrepo");
+    const clear = await sent(false);
+    expectSealed(
+      { trace: lines.join("\n"), result: JSON.stringify(result) },
+      { trace: clear.lines.join("\n"), result: JSON.stringify(clear.result) },
+      ["secretrepo", "CANARY-live", "RepoToggles"],
+    );
   });
 
   test("a mask registered while the request is in flight withholds the transport-failure reason", async () => {

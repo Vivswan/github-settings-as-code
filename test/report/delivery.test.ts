@@ -25,6 +25,7 @@ import { MARKER_LABEL_CONFIG } from "../../src/report/issue-report.js";
 import type { SettingsFile } from "../../src/schema.js";
 import type { LabelConfig } from "../../src/sections/labels/schema.js";
 import { captureIo } from "../io/capture.js";
+import { expectSealed } from "../io/leak-sweep.js";
 import { MockApi } from "../mock-api.js";
 
 const MARKER = "settings-as-code-report";
@@ -85,6 +86,11 @@ function issueApi(overrides: ConstructorParameters<typeof MockApi>[0] = {}): Moc
 
 function open(api: MockApi, channel: PrivateReportChannel, io: Io, uploader?: ArtifactUploader) {
   return openReportChannel(api, channel, META, "", io, uploader);
+}
+
+/** Every request the channel sent, one per line: what it was handed, the control side of a leak sweep. */
+function requestLog(api: MockApi): string {
+  return api.calls.map((c) => `${c.method} ${c.path}`).join("\n");
 }
 
 /** The writes that touched the report issue itself; the marker-label ensure-create is not one of them. */
@@ -157,7 +163,7 @@ describe("the issue channel", () => {
     expect(existed.logs).toEqual(["report: updated issue #7 in private repository #1"]);
   });
 
-  test("a write that landed before a later failure is announced before the warning, so no landed write is silent", async () => {
+  test("a write that landed before a later failure is announced before the warning, so no landed write is silent; neither line names the slug the requests carried", async () => {
     // The issue is created (#9), then the healthy close PATCH is denied.
     const api = issueApi({
       [`GET /repos/o/priv/issues?state=all&labels=${MARKER}&per_page=100&page=1`]: { data: [] },
@@ -177,15 +183,12 @@ describe("the issue channel", () => {
         /^annotate warning: private repository #1: could not deliver the private report \(HTTP 403\)/,
       ),
     ]);
-    expect(events.join("\n")).not.toContain("o/priv");
+    expectSealed({ log: events.join("\n") }, { "request log": requestLog(api) }, ["o/priv"]);
   });
 
-  test("a delivery failure is one warning naming the placeholder and the HTTP status, never the slug or message", async () => {
-    const api = issueApi({
-      "PATCH /repos/o/priv/issues/7": {
-        error: { status: 403, message: "Resource not accessible", body: "" },
-      },
-    });
+  test("a delivery failure is one warning naming the placeholder and the HTTP status, never the slug its requests carried or the message GitHub answered", async () => {
+    const denied = { status: 403, message: "Resource not accessible", body: "" };
+    const api = issueApi({ "PATCH /repos/o/priv/issues/7": { error: denied } });
     const { io, annotations, logs } = captureIo();
     await open(api, "issue", io)?.deliver(target("o/priv", 1));
     expect(annotations).toEqual([
@@ -193,8 +196,11 @@ describe("the issue channel", () => {
         /^warning: private repository #1: could not deliver the private report \(HTTP 403\)\. To fix, grant "Issues"/,
       ),
     ]);
-    expect(annotations[0]).not.toContain("o/priv");
-    expect(annotations[0]).not.toContain("Resource not accessible");
+    expectSealed(
+      { warning: annotations[0] ?? "" },
+      { "request log": requestLog(api), "mocked answer": denied.message },
+      ["o/priv", "Resource not accessible"],
+    );
     // Nothing landed, so nothing is announced as delivered.
     expect(logs).toEqual([]);
   });

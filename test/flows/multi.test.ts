@@ -20,6 +20,7 @@ import { ADMIN_OWNER, ADMIN_SLUG } from "../e2e/constants.js";
 import { startMockServer } from "../e2e/mock/server.js";
 import { scenario } from "../e2e/mock/server-test-support.js";
 import { captureIo } from "../io/capture.js";
+import { expectSealed, publicSurfaces } from "../io/leak-sweep.js";
 import { MockApi, type Route } from "../mock-api.js";
 import { withTempDir } from "../temp-dir.js";
 
@@ -409,7 +410,8 @@ describe("runMulti redaction (private-repos: redact)", () => {
 
   test("a private target is masked before the first emission, and never leaks its slug", async () => {
     const api = mixApi();
-    const { io, annotations, logs, masks, events } = captureIo();
+    const hidden = captureIo();
+    const { io, annotations, logs, masks, events } = hidden;
     const targets = await runTargets(
       api,
       cfg({ reposInput: "o/pub, o/priv", mode: "check", privateRepos: "redact" }),
@@ -421,15 +423,22 @@ describe("runMulti redaction (private-repos: redact)", () => {
     expect(firstMask).toBeGreaterThanOrEqual(0);
     expect(firstMask).toBeLessThan(firstEmit);
     const all = [...annotations, ...logs].join("\n");
-    expect(all).not.toContain("o/priv");
-    expect(all).not.toContain("SECRET-live-desc");
-    expect(all).not.toContain("SECRET-want-desc");
     expect(annotations.some((a) => a.includes("private repository #1"))).toBe(true);
     expect(all).toContain("o/pub");
     const priv = targets.find((t) => t.display === "private repository #1");
     expect(redacted(priv)).toBe(true);
     expect(priv?.result).toBe("drift");
-    expect(JSON.stringify(targets)).not.toContain("o/priv");
+    const shown = captureIo();
+    const shownTargets = await runTargets(
+      mixApi(),
+      cfg({ reposInput: "o/pub, o/priv", mode: "check", privateRepos: "show" }),
+      shown.io,
+    );
+    expectSealed(
+      { ...publicSurfaces(hidden), "returned targets": JSON.stringify(targets) },
+      { ...publicSurfaces(shown), "returned targets": JSON.stringify(shownTargets) },
+      ["o/priv", "SECRET-live-desc", "SECRET-want-desc"],
+    );
   });
 
   test("show is byte-identical to today: no mask, raw slug and live values surface", async () => {
@@ -507,23 +516,29 @@ describe("runMulti redaction (private-repos: redact)", () => {
       ["o/pub", false],
       ["private repository #1", true],
     ]);
-    expect(annotations.join("\n")).not.toContain("o/priv");
+    // Pinned whole: two clean targets print no line, hidden or shown, so a sweep for the slug would have no control.
+    expect(annotations).toEqual([]);
   });
 
   test("a probe error fails closed: an unknown-visibility target is redacted", async () => {
     // The repo probe 404s, so visibility is unknown and redacted; the contents read then 404s too, so the failure line must stay generic.
     const api = new MockApi({});
-    const { io, annotations } = captureIo();
+    const hidden = captureIo();
     const targets = await runTargets(
       api,
       cfg({ reposInput: "o/mystery", privateRepos: "redact" }),
-      io,
+      hidden.io,
     );
     expect(redacted(targets[0])).toBe(true);
     expect(targets[0]?.display).toBe("private repository #1");
-    const all = annotations.join("\n");
-    expect(all).not.toContain("o/mystery");
-    expect(all).toContain("private repository #1: failed");
+    expect(hidden.annotations.join("\n")).toContain("private repository #1: failed");
+    const shown = captureIo();
+    await runTargets(
+      new MockApi({}),
+      cfg({ reposInput: "o/mystery", privateRepos: "show" }),
+      shown.io,
+    );
+    expectSealed(publicSurfaces(hidden), publicSurfaces(shown), ["o/mystery"]);
   });
 
   test("placeholders number private targets 1-based in target order", async () => {
@@ -555,22 +570,27 @@ describe("runMulti redaction (private-repos: redact)", () => {
       // The repos-dir file holds the slug in its path, so the notice's central half must read generically under redaction too.
       mkdirSync(join(dir, "o"));
       writeFileSync(join(dir, "o", "priv.yml"), "repository:\n  has_wiki: false\n");
-      const api = new MockApi({
-        "GET /repos/o/priv": { data: { has_wiki: false, private: true } },
-      });
-      const { io, annotations } = captureIo();
-      const targets = await runTargets(
-        api,
-        cfg({ reposDir: dir, reposInput: "o/priv", mode: "check", privateRepos: "redact" }),
-        io,
-      );
+      const recorded = async (privateRepos: "redact" | "show") => {
+        const api = new MockApi({
+          "GET /repos/o/priv": { data: { has_wiki: false, private: true } },
+        });
+        const raw = captureIo();
+        const targets = await runTargets(
+          api,
+          cfg({ reposDir: dir, reposInput: "o/priv", mode: "check", privateRepos }),
+          raw.io,
+        );
+        return { raw, targets };
+      };
+      const { raw: hidden, targets } = await recorded("redact");
       expect(targets.map((t) => [t.display, t.source, redacted(t)])).toEqual([
         ["private repository #1", "central", true],
       ]);
-      expect(annotations).toContain(
+      expect(hidden.annotations).toContain(
         'notice: private repository #1: using the central file a repos-dir file; the entry for the same repository from the "repos" input is ignored',
       );
-      expect(annotations.join("\n")).not.toContain("o/priv");
+      const shown = await recorded("show");
+      expectSealed(publicSurfaces(hidden), publicSurfaces(shown.raw), ["o/priv"]);
     }));
 });
 
@@ -849,11 +869,11 @@ describe("runMulti private-report: issue wiring", () => {
     const api = reportApi({
       "GET /repos/o/priv/contents/.github/settings.yml": { data: "repository: [oops\n" },
     });
-    const { io, annotations } = captureIo();
+    const hidden = captureIo();
     const targets = await runTargets(
       api,
       cfg({ reposInput: "o/priv", mode: "apply", privateRepos: "redact", privateReport: "issue" }),
-      io,
+      hidden.io,
     );
     expect(targets[0]?.result).toBe("failed");
     const patch = api.calls.find(
@@ -863,7 +883,9 @@ describe("runMulti private-report: issue wiring", () => {
     expect(patch).toBeDefined();
     expect(payload.state).toBe("open");
     expect(String(payload.body ?? "")).toContain("failed");
-    expect(annotations.join("\n")).not.toContain("oops");
+    expectSealed(publicSurfaces(hidden), { "private report": String(payload.body ?? "") }, [
+      "oops",
+    ]);
   });
 });
 
@@ -889,7 +911,7 @@ describe("runMulti private-report: issue-on-failure wiring", () => {
       [allListPath("o/priv")]: { data: [issue7] },
       "PATCH /repos/o/priv/issues/7": { data: { number: 7 } },
     });
-    const { io, annotations, logs } = captureIo();
+    const hidden = captureIo();
     const targets = await runTargets(
       api,
       cfg({
@@ -899,7 +921,7 @@ describe("runMulti private-report: issue-on-failure wiring", () => {
         privateReport: "issue-on-failure",
         selfSlug: "admin/repo",
       }),
-      io,
+      hidden.io,
     );
     expect(targets[0]?.result).toBe("drift");
     const patch = api.calls.find(
@@ -908,9 +930,10 @@ describe("runMulti private-report: issue-on-failure wiring", () => {
     const payload = (patch?.payload ?? {}) as { body?: unknown; state?: unknown };
     expect(String(payload.body ?? "")).toContain("CANARY-live");
     expect(payload.state).toBe("open");
-    const publicText = [...annotations, ...logs].join("\n");
-    expect(publicText).not.toContain("CANARY-live");
-    expect(publicText).not.toContain("o/priv");
+    expectSealed(publicSurfaces(hidden), { "private report": String(payload.body ?? "") }, [
+      "CANARY-live",
+      "o/priv",
+    ]);
   });
 
   test("a clean target performs zero issue/label writes and adds no note", async () => {
@@ -1121,26 +1144,32 @@ describe("runMulti private-report: the marker read of a hidden target", () => {
       }),
     );
     try {
-      const trace: string[] = [];
-      const io = { ...captureIo().io, debug: (line: string) => trace.push(line) };
-      const api = new GitHubApi({
-        token: "t",
-        io,
-        baseUrl: handle.url,
-        apiVersion: DEFAULT_API_VERSION,
+      const traced = async (redaction: Partial<Parameters<typeof runMulti>[1]>) => {
+        const trace: string[] = [];
+        const io = { ...captureIo().io, debug: (line: string) => trace.push(line) };
+        const api = new GitHubApi({
+          token: "t",
+          io,
+          baseUrl: handle.url,
+          apiVersion: DEFAULT_API_VERSION,
+        });
+        const targets = await runTargets(
+          api,
+          cfg({
+            reposInput: slug,
+            adminOwner: ADMIN_OWNER,
+            mode: "check",
+            selfSlug: ADMIN_SLUG,
+            ...redaction,
+          }),
+          io,
+        );
+        return { trace, targets };
+      };
+      const { trace, targets } = await traced({
+        privateRepos: "redact",
+        privateReport: "issue-on-failure",
       });
-      const targets = await runTargets(
-        api,
-        cfg({
-          reposInput: slug,
-          adminOwner: ADMIN_OWNER,
-          mode: "check",
-          privateRepos: "redact",
-          privateReport: "issue-on-failure",
-          selfSlug: ADMIN_SLUG,
-        }),
-        io,
-      );
       expect(targets.map((t) => [t.display, t.result])).toEqual([
         ["private repository #1", "clean"],
       ]);
@@ -1152,7 +1181,8 @@ describe("runMulti private-report: the marker read of a hidden target", () => {
       expect(trace.filter((line) => line.includes("-> 404"))).toEqual([
         expect.stringMatching(/^GET <redacted> -> 404 \(\d+ms\)$/),
       ]);
-      expect(trace.join("\n")).not.toContain("svc-hidden");
+      const clear = await traced({ privateRepos: "show" });
+      expectSealed({ trace: trace.join("\n") }, { trace: clear.trace.join("\n") }, ["svc-hidden"]);
     } finally {
       await handle.stop();
     }
