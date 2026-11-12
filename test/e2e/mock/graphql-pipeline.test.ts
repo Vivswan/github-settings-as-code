@@ -32,12 +32,16 @@ function scenario(overrides: Partial<Scenario> = {}): Scenario {
 }
 
 // Fixture operations, tagged onto the real repository section so the permission gate resolves its real requirement (administration).
+// Each is a document GitHub's schema accepts, named as its declaration names it: the pipeline refuses any other before a barrier runs.
+
+function repoIdQuery(name: string) {
+  return `query ${name}($owner: String!, $repo: String!) { repository(owner: $owner, name: $repo) { id } }` as const;
+}
 
 const G_READ: TaggedGraphqlOp = {
   name: "RepoToggles",
   kind: "read",
-  query:
-    "query RepoToggles($owner: String!, $repo: String!) { repository(owner: $owner, name: $repo) { id } }",
+  query: repoIdQuery("RepoToggles"),
   outcomes: { ok: "the toggles" },
   section: "repository",
   role: "gToggles",
@@ -45,12 +49,14 @@ const G_READ: TaggedGraphqlOp = {
 const G_READ_TOLERANT: TaggedGraphqlOp = {
   ...G_READ,
   name: "RepoTogglesProbe",
+  query: repoIdQuery("RepoTogglesProbe"),
   role: "gProbe",
   outcomes: { ok: "the toggles", NOT_FOUND: "the feature is off" },
 };
 const G_READ_EXECUTION: TaggedGraphqlOp = {
   ...G_READ,
   name: "RepoNodeId",
+  query: repoIdQuery("RepoNodeId"),
   role: "gNodeId",
   phase: "execution",
 };
@@ -58,10 +64,17 @@ const G_WRITE: TaggedGraphqlOp = {
   name: "UpdateToggles",
   kind: "write",
   query:
-    "mutation UpdateToggles($repositoryId: ID!, $hasWiki: Boolean!) { updateRepository(input: {repositoryId: $repositoryId, hasWiki: $hasWiki}) { clientMutationId } }",
+    "mutation UpdateToggles($repositoryId: ID!, $hasWikiEnabled: Boolean) { updateRepository(input: {repositoryId: $repositoryId, hasWikiEnabled: $hasWikiEnabled}) { clientMutationId } }",
   outcomes: { ok: "toggles updated" },
   section: "repository",
   role: "gUpdate",
+};
+const G_WRITE_NESTED: TaggedGraphqlOp = {
+  ...G_WRITE,
+  name: "UpdateTogglesInput",
+  query:
+    "mutation UpdateTogglesInput($input: UpdateRepositoryInput!) { updateRepository(input: $input) { clientMutationId } }",
+  role: "gUpdateInput",
 };
 
 const OPS: Readonly<Record<string, TaggedGraphqlOp>> = {
@@ -69,6 +82,7 @@ const OPS: Readonly<Record<string, TaggedGraphqlOp>> = {
   "repository.gProbe": G_READ_TOLERANT,
   "repository.gNodeId": G_READ_EXECUTION,
   "repository.gUpdate": G_WRITE,
+  "repository.gUpdateInput": G_WRITE_NESTED,
 };
 
 const HANDLERS: Record<string, GraphqlHandler> = {
@@ -80,7 +94,11 @@ const HANDLERS: Record<string, GraphqlHandler> = {
     data: { repository: { id: String(state.repo.node_id) } },
   }),
   "repository.gUpdate": ({ state, variables }) => {
-    state.repo.has_wiki = variables.hasWiki === true;
+    state.repo.has_wiki = variables.hasWikiEnabled === true;
+    return { data: { updateRepository: { clientMutationId: null } } };
+  },
+  "repository.gUpdateInput": ({ state, variables }) => {
+    state.repo.has_wiki = (variables.input as Json).hasWikiEnabled === true;
     return { data: { updateRepository: { clientMutationId: null } } };
   },
 };
@@ -171,7 +189,7 @@ describe("GraphQL dispatch and logging", () => {
     const opts = options(scenario());
     const state = opts.working.mode === "single" ? opts.working.state : undefined;
     const id = mintNodeId("repo", ADMIN_SLUG, "");
-    const result = dispatch(G_WRITE, { repositoryId: id, hasWiki: true }, opts);
+    const result = dispatch(G_WRITE, { repositoryId: id, hasWikiEnabled: true }, opts);
     expect(result.violation).toBeUndefined();
     expect(state?.repo.has_wiki).toBe(true);
     expect(isWriteRequest(result.log)).toBe(true);
@@ -191,10 +209,32 @@ describe("GraphQL dispatch and logging", () => {
       violation: ['node ids of "acme/other"', `serves only "${ADMIN_SLUG}"`],
     },
   ])("a single-mode mutation $name is a violation", ({ repositoryId, violation }) => {
-    const result = dispatch(G_WRITE, { repositoryId, hasWiki: true }, options(scenario()));
+    const result = dispatch(G_WRITE, { repositoryId, hasWikiEnabled: true }, options(scenario()));
     for (const fragment of violation) {
       expect(result.violation).toContain(fragment);
     }
+  });
+
+  test("control: the handler receives the variables exactly as sent, an undeclared one included", () => {
+    // The schema check coerces to judge, never to rewrite: the coerced variables would lack `stray`.
+    let received: unknown;
+    const handlers: Record<string, GraphqlHandler> = {
+      ...HANDLERS,
+      "repository.gToggles": ({ state, variables }) => {
+        received = variables;
+        return { data: { repository: { id: String(state.repo.node_id) } } };
+      },
+    };
+    const body = gqlBody(G_READ, { owner: OWNER, repo: REPO, stray: 1 });
+    const result = handleGraphqlRequest(
+      { method: "POST", body },
+      options(scenario()),
+      baseLog(body),
+      OPS,
+      handlers,
+    );
+    expect(result.violation).toBeUndefined();
+    expect(received).toEqual({ owner: OWNER, repo: REPO, stray: 1 });
   });
 
   test("sectionForRequest attributes a /graphql request through its body", () => {
@@ -202,6 +242,34 @@ describe("GraphQL dispatch and logging", () => {
     // fallback stays intact.
     expect(sectionForRequest("POST", "/graphql", gqlBody(G_READ, {}))).toBeNull();
     expect(sectionForRequest("GET", `/repos/${OWNER}/${REPO}`)).toBe("repository");
+  });
+});
+
+describe("GraphQL schema check", () => {
+  test("a request GitHub's schema refuses is answered ahead of the check-mode, fault, and permission barriers", () => {
+    // Behind any of the three, a check-mode, faulted, or denied request would hide variables GitHub refuses.
+    const opts = options(
+      scenario({ inputs: { mode: "check" }, token_permissions: { administration: "none" } }),
+      { faults: [{ key: "repository.gUpdate", kind: "server_error" }] },
+    );
+    const result = dispatch(
+      G_WRITE,
+      { repositoryId: mintNodeId("repo", ADMIN_SLUG, ""), hasWikiEnabled: "yes" },
+      opts,
+    );
+    expect(result.response).toEqual({
+      status: 200,
+      body: {
+        errors: [
+          expect.objectContaining({
+            message: expect.stringContaining("Boolean cannot represent a non boolean value"),
+          }),
+        ],
+      },
+    });
+    expect(result.violation).toStartWith("GraphQL UpdateToggles is refused by GitHub's schema: ");
+    expect(opts.faultCounts.size).toBe(0);
+    expect(result.log.deniedBy).toBeUndefined();
   });
 });
 
@@ -316,7 +384,7 @@ describe("GraphQL denial barrier (shared with REST)", () => {
     const wikiBefore = state.repo.has_wiki;
     const write = dispatch(
       G_WRITE,
-      { repositoryId: mintNodeId("repo", ADMIN_SLUG, ""), hasWiki: !wikiBefore },
+      { repositoryId: mintNodeId("repo", ADMIN_SLUG, ""), hasWikiEnabled: !wikiBefore },
       opts,
     );
     expect(write.violation).toBeUndefined();
@@ -343,7 +411,7 @@ describe("GraphQL denial barrier (shared with REST)", () => {
     const wikiBefore = state.repo.has_wiki;
     const write = dispatch(
       G_WRITE,
-      { repositoryId: mintNodeId("repo", ADMIN_SLUG, ""), hasWiki: !wikiBefore },
+      { repositoryId: mintNodeId("repo", ADMIN_SLUG, ""), hasWikiEnabled: !wikiBefore },
       opts,
     );
     expect(write.violation).toBeUndefined();
@@ -377,8 +445,22 @@ describe("GraphQL multi-repo slug resolution", () => {
     expect(denied.log.deniedBy).toBe("administration");
   });
 
-  test("a read without $owner/$repo variables is a violation", () => {
-    const result = dispatch(G_READ, { owner: "acme" }, multiOptions(scenario()));
+  test("a read addressing no repository is a violation", () => {
+    // A read that omits a $repo its document declares is GitHub's own refusal; this one declares no address at all.
+    const unaddressed: TaggedGraphqlOp = {
+      ...G_READ,
+      name: "ViewerLogin",
+      query: "query ViewerLogin { viewer { login } }",
+      role: "gViewer",
+    };
+    const body = gqlBody(unaddressed, {});
+    const result = handleGraphqlRequest(
+      { method: "POST", body },
+      multiOptions(scenario()),
+      baseLog(body),
+      { ...OPS, "repository.gViewer": unaddressed },
+      HANDLERS,
+    );
     expect(result.violation).toContain("carries no $owner/$repo variables");
   });
 
@@ -388,7 +470,8 @@ describe("GraphQL multi-repo slug resolution", () => {
     // The fixture starts every repo at has_wiki: true, so flipping alpha to
     // false is what proves the write landed on alpha and ONLY alpha.
     const id = mintNodeId("repo", "acme/alpha", "");
-    const result = dispatch(G_WRITE, { input: { repositoryId: id }, hasWiki: false }, opts);
+    const input = { repositoryId: id, hasWikiEnabled: false };
+    const result = dispatch(G_WRITE_NESTED, { input }, opts);
     expect(result.violation).toBeUndefined();
     expect(multi?.repos.get("acme/alpha")?.repo.has_wiki).toBe(false);
     expect(multi?.repos.get("acme/beta")?.repo.has_wiki).toBe(true);
