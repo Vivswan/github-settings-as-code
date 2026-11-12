@@ -93,7 +93,7 @@ In apply mode, the action resolves every declared reference up front, after the 
 
 Every resolved plaintext is registered with the runner's secret masker before it is used anywhere. That is on top of the protections the client always applies to secret-bearing requests:
 
-- **Debug traces** show `***` in place of the value.
+- **Debug traces** withhold the whole payload of a request that carries a resolved secret: `payload: <withheld: the request carried a resolved secret>`.
 - **The response body of a failed secret-carrying request** is withheld wholesale, since an error body can echo the rejected value.
 
 The value itself never appears in a drift line, a change line, a note, or a report.

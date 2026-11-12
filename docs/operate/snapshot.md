@@ -77,7 +77,7 @@ Byte-identical output holds for the lists left as written while GitHub returns e
 
 ## The `$NAME` placeholders
 
-GitHub never returns a secret's value, so the file cannot hold one. The snapshot writes a reference instead, and the note tells you which variable to export before an apply or check runs the file:
+GitHub never returns a secret's value, so the file cannot hold one. The snapshot writes a reference instead, and the note tells you which variable to export before an apply runs the file:
 
 | What GitHub hides                                                                             | What the file holds                                                                                 | What to export                                                                                                                                                                                                                                                                       |
 | --------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -86,7 +86,7 @@ GitHub never returns a secret's value, so the file cannot hold one. The snapshot
 | A webhook's `config.secret`, one per hook                                                     | `secret: $SECRET_WEBHOOK_601`                                                                       | `SECRET_WEBHOOK_<id>`, the hook's own id, so the reference survives a reordering                                                                                                                                                                                                     |
 | An environment secret named `DEPLOY_TOKEN` in the `production` environment                    | `value: $SECRET_ENVIRONMENT_PRODUCTION_DEPLOY_TOKEN`                                                | `SECRET_ENVIRONMENT_<ENV>_<NAME>`, the environment name uppercased with every other character folded to `_`, so same-named secrets in two environments get two variables; two names the fold collapses (`prod-eu`, `prod_eu`) share one, and a header line names the entries to edit |
 
-Wire them the way the [secrets guide](../reference/secrets-and-vaults.md) describes: an `env:` block on the apply step, fed from GitHub Secrets or a vault action. A reference that is not exported fails the run that reads the file, naming the variable.
+Wire them the way the [secrets guide](../reference/secrets-and-vaults.md) describes: an `env:` block on the apply step, fed from GitHub Secrets or a vault action. A reference that is not exported fails the apply that reads the file, naming the variable. A check never reads the environment, so it needs none of them.
 
 ## Backup, then check
 
@@ -110,8 +110,6 @@ jobs:
           mode: snapshot
           snapshot-file: backup/settings.yml
       - uses: Vivswan/github-settings-as-code@v3 # x-release-please-major
-        env:
-          SECRET_ACTIONS_DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
         with:
           token: ${{ secrets.ADMIN_TOKEN }}
           mode: check
@@ -150,7 +148,7 @@ A snapshot is written so that applying it changes nothing and checking it reads 
 | A branch only a wildcard rule protects                                                                        | GitHub serves the rule's protection under the branch's name; a literal entry would create a second rule on apply                            | The wildcard entry alone (`release/*`), never the branch                                                                                                   |
 | `collaborators`: the repository owner, email invitations                                                      | The owner's access is implicit, and an email invitation has no username to declare                                                          | No entry and a note each; apply leaves both alone                                                                                                          |
 | `collaborators`: expired invitations                                                                          | A declared one would be cancelled and re-sent; an undeclared one is cancelled under the delete default the file carries                     | No entry and a note per invitation; add the entry to re-invite                                                                                             |
-| A custom role named `push` or `pull`                                                                          | In a settings file those words mean the `write` and `read` roles, so no declaration plans as the live role                                  | `collaborators` fails and the file is written without it; `teams` omits the team with a note                                                               |
+| A custom role named `push` or `pull`                                                                          | In a settings file those words mean the `write` and `read` roles, so no declaration plans as the live role                                  | `collaborators` fails, so the target fails and no file is written; `teams` omits the team with a note                                                      |
 | `teams`: access granted at the organization or enterprise level                                               | Declaring it would grant direct repository access on top                                                                                    | No entry and a note; apply leaves it alone                                                                                                                 |
 
 A section that exists but holds nothing live (no milestones, no Pages site) is omitted with a header line, never written as an empty list: an empty list under `_undeclared: delete` would delete on apply.

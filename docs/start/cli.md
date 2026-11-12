@@ -10,19 +10,21 @@ start managing a repository from its live settings (`init`), validate a settings
 
 ## Install
 
-Run it without installing, with npm or bun. Until the first stable release publishes the package, ask for the `next` tag:
+Run it without installing, with npm or bun:
 
 ```bash
-npx @vivswan/github-settings-as-code@next --help
-bunx @vivswan/github-settings-as-code@next --help
+npx @vivswan/github-settings-as-code --help
+bunx @vivswan/github-settings-as-code --help
 ```
 
 Or install it and call `gsac`:
 
 ```bash
-npm install --global @vivswan/github-settings-as-code@next
+npm install --global @vivswan/github-settings-as-code
 gsac --help
 ```
+
+Each form fetches the released version. Append `@next` to the package name for the pre-release of `main`; [Versioning](../reference/library.md#versioning) says which build that is.
 
 The package needs Node 22.14 or newer; `bunx` fetches it the same way and honors the executable's `node` shebang. The command reads its token from `--token` or the `GITHUB_TOKEN` environment variable; the same fine-grained PAT the action uses (see [Token permissions](../reference/permissions.md)).
 
