@@ -15,6 +15,12 @@ coverage:
         Undeclared milestones are kept by default and surfaced as notes, because deleting a milestone
         DETACHES it from every issue carrying it - the wrapped `_undeclared: delete` form opts into
         exactly that.
+      - >-
+        A declared key the GET reports and neither the POST nor the PATCH takes (url, html_url,
+        labels_url, id, node_id, number, creator, open_issues, closed_issues, created_at, updated_at,
+        closed_at) draws a note in check and in apply, whatever its value and with or without a live
+        milestone: a value that differs from the live one drifts on every check, and its update
+        re-runs on every apply.
       - Snapshot reads every milestone, open and closed, back as entries under the keep default.
 schema:
   SettingsFile.milestones: >-

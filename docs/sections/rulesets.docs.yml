@@ -27,6 +27,11 @@ coverage:
         A live value the entry omits is drift, and apply refuses the PUT (the [replace-write
         rule](semantics.md)).
       - >-
+        A declared key the GET reports and neither the POST nor the PUT takes (id, source_type,
+        source, current_user_can_bypass, node_id, _links, created_at, updated_at) draws a note in
+        check and in apply, whatever its value and with or without a live ruleset: a value that
+        differs from the live one drifts on every check, and its update re-runs on every apply.
+      - >-
         Undeclared rulesets are kept by default (notes only); the wrapped `_undeclared: delete` form
         deletes them.
       - Org-sourced rulesets are outside the section (source_type other than Repository).

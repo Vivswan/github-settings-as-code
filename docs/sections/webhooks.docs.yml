@@ -27,6 +27,15 @@ coverage:
         "********", so check mode verifies everything except the secret (a cannot-verify note) and
         apply re-sends the declared secret every run so rotations propagate.
       - >-
+        A declared entry key the GET reports and neither the POST nor the general PATCH takes (type,
+        id, updated_at, created_at, url, test_url, ping_url, deliveries_url, last_response) draws a
+        note in check and in apply, whatever its value and with or without a live hook: on a live hook
+        a value that differs from the live one drifts on every check, and its update re-runs on every
+        apply.
+      - >-
+        With no live hook such a key rides the create POST, whose body takes no key outside its own,
+        so GitHub answers 422 and the section fails beside the note.
+      - >-
         insecure_ssl compares number and string spellings as equal (GitHub stores strings); events
         compare as a set.
       - >-

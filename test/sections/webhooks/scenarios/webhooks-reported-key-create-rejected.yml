@@ -1,0 +1,26 @@
+# A webhook entry declares `id`, a value GitHub reports, and no live hook has
+# its url. The create POST takes no key outside its own, so GitHub answers it
+# with a 422 and the section fails. The note still prints beside the failure
+# and names the key to remove. With a live hook the same entry rides the
+# general PATCH, which ignores the key, and that apply completes.
+name: webhooks-reported-key-create-rejected
+settings:
+  webhooks:
+    - config:
+        url: https://ci.example.com/hook
+        content_type: json
+      id: 5
+live_state:
+  hooks: []
+inputs:
+  mode: apply
+expect:
+  exit_code: 1
+  result: failed
+  outcomes:
+    webhooks: failed
+  mutations:
+    - POST /repos/{repo}/hooks
+  stdout_contains:
+    - '::notice::webhooks[https://ci.example.com/hook]: "id" is a value GitHub reports, not a setting it accepts (the GET returns it, neither the POST nor the PATCH takes it), so a declared value that differs from the live one drifts on every check and its update re-runs on every apply without converging; remove it from the settings file'
+    - '"id" is not a permitted key'

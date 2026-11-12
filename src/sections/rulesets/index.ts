@@ -244,6 +244,16 @@ export const rulesetsSection = listSection({
             remedy: "grant Administration write",
           },
         ],
+  reported: {
+    id: true,
+    source_type: true,
+    source: true,
+    current_user_can_bypass: true,
+    node_id: true,
+    _links: true,
+    created_at: true,
+    updated_at: true,
+  },
   prose: { undeclaredAction: "DELETE it" },
   layering: { nested: { rules: keyedBy("type") } },
 });
