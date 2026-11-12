@@ -13,14 +13,16 @@ Three writes carry the whole object, the ruleset PUT, the environment PUT, and t
 
 Check reports each one as drift naming the key (`bypass_actors`, `conditions.ref_name.exclude`, `reviewers`, `required_status_checks`).
 
-For a ruleset or an environment, apply refuses that write: the entry fails with the same line and nothing of it is written, until the file says which is meant.
+For a ruleset or an environment, apply refuses that write: the entry fails with the same line and nothing of it is written, until the file says which is meant. The section stops at that entry: the operations its plan still held are never sent, the run lists each as `not attempted` under a warning that counts them, and the other sections still run.
 
 Declare the key to keep the value, or declare it empty (`bypass_actors: []`, `reviewers: []`, `deployment_branch_policy: null`) to remove it on purpose. Empty values (an empty list, a zero, false, null) never count.
 A ruleset's `target` and `enforcement` never count either: an entry without them is parsed with `branch` and `active`, so a live value under either key is compared, not reported as omitted.
 
 In a ruleset the sweep stops inside a rule (its `parameters` included) and inside a bypass actor: each is a mapping that passes unknown keys through. A live `require_code_owner_review: true` beside a declared `pull_request` rule reads clean, and the PUT resets it.
 
-Apply is convergent: re-running preserves the declared state (some sections diff first and skip converged writes, others send idempotent full-payload writes), and a check right after an apply reports clean.
+Apply is convergent: re-running preserves the declared state (some sections diff first and skip converged writes, others send idempotent full-payload writes), and a check right after an apply reports clean wherever that apply reached the declared state.
+
+Three examples of a declared state no apply reaches, because its section has no write for it: a `workflows` entry whose file does not exist (`so apply skips it`), a `pull_request_creation_cap` where the cap endpoint answers 405 (`apply cannot set it`), and a `pages` section with neither `build_type` nor `source` and no live site (`so apply changes nothing`). Apply prints the line as a note, the next check as drift.
 
 ## What the parse refuses
 
@@ -34,6 +36,8 @@ The field GitHub reports but cannot set is the case that motivated the rule:
 | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Before | The GET reports `has_downloads`, the PATCH cannot set it, so every check saw drift and every apply re-sent it without converging.                        |
 | Now    | The parse refuses the file with an error naming `repository.has_downloads` and telling you to remove the key. No section reads or writes the repository. |
+
+Three passthrough entry shapes name such a key in a note instead, until the next major refuses it there: an environment entry, one of its `deployment_branch_policies` patterns, and a variable (`actions_variables`, `agents_variables`, an environment's `variables`). The key still parses and rides the write, and the note, drawn from the declaration alone in check and in apply, says to remove it.
 
 An unknown key has two fates, decided by the shape it sits in:
 

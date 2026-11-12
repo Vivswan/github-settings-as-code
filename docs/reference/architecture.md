@@ -131,7 +131,9 @@ In a multi-repo run the `defaults-file` document is validated before target reso
 - Two document-wide walks: a value that is not plain YAML data (a tagged mapping, a list with a hole) and a passthrough number that is not finite.
   Their proof is the `ProvedPlain` brand on the walk's output, the only input the `ValidatedSettings` mint accepts.
 
-Every issue the phase finds lands in one list: unknown directives, unknown sections, a single document's `_remove` markers, then each section's issues in apply order. Zero section requests reach that repository, and the run exits 1; in a multi-repo run only that target fails. One downgrade: an unknown section outside a non-empty `sections` allowlist is a warning, so an older action can run a file written for a newer one.
+Every issue the phase finds lands in one list: unknown directives, unknown sections, a single document's `_remove` markers, then each section's issues in apply order. Zero section requests reach that repository, and the run exits 1; in a multi-repo run only that target fails.
+
+Three downgrades, each a warning in place of an issue. An unknown section outside a non-empty `sections` allowlist, so an older action can run a file written for a newer one. And, in a document that otherwise validates, until the next major refuses them: a single document's top-level `_layering` outside its three values, and a `_remove` on an entry of a list that is not keyed.
 
 Two limits. A shape's own issues are capped at five per section, with a count of the rest; and a section's hook runs once its shape parsed, so a shape error in an entry can hide a duplicate until it is fixed.
 
@@ -168,7 +170,7 @@ flowchart TD
   whole --> out
 ```
 
-The fold is a cascade: the higher layer's value wins at every depth, and `null` is a value. Every list section is keyed by what its planner matches entries by, so a fleet `Bug` and a repository `bug` are one label. Three directives say how a keyed list meets the list below it; here the highest layer, in a run with `layering: replace`:
+The fold is a cascade: the higher layer's value wins at every depth (a label's `name` aside: [the rename rule](../operate/layering.md#the-rules)), and `null` is a value. Every list section is keyed by what its planner matches entries by, so a fleet `Bug` and a repository `bug` are one label. Three directives say how a keyed list meets the list below it; here the highest layer, in a run with `layering: replace`:
 
 ```yaml layer
 _layering: shallow # every list section of this file, unless it says otherwise

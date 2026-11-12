@@ -476,6 +476,7 @@ The side-by-side comparison with the Probot Settings app lives in the migration 
 - GET/POST /repos/{owner}/{repo}/actions/variables and PATCH/DELETE /repos/{owner}/{repo}/actions/variables/{name}: plain-text repository variables, upserted by name.
 - Names are case-insensitive (GitHub stores them uppercased regardless of how they are entered), so matching and duplicate rejection compare uppercased names.
 - Values read back in full, which is what makes exact check-mode diffing possible; undeclared variables are DELETED by default, kept as notes under the wrapped `_undeclared: keep` form.
+- A declared created_at or updated_at, which the GET reports and neither write takes, is named by a note in check and in apply, whatever the live variable holds.
 - The list endpoint caps per_page at 30 (not the usual 100), which the page loop honors so a large inventory is never truncated.
 - Secrets are write-only material and deliberately NOT this section: they live in the `actions_secrets` section above.
 - Snapshot reads the variables back as name and value entries under the delete default.
@@ -485,6 +486,7 @@ The side-by-side comparison with the Probot Settings app lives in the migration 
 - GET/POST /repos/{owner}/{repo}/agents/variables and PATCH/DELETE /repos/{owner}/{repo}/agents/variables/{name}: same upsert-by-uppercase-name semantics, exact check-mode diffing, and 30-item per_page cap as `actions_variables`, over the Copilot agents variable store.
 - GET .../agents/organization-variables is the read-only org-inherited view, out of scope.
 - Undeclared variables are DELETED by default, kept as notes under the wrapped `_undeclared: keep` form.
+- A declared created_at or updated_at, which the GET reports and neither write takes, is named by a note in check and in apply, whatever the live variable holds.
 - CAVEAT: GitHub auto-migrated values from the older `copilot` Actions environment into this store, so a repository can hold agents variables nobody created here - run `mode: check` first (it lists them as deletion drift) before the first apply, or declare `_undeclared: keep`.
 - Snapshot reads the variables back as name and value entries under the delete default.
 

@@ -343,7 +343,7 @@ The rendered file is exactly what apply runs, so it is worth knowing its shape:
   An environment's variables, secrets, deployment branch policies, and deployment protection rules are in their `{_undeclared, entries}` wrapper form too, each policy resolved; its reviewers take no knob and stay as declared.
 - No `_layering` and no top-level `_undeclared` anywhere: both directives are consumed before the file is written, and YAML comments do not survive the fold.
 - Every `null` that won its key is there, at the top level (`pages: null`, `interaction_limits: null`) or below: the fold reads no `null` as a marker, and validation refused every one a key does not admit.
-- No `_remove` anywhere: each removal was consumed at its own layer's step, along with the entry it named.
+- No `_remove` on a keyed entry: each removal was consumed at its own layer's step, along with the entry it named. One on an entry of a list that is not keyed removes nothing and stays, a field [under a warning](#four-knobs).
 - Every layer was validated on its own before the fold, and the result is validated again before it is written.
 
 ## The two-step workflow
@@ -440,7 +440,7 @@ That guarantee covers the fold alone. The per-layer validation prints the same m
 - A `branches` control declared as a scalar where a mapping belongs, on a literal branch and a wildcard entry alike, naming the key and nothing of the value:
   `branches[0].protection.required_status_checks: required_status_checks must be a mapping of its keys (strict, then contexts or checks), or null to turn the requirement off`.
 - A YAML syntax error, quoting the offending source line with a caret under the column; an unresolved alias names the alias instead, and an anchor whose name carries whitespace or a control character prints that name after `Anchor must not contain whitespace or control characters:`.
-- A YAML alias inside the node its own anchor opens (`repository: &loop {self: *loop}`), which would parse to a cyclic object, names the anchor when the file is read, before any validation: `alias *loop refers back into the node its anchor &loop opens (a YAML alias cycle), which no settings document can carry. An alias may only reference a completed node: write the value out again, or move the anchor to a sibling`.
+- A YAML alias cycle (`repository: &loop {self: *loop}`), which would parse to a cyclic object, names the anchor when the file is read, before any validation: `alias *loop refers back into the node its anchor &loop opens (a YAML alias cycle), which no settings document can carry. An alias may only reference a completed node: write the value out again, or move the anchor to a sibling`.
 - A YAML parser warning (an unresolved tag, an unknown directive, an ambiguous anchor, a collection used as a key) prints nothing: the parser runs with its warnings off, so such a document parses silently to the same object it always did, and only a parse failure reaches the log, printing what the bullet above describes.
 
 A render-mode log can therefore show your settings file's structure and, through these messages, a value from it: treat it like any log that prints a parse error for a file the runner holds.

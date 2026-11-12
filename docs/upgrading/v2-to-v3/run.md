@@ -196,7 +196,7 @@ v3 apply    rulesets[main-protection]: not applied - the update would remove a l
 
 A file that was stable can now drift: an environment entry declaring `variables` alone, beside a live wait timer, reports the timer in check and refuses the PUT in apply. Declare `wait_timer` to keep it, or `wait_timer: 0` to remove it; an omitted object whose key accepts null offers `<key>: null` (`deployment_branch_policy: null`).
 
-The sweep stops where the entry shape stops naming keys (`rules[].parameters`, the fields inside a bypass actor): a live non-default rule parameter beside a declared rule still reads clean and the PUT resets it, as before. The [semantics page](../../reference/semantics.md) states the boundary.
+The sweep stops where the entry shape stops naming keys (inside a ruleset's rule, its `parameters` included, and inside a bypass actor): a live non-default rule parameter beside a declared rule still reads clean and the PUT resets it, as before. The [semantics page](../../reference/semantics.md) states the boundary.
 
 ## 34. File-only checks run before the first write
 
