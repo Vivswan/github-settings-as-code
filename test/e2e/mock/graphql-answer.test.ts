@@ -5,21 +5,34 @@
  */
 
 import { describe, expect, spyOn, test } from "bun:test";
-import { rmSync } from "node:fs";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { stringify as stringifyYaml } from "yaml";
+import { parseRepoSlug } from "../../../src/discovery/targets.js";
+import { SectionSelection } from "../../../src/engine/section-selection.js";
+import { runSingle } from "../../../src/flows/single.js";
+import { GitHubApi } from "../../../src/github/api.js";
+import { silentIo } from "../../../src/io.js";
 import { allGraphqlOps, type SectionGraphqlKey } from "../../../src/sections/registry.js";
-import { ADMIN_OWNER as OWNER, ADMIN_REPO as REPO, VIOLATION_PREFIX } from "../constants.js";
-import { runScenario, type ScenarioReport } from "../runner/runner.js";
-import type { Scenario } from "../scenario.js";
+import { withTempDir } from "../../temp-dir.js";
+import {
+  ADMIN_SLUG,
+  E2E_TOKEN,
+  ADMIN_OWNER as OWNER,
+  ADMIN_REPO as REPO,
+  VIOLATION_PREFIX,
+} from "../constants.js";
 import { type LoggedRequest, newPipelineRunState, type PipelineResult } from "./contract.js";
 import { isWriteRequest } from "./dispatch.js";
 import { completedGraphqlAnswer } from "./graphql-answer.js";
 import { type AcceptedGraphqlRequest, acceptedGraphqlRequest } from "./graphql-request.js";
 import { GRAPHQL_HANDLERS } from "./handlers.js";
 import { handleGraphqlRequest } from "./routes.js";
-import { scenario } from "./server-test-support.js";
+import { mockServerLifecycle, scenario } from "./server-test-support.js";
 import { buildState, completeRule, ruleWireNode } from "./state.js";
 import type { Json } from "./support.js";
 
+const start = mockServerLifecycle();
 const OPS = allGraphqlOps();
 const READ = { owner: OWNER, repo: REPO };
 const NULL_ADMIN_ENFORCED =
@@ -74,13 +87,39 @@ function served(key: SectionGraphqlKey, variables: Json, data: Json): PipelineRe
   );
 }
 
-/** One scenario run of the real bundle; the artifact directory a failing run dumps is removed, the report carries what the assertions read. */
-async function scenarioRun(run: Scenario): Promise<ScenarioReport> {
-  const report = await runScenario(run);
-  if (report.artifactDir !== undefined) {
-    rmSync(report.artifactDir, { recursive: true, force: true });
-  }
-  return report;
+/**
+ * One check run of the product's own code, in-process and over the wire, on a settings file that matches the mock's one
+ * wildcard rule. Returns the run's result and the violations the mock recorded, the list the runner fails a scenario on.
+ */
+async function checkRun(dir: string): Promise<{ result: string; violations: string[] }> {
+  const mock = await start(
+    scenario({
+      live_state: { branch_protection_rules: [{ pattern: "release/*", isAdminEnforced: true }] },
+    }),
+  );
+  const settingsFile = join(dir, "settings.yml");
+  const settings = { branches: [{ name: "release/*", protection: { enforce_admins: true } }] };
+  writeFileSync(settingsFile, stringifyYaml(settings));
+  const io = silentIo();
+  const client = new GitHubApi({ token: E2E_TOKEN, io, baseUrl: mock.url, retryBaseMs: 1 });
+
+  const outcome = await runSingle(
+    client,
+    {
+      mode: "check",
+      repo: parseRepoSlug(ADMIN_SLUG)._unsafeUnwrap(),
+      settingsFile,
+      selfSlug: ADMIN_SLUG,
+      privateRepos: "redact",
+      onMissingPermission: "fail",
+      sections: SectionSelection.ALL,
+      privateReport: "none",
+      reportPublicKey: "",
+      runUrl: "",
+    },
+    io,
+  );
+  return { result: outcome._unsafeUnwrap().result, violations: mock.violations };
 }
 
 describe("data GitHub's schema could never serialize does not complete", () => {
@@ -187,21 +226,17 @@ describe("data that does not complete fails the run", () => {
     expect(isWriteRequest(result.log)).toBe(false);
   });
 
-  test("inside a scenario run: a handler answering a null in a Boolean! field fails the scenario with the violation, and the handlers as they are pass it (the control)", async () => {
-    const wildcardRule = scenario({
-      name: "graphql-answer-in-run",
-      settings: { branches: [{ name: "release/*", protection: { enforce_admins: true } }] },
-      live_state: { branch_protection_rules: [{ pattern: "release/*", isAdminEnforced: true }] },
-    });
-    const control = await scenarioRun(wildcardRule);
-    expect(control.failures).toEqual([]);
+  test("inside a run of the product: a handler answering a null in a Boolean! field fails the run and records the violation, and the handlers as they are run clean (the control)", () =>
+    withTempDir("graphql-answer-run-", async (dir) => {
+      expect(await checkRun(dir)).toEqual({ result: "clean", violations: [] });
 
-    using mutant = spyOn(GRAPHQL_HANDLERS, "branches.rulesQuery").mockImplementation(() => ({
-      data: rulesData(ruleNode({ isAdminEnforced: null })),
+      using mutant = spyOn(GRAPHQL_HANDLERS, "branches.rulesQuery").mockImplementation(() => ({
+        data: rulesData(ruleNode({ isAdminEnforced: null })),
+      }));
+      const refused = await checkRun(dir);
+      expect(mutant).toHaveBeenCalled();
+      expect(refused.result).toBe("failed");
+      // Every rules read of the run earns the line; how many the product makes is not this test's subject.
+      expect(new Set(refused.violations)).toEqual(new Set([NULL_ADMIN_ENFORCED_VIOLATION]));
     }));
-    const report = await scenarioRun(wildcardRule);
-    expect(mutant).toHaveBeenCalled();
-    // Every rules read of the run earns the line; how many the product makes is not this test's subject.
-    expect(report.failures[0]).toStartWith(`mock violations:\n  ${NULL_ADMIN_ENFORCED_VIOLATION}`);
-  }, 120_000);
 });
