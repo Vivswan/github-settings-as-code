@@ -1,10 +1,8 @@
 # The issue-on-failure channel on a HEALTHY run: total quiet. svc-quiet is
-# private, converged, and has never needed a report, so neither its settings
-# file nor the repository holds the marker label. The channel makes two reads:
-# the marker label (404, so the label is not declared and the check stays
-# clean) and the open-issue lookup by the marker label, which finds none. It
-# writes NOTHING: no marker-label ensure-create, no issue create or update, no
-# fallback title scan. A healthy repo never sees a report issue or its label.
+# private and converged and never needed a report, so neither its settings nor
+# the repository holds the marker label. The channel reads the marker label
+# (404: not declared, the check stays clean) and looks up an open report
+# issue, finds none, and writes NOTHING: no label, no issue, no title scan.
 name: multi-report-issue-on-failure-healthy-quiet
 settings: {}
 inputs:

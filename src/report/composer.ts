@@ -1,6 +1,6 @@
 /**
  * One markdown document per redacted target, rendered identically for both channels, except that a channel whose
- * document has a length limit gets it cut to fit. Pure, and structurally typed on purpose, so it depends on no
+ * document has a length limit gets its lines cut to fit. Pure, and structurally typed on purpose, so it depends on no
  * action-layer types.
  */
 
@@ -126,10 +126,10 @@ function render(input: ReportInput, kept: Kept, limit: number): string {
 }
 
 /**
- * The lines that fit under `limit`, spent in the order a reader loses least: each section's detail first, one line per
- * section in turn so a long section never starves a short one, then the transcript from its start, which repeats the
- * detail. A list ends at its first line that does not fit. Every line is paid for against the document that carries
- * none, whose marks are the longest a cut renders, so the result is over the limit only when that document is.
+ * The lines the document carries under `limit`: each section's detail first, one line per section in turn, then the
+ * transcript from its start, each list ending at its first line that does not fit. These lines never push the
+ * document past the limit. The rest (heading, run table, section statuses, marks) is never cut, so a limit below it
+ * is not met.
  */
 function fit(input: ReportInput, limit: number): Kept {
   const kept: Kept = { detail: input.outcomes.map(() => 0), transcript: 0 };
@@ -163,12 +163,20 @@ function fit(input: ReportInput, limit: number): Kept {
   return kept;
 }
 
-/** `limit` is the most characters the document may hold: over it, lines are left out and the document counts them. */
-export function composeReport(input: ReportInput, limit = Number.POSITIVE_INFINITY): string {
-  const all: Kept = {
+function everyLine(input: ReportInput): Kept {
+  return {
     detail: input.outcomes.map((outcome) => outcome.detail.length),
     transcript: input.transcript.length,
   };
-  const whole = render(input, all, limit);
+}
+
+/** The whole report, whatever its length. */
+export function composeReport(input: ReportInput): string {
+  return render(input, everyLine(input), Number.POSITIVE_INFINITY);
+}
+
+/** The report for a channel whose document holds `limit` characters: over it, lines are left out and the document counts them. */
+export function composeReportWithin(input: ReportInput, limit: number): string {
+  const whole = render(input, everyLine(input), limit);
   return whole.length <= limit ? whole : render(input, fit(input, limit), limit);
 }

@@ -20,7 +20,7 @@ import { revealPrivate } from "../private-open.js";
 import { describeProblem } from "../problem.js";
 import type { SectionKey, SettingsFile } from "../schema.js";
 import { type ArtifactUploader, deliverArtifactReport } from "./artifact-report.js";
-import { composeReport } from "./composer.js";
+import { composeReport, composeReportWithin, type ReportInput } from "./composer.js";
 import {
   deliverIssueReport,
   ISSUE_BODY_LIMIT,
@@ -213,25 +213,19 @@ export function openReportChannel(
   }
 }
 
-/**
- * The seal opens in full here: the readers are the target repository's own, or hold the artifact's decryption key.
- * `limit` is the most characters the channel's document may hold; the report is cut to it and says so.
- */
-function composeTargetReport(meta: ReportRunMeta, target: ReportTarget, limit?: number): string {
+/** The seal opens in full here: the readers are the target repository's own, or hold the artifact's decryption key. */
+function reportOf(meta: ReportRunMeta, target: ReportTarget): ReportInput {
   const { slug, outcomes, transcript } = revealPrivate(target.detail);
-  return composeReport(
-    {
-      target: slug,
-      adminRepo: meta.adminRepo,
-      runUrl: meta.runUrl,
-      mode: meta.mode,
-      result: target.conclusion.result,
-      timestamp: meta.timestamp,
-      outcomes: outcomes.map((o) => ({ key: o.key, status: o.status, detail: o.detail })),
-      transcript,
-    },
-    limit,
-  );
+  return {
+    target: slug,
+    adminRepo: meta.adminRepo,
+    runUrl: meta.runUrl,
+    mode: meta.mode,
+    result: target.conclusion.result,
+    timestamp: meta.timestamp,
+    outcomes: outcomes.map((o) => ({ key: o.key, status: o.status, detail: o.detail })),
+    transcript,
+  };
 }
 
 function issueChannel(
@@ -252,7 +246,7 @@ function issueChannel(
         );
         return;
       }
-      const body = composeTargetReport(meta, target, ISSUE_BODY_LIMIT);
+      const body = composeReportWithin(reportOf(meta, target), ISSUE_BODY_LIMIT);
       const delivery = await deliverIssueReport(
         api,
         target.repo,
@@ -301,7 +295,7 @@ function artifactChannel(
   return {
     declaresMarker: async () => false,
     async deliver(target) {
-      reports.push(`<!-- ${target.display} -->\n\n${composeTargetReport(meta, target)}`);
+      reports.push(`<!-- ${target.display} -->\n\n${composeReport(reportOf(meta, target))}`);
     },
     async flush() {
       if (reports.length === 0) {

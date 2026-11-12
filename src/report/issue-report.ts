@@ -62,11 +62,7 @@ export const ISSUE_REPORT_ENDPOINTS = {
   },
 } as const satisfies Record<string, EndpointDecl>;
 
-/**
- * The most characters GitHub keeps in an issue body. Its REST reference states no limit; the number is the one in the
- * 422 a longer body earns on every attempt: "body is too long (maximum is 65536 characters)". A string's length counts
- * UTF-16 units, never fewer than GitHub's characters, so a body within this length always fits.
- */
+/** GitHub's cap on an issue body, from the 422 a longer one earns every time ("body is too long (maximum is 65536 characters)"); its REST reference states none. A string's length in UTF-16 units is never below that count. */
 export const ISSUE_BODY_LIMIT = 65536;
 
 export type IssueReportMode = "always" | "on-failure";
@@ -445,10 +441,10 @@ export async function deliverIssueReport(
 }
 
 /**
- * False only when the target answers 404 for the marker label, asked before the target's settings are applied.
- * Declaring the marker on such a target would make the labels section create it, and a check call a repository no
- * report ever touched drifted. Every other answer may hide a label, a failed read included, and declares it, so an
- * unread label is never deleted. Nothing is printed: the delivery that follows reports a failure that persists.
+ * False only when the target answers 404 for the marker label. Declared there, the label would be created by the
+ * labels section, and a check would call a repository no report ever touched drifted. Any other answer, a failed read
+ * included, declares it without printing anything, so no label is deleted unread and the delivery that follows
+ * reports a failure that persists.
  */
 export async function mayHoldMarkerLabel(api: GitHubClient, repo: RepoRef): Promise<boolean> {
   try {

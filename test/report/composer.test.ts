@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { composeReport, type ReportInput } from "../../src/report/composer.js";
+import { composeReport, composeReportWithin, type ReportInput } from "../../src/report/composer.js";
 
 function input(overrides: Partial<ReportInput> = {}): ReportInput {
   return {
@@ -94,7 +94,7 @@ describe("composeReport", () => {
   });
 });
 
-describe("composeReport under a length limit", () => {
+describe("composeReportWithin", () => {
   const detail = (section: string, count: number): string[] =>
     Array.from(
       { length: count },
@@ -121,7 +121,7 @@ describe("composeReport under a length limit", () => {
   test("a report within the limit is the whole report, with no notice", () => {
     const report = drifted(5);
     const whole = composeReport(report);
-    expect(composeReport(report, whole.length)).toBe(whole);
+    expect(composeReportWithin(report, whole.length)).toBe(whole);
     expect(leftOut(whole)).toEqual({ head: undefined, marks: [] });
   });
 
@@ -130,7 +130,7 @@ describe("composeReport under a length limit", () => {
     const report = drifted(40);
     const whole = composeReport(report);
     const limit = whole.length - 1;
-    const cut = composeReport(report, limit);
+    const cut = composeReportWithin(report, limit);
     expect(cut.length).toBeLessThanOrEqual(limit);
     const row = (text: string) => text.split("\n").find((line) => line.startsWith("| labels |"));
     expect(row(cut)).toBe(row(whole) as string);
@@ -165,7 +165,7 @@ describe("composeReport under a length limit", () => {
       transcript: long.map((line) => ({ line })),
     });
     const limit = Math.floor(composeReport(report).length / 3);
-    const cut = composeReport(report, limit);
+    const cut = composeReportWithin(report, limit);
     expect(cut.length).toBeLessThanOrEqual(limit);
     expect(cut).toContain("| rulesets | failed | rulesets: 403 Forbidden |");
     const { head, marks } = leftOut(cut);
@@ -178,8 +178,8 @@ describe("composeReport under a length limit", () => {
     expect(transcriptOf(cut)).toBe("## Transcript\n\n(lines left out: 60)\n");
   });
 
-  test("every limit from the emptiest document up is met, and the head count is the sum of the marks", () => {
-    // The fit is paid for line by line against the emptiest document; one unpaid character anywhere is a refused body at some limit.
+  test("detail and transcript lines never push the body past the limit; the fixed part is not cut, so a limit below it is not met", () => {
+    // One unpaid character in the fit is a refused body at some limit, so every limit up to the whole report is tried.
     const varied = (prefix: string): string[] =>
       Array.from({ length: 12 }, (_, i) => `${prefix}${"x".repeat((i * 7) % 23)}`);
     const report = input({
@@ -194,19 +194,29 @@ describe("composeReport under a length limit", () => {
         ...varied("h").map((line) => ({ line })),
       ],
     });
-    const whole = composeReport(report);
-    const lefts = new Set<number>();
-    const broken = Array.from({ length: whole.length }, (_, limit) => limit).filter((limit) => {
-      const cut = composeReport(report, limit);
+    // The fixed part is the body with all 42 lines left out: the heading, the notice, the run table, each section's
+    // status, and the marks. Its length moves only with the digits of the limit its notice names.
+    const fixedPart = (limit: number): number =>
+      composeReportWithin(report, 0).length + String(limit).length - 1;
+    const cuts = Array.from({ length: composeReport(report).length }, (_, limit) => {
+      const cut = composeReportWithin(report, limit);
       const { head, marks } = leftOut(cut);
-      const left = marks.reduce((sum, count) => sum + count, 0);
-      lefts.add(left);
-      // Only the document that carries no line at all may be over the limit: nothing smaller exists.
-      return head?.join() !== [limit, left, 42].join() || (cut.length > limit && left < 42);
+      return { limit, length: cut.length, head, left: marks.reduce((sum, n) => sum + n, 0) };
     });
-    expect(broken).toEqual([]);
-    // Not vacuous: the scan met cuts of more than twenty different sizes, the emptiest document included.
-    expect(lefts.size).toBeGreaterThan(20);
-    expect(lefts.has(42)).toBe(true);
+    const limitsOf = (found: typeof cuts): number[] => found.map((cut) => cut.limit);
+    const reachable = cuts.filter((cut) => cut.limit >= fixedPart(cut.limit));
+    const below = cuts.filter((cut) => cut.limit < fixedPart(cut.limit));
+
+    expect(limitsOf(reachable.filter((cut) => cut.length > cut.limit))).toEqual([]);
+    // Below the fixed part nothing more can go: the body is that part, every line left out, and over the limit.
+    expect(
+      limitsOf(below.filter((cut) => cut.length !== fixedPart(cut.limit) || cut.left !== 42)),
+    ).toEqual([]);
+    expect(
+      limitsOf(cuts.filter((cut) => cut.head?.join() !== [cut.limit, cut.left, 42].join())),
+    ).toEqual([]);
+    // Not vacuous: both sides of the fixed part were tried, and the reachable side met cuts of more than twenty sizes.
+    expect(below.length).toBeGreaterThan(500);
+    expect(new Set(reachable.map((cut) => cut.left)).size).toBeGreaterThan(20);
   });
 });

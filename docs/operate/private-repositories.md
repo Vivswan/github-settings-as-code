@@ -87,23 +87,32 @@ Every other channel follows the same four rules:
 - **Which issue:** found by the marker label, or by its exact title when someone removed the label. Either way it must be one of the action's own reports: the body carries the report heading. A same-titled issue you opened by hand is left alone, unless its body pastes a report verbatim.
 - **Whose issue:** the creator does not matter, so a rotated PAT reuses the issue instead of opening a second one. With several reports, an open one wins, then the newest.
 - **Each run:** the body is replaced; the issue opens when the target fails or drifts and closes when it is healthy.
-- **A long report is cut to fit:** GitHub keeps at most 65,536 characters in an issue body. A longer report keeps every section's status and leaves lines out: from the transcript first, then from the sections with the most detail. It opens by saying how many lines were left out, and each cut is marked in place. The `artifact` channel delivers the whole report.
-- **The marker label:** the first delivery creates `settings-as-code-report`. Each run reads it once per target, before that target's settings are checked or applied. On a repository that holds it, a declared `labels` section manages it like any declared label, so it is not deleted as undeclared. On a repository without it, nothing is added. A read that fails counts as held, so the label is never deleted unread.
+- **A long report is cut to fit:** GitHub keeps at most 65,536 characters in an issue body. A longer report keeps every section's status and leaves lines out: from the transcript first, then from the sections with the most detail. It opens by saying how many lines were left out and marks each cut in place, while the `artifact` channel delivers the whole report.
 - **What the log says:** every write is announced with the placeholder, never the slug: `report: updated issue #7 in private repository #1` (or `created`), and `report: created label "settings-as-code-report" in private repository #1` when the delivery creates the marker label. A write that landed before a later step failed is announced the same way, ahead of the warning.
 - **Permission:** the PAT needs `"Issues"` (read and write) on every target repository, on top of the section permissions.
 
+The first delivery creates the marker label, `settings-as-code-report`. Each run reads it once per target, before that target's settings are checked or applied. Where the settings declare `labels` without naming the marker, the answer decides what that section does with it:
+
+| The read answers               | The marker is | Check                                                  | Apply                                           |
+| ------------------------------ | ------------- | ------------------------------------------------------ | ----------------------------------------------- |
+| 404: no such label             | left out      | says nothing about it                                  | does not create it                              |
+| 200: the label exists          | declared      | compares it like any declared label                    | keeps it                                        |
+| anything else: the read failed | declared      | reports `drift` where the repository has no such label | creates the label where the repository has none |
+
+A failed read counts as a label that exists, so no label is deleted unread. A settings file that names the marker itself is outside the table: its own entry manages the label, and a rename away from the marker's name is dropped unless the read answers 404.
+
 `private-report: issue-on-failure` is the quiet variant of `issue`. When a target fails (or drifts in check mode) it behaves identically: the reused, marker-labelled report issue is written and opened.
 
-On a healthy run it only reads: the marker label, then an open report issue carrying it:
+On a healthy run it reads the marker label, then looks for an open report issue carrying it:
 
 - **One is open,** left over from an earlier failure: it is updated with the healthy report and closed.
-- **None is open:** nothing is written, no issue, no label, zero notification noise, and the log says so: `report: nothing to deliver for private repository #1`.
+- **None is open:** the delivery writes nothing, no issue, no label, zero notification noise, and the log says so: `report: nothing to deliver for private repository #1`.
 
-A repository that never fails never sees an issue or the marker label: both appear only when a report is delivered. The cost is that healthy runs' reports are not delivered anywhere. Choose `issue` or `artifact` when you need the report mirror on every run.
+A repository that never fails never sees an issue, and no delivery creates the marker label there. The cost is that healthy runs' reports are not delivered anywhere. Choose `issue` or `artifact` when you need the report mirror on every run.
 
 One caveat on the quiet variant: a removed marker label hides an open issue. If someone removes the label while a report issue is open, the healthy path cannot find the issue, so it stays open until the next failing run recreates the label and reclaims it.
 
-Everything else matches `issue`: the same delivery gate, the same Issues grant (a healthy run only reads; the open and close are writes), and delivery still runs in `mode: check`.
+Everything else matches `issue`: the same delivery gate, the same Issues grant (with no open issue, a healthy run's delivery only reads; the open and the close are writes), and delivery still runs in `mode: check`.
 
 `private-report: artifact` concatenates the report for every proven-private target into one document, encrypts it to an age recipient, and uploads it as the workflow artifact `settings-as-code-private-report` (file `private-report.md.age`). Use it when the people who need the report cannot be given repository access, since the archive travels with the run rather than living in the target repo.
 

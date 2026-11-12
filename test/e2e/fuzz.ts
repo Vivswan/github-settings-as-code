@@ -738,11 +738,7 @@ interface Counterfactual {
   artifactDir?: string;
 }
 
-/**
- * What a raw target may still receive, by first path segment: the parse gate stops it before any section call. The
- * report channel reads the marker label (GET) ahead of the parse and ensure-creates it (POST), so a labels PATCH or
- * DELETE is a section call leaking through.
- */
+/** What a raw target may still receive, by first path segment: the parse gate stops it before any section call, and the report channel reads the marker label (GET) and ensure-creates it (POST), so a labels PATCH or DELETE is a leaked section call. */
 const RAW_TARGET_ALLOWED_BY_HEAD: Record<string, ReadonlySet<string>> = {
   contents: new Set(["GET"]),
   labels: new Set(["GET", "POST"]),

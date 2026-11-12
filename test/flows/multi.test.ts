@@ -5,7 +5,7 @@ import { Decrypter, generateX25519Identity, identityToRecipient } from "age-encr
 import { DEFAULT_DISCOVERY_FILTERS } from "../../src/discovery/discover.js";
 import { SectionSelection } from "../../src/engine/section-selection.js";
 import { runMulti } from "../../src/flows/multi.js";
-import type { TargetOutcome } from "../../src/flows/redact.js";
+import { REDACTED_NOTE, type TargetOutcome } from "../../src/flows/redact.js";
 import { DEFAULT_API_VERSION, GitHubApi } from "../../src/github/api.js";
 import { isPrivate } from "../../src/private.js";
 import { describeProblem, type Problem } from "../../src/problem.js";
@@ -971,22 +971,62 @@ describe("runMulti private-report: issue-on-failure wiring", () => {
     expect(String(payload.body ?? "")).toContain("o/priv");
   });
 
-  // The settings file declares one label and the repository holds it, so the target is converged whatever the channel.
+  // The settings file declares one label, "bug", and the repository holds it; only the marker label varies.
   const markerRead = `GET /repos/o/priv/labels/${MARKER_LABEL}`;
   const bug = { name: "bug", color: "d73a4a", description: null };
-  const absent: Route = { error: { status: 404, message: "Not Found", body: "" } };
   const unread: Route = { error: { status: 500, message: "Server Error", body: "" } };
-  test.each<[string, "check" | "apply", Route, unknown[]]>([
-    ["absent, in check", "check", absent, [bug]],
-    ["absent, in apply", "apply", absent, [bug]],
-    ["present, in check", "check", { data: MARKER_LABEL_CONFIG }, [bug, MARKER_LABEL_CONFIG]],
-    ["present, in apply", "apply", { data: MARKER_LABEL_CONFIG }, [bug, MARKER_LABEL_CONFIG]],
-    ["unread (HTTP 500), in apply", "apply", unread, [bug, MARKER_LABEL_CONFIG]],
+  /** What the marker read answers, beside the labels the repository really holds. */
+  const MARKER = {
+    absent: { read: { error: { status: 404, message: "Not Found", body: "" } }, live: [bug] },
+    held: { read: { data: MARKER_LABEL_CONFIG }, live: [bug, MARKER_LABEL_CONFIG] },
+    unreadHeld: { read: unread, live: [bug, MARKER_LABEL_CONFIG] },
+    unreadAbsent: { read: unread, live: [bug] },
+  } satisfies Record<string, { read: Route; live: unknown[] }>;
+  const QUIET = ["log: report: nothing to deliver for private repository #1"];
+  const MARKER_POST = `POST /repos/o/priv/labels (${MARKER_LABEL})`;
+  /** A target that plans nothing: an apply with nothing to change still says "applied", and its proof is the empty write list. */
+  const converged = (result: "clean" | "applied") => ({ result, writes: [], said: QUIET });
+  test.each<
+    [
+      string,
+      "check" | "apply",
+      keyof typeof MARKER,
+      { result: "clean" | "applied" | "drift"; writes: string[]; said: string[] },
+    ]
+  >([
+    ["404", "check", "absent", converged("clean")],
+    ["404", "apply", "absent", converged("applied")],
+    ["the label", "check", "held", converged("clean")],
+    ["the label", "apply", "held", converged("applied")],
+    ["500 over a label that exists", "check", "unreadHeld", converged("clean")],
+    ["500 over a label that exists", "apply", "unreadHeld", converged("applied")],
+    // The price of never deleting a label unread: a failed read declares the marker where the repository has none.
+    [
+      "500 over no label",
+      "check",
+      "unreadAbsent",
+      {
+        result: "drift",
+        writes: [MARKER_POST, "POST /repos/o/priv/issues"],
+        said: [
+          `log: report: created label "${MARKER_LABEL}" in private repository #1`,
+          "log: report: created issue #9 in private repository #1",
+          `annotate warning: private repository #1: drift - labels. ${REDACTED_NOTE}`,
+        ],
+      },
+    ],
+    [
+      "500 over no label",
+      "apply",
+      "unreadAbsent",
+      { result: "applied", writes: [MARKER_POST], said: QUIET },
+    ],
   ])(
-    "the marker label %s: a converged target plans nothing and nothing is written",
-    async (_name, mode, read, live) => {
-      // Declared for a target without the label, a check calls a repository no report ever touched drifted and an apply creates the label there.
-      // Left undeclared on a target that holds it, the label an earlier report created is drift in check and a DELETE in apply.
+    "the marker read answers %s, in %s: the declared labels plan and write only what that answer allows",
+    async (_name, mode, marker, planned) => {
+      // Declared on a 404, a check calls a repository no report ever touched drifted and an apply creates the label there.
+      // Left undeclared where the label exists, an earlier report's label is drift in check and a DELETE in apply.
+      const { read, live } = MARKER[marker];
       const api = new MockApi({
         "GET /repos/o/priv": { data: { private: true } },
         "GET /repos/o/priv/contents/.github/settings.yml": {
@@ -995,7 +1035,12 @@ describe("runMulti private-report: issue-on-failure wiring", () => {
         "GET /repos/o/priv/labels?per_page=100&page=1": { data: live },
         [markerRead]: read,
         [openListPath("o/priv")]: { data: [] },
-      });
+        [allListPath("o/priv")]: { data: [] },
+        "GET /repos/o/priv/issues?state=all&sort=created&direction=desc&per_page=100&page=1": {
+          data: [],
+        },
+        "POST /repos/o/priv/issues": { data: { number: 9 } },
+      }).allowMutations("POST /repos/o/priv/labels", "DELETE /repos/o/priv/labels/*");
       const { io, events } = captureIo();
       const targets = await runTargets(
         api,
@@ -1008,13 +1053,14 @@ describe("runMulti private-report: issue-on-failure wiring", () => {
         }),
         io,
       );
-      // An apply with nothing to change still says "applied"; its proof of convergence is the empty write list.
-      expect(targets[0]?.result).toBe(mode === "check" ? "clean" : "applied");
-      expect(api.mutations()).toEqual([]);
-      expect(events).toEqual([
-        "mask: o/priv",
-        "log: report: nothing to deliver for private repository #1",
-      ]);
+      expect(targets[0]?.result).toBe(planned.result);
+      expect(
+        api.mutations().map((c) => {
+          const name = (c.payload as { name?: string } | undefined)?.name;
+          return `${c.method} ${c.path}${name === undefined ? "" : ` (${name})`}`;
+        }),
+      ).toEqual(planned.writes);
+      expect(events).toEqual(["mask: o/priv", ...planned.said]);
     },
   );
 

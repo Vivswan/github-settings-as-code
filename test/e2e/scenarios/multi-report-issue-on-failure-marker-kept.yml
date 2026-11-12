@@ -1,0 +1,68 @@
+# The other side of the marker label: a repository that already holds it
+# keeps it. An earlier report left svc-kept the label and a closed report
+# issue, and its settings declare `labels` without the marker, where labels
+# deletes what is undeclared. The marker read (200) declares the label for this
+# run, so the apply writes no label and the check that follows exits 0 with
+# zero writes.
+name: multi-report-issue-on-failure-marker-kept
+settings: {}
+inputs:
+  mode: apply
+  private_report: issue-on-failure
+repos:
+  e2e-owner/svc-kept:
+    settings:
+      labels:
+        - name: declared
+          color: "00ff00"
+    live_state:
+      repo:
+        private: true
+        visibility: private
+      labels:
+        - name: declared
+          color: "00ff00"
+        - name: settings-as-code-report
+          color: "0e2a47"
+          description: "managed by settings-as-code private reporting - do not remove"
+      issues:
+        - number: 7
+          title: "[automated] settings-as-code: private settings report"
+          body: "# settings-as-code private report: e2e-owner/svc-kept\n\nOLD REPORT BODY"
+          state: closed
+          labels:
+            - name: settings-as-code-report
+          user:
+            login: e2e-token-user
+          html_url: "https://github.com/e2e-owner/svc-kept/issues/7"
+    permissions:
+      issues: write
+      contents: read
+      administration: read
+expect:
+  exit_code: 0
+  result: applied
+  repos_result:
+    "private repository #1": applied
+  summary_lacks:
+    - "svc-kept"
+  stdout_lacks:
+    - "svc-kept"
+  issue_report:
+    slug: e2e-owner/svc-kept
+    created_count: 0
+    lookup_by_label: true
+  # No label is written in either direction, and the closed issue is left
+  # alone.
+  never:
+    - "DELETE /repos/e2e-owner/svc-kept/labels"
+    - "POST /repos/e2e-owner/svc-kept/labels"
+    - "PATCH /repos/e2e-owner/svc-kept/labels"
+    - "POST /repos/e2e-owner/svc-kept/issues"
+    - "PATCH /repos/e2e-owner/svc-kept/issues"
+  # The read that declares the marker for this run.
+  requests_contain:
+    - "GET /repos/e2e-owner/svc-kept/labels/settings-as-code-report"
+  # The check half: a rerun in check mode against the same repository must
+  # exit 0 with zero writes.
+  fixpoint: converges
