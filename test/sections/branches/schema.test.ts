@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { Ajv } from "ajv";
 import { validateSectionShapes } from "../../../src/engine/validate.js";
 import { branchesSection, protectionSnapshot } from "../../../src/sections/branches/index.js";
 import { loadSpec } from "../../e2e/openapi/validate.js";
+import { readSettingsSchema } from "../../settings-schema.js";
 
 /** Every issue as "path: message", so a case pins the whole verdict and not one line of it. */
 function issues(entries: unknown[]): string[] {
@@ -15,6 +17,14 @@ function issues(entries: unknown[]): string[] {
 function problems(entries: unknown[]): readonly string[] {
   const verdict = validateSectionShapes({ branches: entries }, "fixture");
   return verdict.isErr() ? verdict.error.issues : [];
+}
+
+/** The built lib/settings.schema.json as an editor judges a file against it; strict off for its draft-07 idioms. */
+const published = new Ajv({ strict: false, allErrors: true }).compile(readSettingsSchema());
+
+/** The published schema's verdict on the same entries. */
+function publishedAccepts(entries: unknown[]): boolean {
+  return published({ branches: entries }) === true;
 }
 
 /** A bare boolean of GitHub's protection PUT body: its dotted path under protection, and whether the PUT takes null there. */
@@ -37,10 +47,7 @@ function booleansUnder(node: DescriptorNode, path: string[]): PutBoolean[] {
   );
 }
 
-/**
- * Read off GitHub's own descriptor, so a boolean the PUT gains is held to the same refusals. `strict` keeps its
- * own rows: it was typed before, under a wording that also covers its absence.
- */
+/** Read off GitHub's own descriptor, so a boolean the PUT gains meets the same rows; `strict` keeps its own, typed before under a wording that also covers its absence. */
 const PUT_BOOLEANS = booleansUnder(
   loadSpec().paths["/repos/{owner}/{repo}/branches/{branch}/protection"]?.put?.requestBody
     ?.content?.["application/json"]?.schema as DescriptorNode,
@@ -259,44 +266,39 @@ describe("branches protection parse rules", () => {
   test.each(
     PUT_BOOLEANS.flatMap(({ site }) => ["main", "release/*"].map((name) => ({ site, name }))),
   )(
-    "a quoted $site is refused on $name, naming the YAML gotcha: the PUT answers 422 to it and the rule mutation's Boolean input cannot take a string",
+    "a quoted $site is refused on $name, naming the YAML gotcha, and the published schema refuses it too: the PUT answers 422 to it and the rule mutation's Boolean input cannot take a string",
     ({ site, name }) => {
-      expect(problems([{ name, protection: declaring(site, "yes") }])).toEqual([
-        `branches[0].protection.${site}: ${site}${QUOTED_ADVICE}`,
-      ]);
-      expect(problems([{ name, protection: declaring(site, true) }])).toEqual([]);
-      expect(problems([{ name, protection: declaring(site, false) }])).toEqual([]);
+      const quoted = [{ name, protection: declaring(site, "yes") }];
+      expect(problems(quoted)).toEqual([`branches[0].protection.${site}: ${site}${QUOTED_ADVICE}`]);
+      expect(publishedAccepts(quoted)).toBe(false);
+      for (const value of [true, false]) {
+        const bare = [{ name, protection: declaring(site, value) }];
+        expect(problems(bare)).toEqual([]);
+        expect(publishedAccepts(bare)).toBe(true);
+      }
     },
   );
 
   test.each(PUT_BOOLEANS)(
     "$site: null on a literal branch is refused unless the PUT marks the boolean nullable (nullable: $nullable), since the PUT answers 422 to it at apply",
     ({ site, nullable }) => {
-      expect(problems([{ name: "main", protection: declaring(site, null) }])).toEqual(
+      const entries = [{ name: "main", protection: declaring(site, null) }];
+      expect(problems(entries)).toEqual(
         nullable ? [] : [`branches[0].protection.${site} has no empty state; write true or false`],
       );
+      // The refusal reads the entry's name, which no type carries: the published schema holds it as a conditional, so an editor reaches the same verdict.
+      expect(publishedAccepts(entries)).toBe(nullable);
     },
   );
 
   test.each(PUT_BOOLEANS)(
-    "$site: null still passes on a wildcard rule, whose mutation input types every twin as a nullable Boolean, so GitHub can accept the file's first apply",
+    "$site: null still passes on a wildcard rule, at parse and in the published schema: its mutation input types every twin as a nullable Boolean, so GitHub can accept the file's first apply",
     ({ site }) => {
-      expect(problems([{ name: "release/*", protection: declaring(site, null) }])).toEqual([]);
+      const entries = [{ name: "release/*", protection: declaring(site, null) }];
+      expect(problems(entries)).toEqual([]);
+      expect(publishedAccepts(entries)).toBe(true);
     },
   );
-
-  test("required_signatures and strict refuse null on every entry, wildcard included", () => {
-    // The two toggles typed before the rows above: their wildcard refusals stand beside the nulls a wildcard rule may carry.
-    for (const name of ["main", "release/*"]) {
-      expect(problems([{ name, protection: { required_signatures: null } }])).toEqual([
-        "branches[0].protection.required_signatures has no empty state; write true or false",
-      ]);
-      const checks = { strict: null, contexts: [] };
-      expect(problems([{ name, protection: { required_status_checks: checks } }])).toEqual([
-        "branches[0].protection.required_status_checks.strict has no empty state; write true or false",
-      ]);
-    }
-  });
 
   // The GET expands each actor into an object; the PUT takes the login/slug string, so a copied
   // list reached the PUT as objects and 422d there.

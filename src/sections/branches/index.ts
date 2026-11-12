@@ -20,7 +20,6 @@ import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import type { SectionModule } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import type { PlainData, Read } from "../contract/plan.js";
-import { valueAt } from "../shared/list/write.js";
 import { layeredList, routed, rule } from "../shared/schema-helpers.js";
 import { ENDPOINTS, MISSING_BRANCH } from "./endpoints.js";
 import {
@@ -59,8 +58,7 @@ import {
   BranchProtectionConfig,
   copiedActorName,
   PROTECTION_MAPPING_KEYS,
-  PUT_CONTROLS,
-  REVIEW_TOGGLES,
+  WILDCARD_NAME,
 } from "./schema.js";
 
 /** The classic PUT rejects a payload missing any of these; null is a valid value for each. */
@@ -78,21 +76,6 @@ const PROTECTION_VOCABULARY: ReadonlyMap<string, ReadonlySet<string>> = new Map(
     "": Object.keys(BranchProtectionConfig.shape),
   }).map(([holder, keys]) => [holder, new Set(keys)]),
 );
-
-/**
- * The booleans a literal entry may not declare null, each as its steps under protection: GitHub's protection PUT
- * answers 422 to a null it does not mark nullable. The shape takes the null, since a wildcard entry may carry it
- * (schema.ts states the two contracts).
- */
-const LITERAL_BOOLEANS_WITHOUT_NULL: readonly (readonly string[])[] = [
-  ...PUT_CONTROLS.filter((key) => !NULLABLE_CONTROLS.has(key)).map((key) => [key]),
-  ...REVIEW_TOGGLES.map((key) => ["required_pull_request_reviews", key]),
-];
-
-/** The steps under protection of each null a literal entry declares where the protection PUT takes none. */
-function nullsThePutRefuses(protection: Record<string, unknown>): (readonly string[])[] {
-  return LITERAL_BOOLEANS_WITHOUT_NULL.filter((steps) => valueAt(protection, steps) === null);
-}
 
 /**
  * Whether every step of a phantom's path names a key the PUT documents under its holder. The steps
@@ -157,9 +140,9 @@ function undocumentedPhantoms(declared: Record<string, unknown>, live: unknown):
   });
 }
 
-/** Git refnames forbid `*`, `?`, and `[`, so a wildcard entry can never collide with a literal branch. */
+/** Whether an entry's name is a wildcard pattern, which only the rule mutations reach. */
 export function isWildcardPattern(name: string): boolean {
-  return /[*?[]/.test(name);
+  return WILDCARD_NAME.test(name);
 }
 
 // GitHub spells this one list two ways inside required_status_checks and the GET returns both, so a declaration carrying either covers the other.
@@ -819,9 +802,8 @@ export const branchesSection = {
   permission,
   endpoints: ENDPOINTS,
   graphql: GRAPHQL,
-  // The two per-surface rules compose HERE, not in schema.ts, which holds one shape for both kinds of entry:
-  // the wildcard key sweep reads the GraphQL translation tables, this section's own machinery, and the
-  // literal null refusal is the protection PUT's contract alone.
+  // The wildcard key sweep composes HERE, not in schema.ts: it reads the GraphQL translation tables,
+  // which are this section's own machinery, and nothing outside them can reach a wildcard rule.
   shape: routed(layeredList(BranchesConfig)).check(
     rule((declared, refineCtx) => {
       // The routed shape parsed one of the two forms; under the wrapper an issue's path starts at `entries`.
@@ -835,27 +817,17 @@ export const branchesSection = {
       entries.forEach((entry: BranchConfig, index) => {
         // The entry, its name, or its protection may be raw or missing beside its own shape issue; a regex would
         // coerce the name (`[object Object]` wildcards), and a non-mapping protection holds no keys to sweep.
-        if (!isPlainObject(entry) || typeof entry.name !== "string") {
+        if (
+          !isPlainObject(entry) ||
+          typeof entry.name !== "string" ||
+          !isWildcardPattern(entry.name)
+        ) {
           return;
         }
         const protection = entry.protection;
         if (!isPlainObject(protection)) {
           return;
         }
-
-        if (!isWildcardPattern(entry.name)) {
-          for (const steps of nullsThePutRefuses(protection)) {
-            // The type issue it is on this surface, so validation words it like any null with no empty state.
-            refineCtx.addIssue({
-              code: "invalid_type",
-              expected: "boolean",
-              input: null,
-              path: at(index, "protection", ...steps),
-            });
-          }
-          return;
-        }
-
         for (const steps of wildcardKeysOutsideVocabulary(protection)) {
           refineCtx.addIssue({
             code: "custom",

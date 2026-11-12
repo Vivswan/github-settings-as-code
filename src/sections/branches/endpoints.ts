@@ -21,13 +21,12 @@ export const ENDPOINTS = {
     statuses: { 200: "protection replaced" },
     // Reached for a missing branch only when the advisory probe below was denied.
     rejections: [MISSING_BRANCH],
-    // A malformed shape is refused when the file is parsed, so the hint names only what GitHub's
-    // descriptor says the PUT judges against the repository itself.
+    // A malformed shape is refused when the file is parsed, so the hint names causes the parser does not refuse.
     hints: {
       422:
-        "Usually a state only GitHub can judge, since the file's shape is checked before any " +
-        'request: users or teams under "restrictions" or "dismissal_restrictions" on a ' +
-        "repository a personal account owns, more than 100 actors across the actor lists, or " +
+        "Usually one of the causes the settings file's own checks do not refuse: users or teams " +
+        'under "restrictions" or "dismissal_restrictions" on a repository a personal account ' +
+        "owns, more than 100 actors across the actor lists, or " +
         '"required_linear_history" where the repository allows neither squash nor rebase merging',
     },
   },

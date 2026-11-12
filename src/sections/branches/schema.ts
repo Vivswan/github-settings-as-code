@@ -3,8 +3,8 @@
 import { z } from "zod";
 import { isPlainObject } from "../../plain-data.js";
 import { stringItems } from "../shared/raw-values.js";
-import { open, rule } from "../shared/schema-helpers.js";
-import { type BooleanControl, isGetOnlyKey, isUrlKey } from "./keys.js";
+import { conditional, open, rule } from "../shared/schema-helpers.js";
+import { type BooleanControl, isGetOnlyKey, isUrlKey, NULLABLE_CONTROLS } from "./keys.js";
 
 export type BypassActor =
   | { kind: "user"; login: string }
@@ -210,13 +210,7 @@ function control(key: PutControl) {
   });
 }
 
-/**
- * The booleans of the PUT body. GitHub states two contracts for a null under one, and this one shape serves both
- * kinds of entry, so it takes the null and index.ts refuses it on a literal entry:
- *
- *   the protection PUT (a literal entry)  -> 422, except under the two controls it marks nullable, where null is off
- *   the rule mutation (a wildcard entry)  -> every twin is a nullable Boolean input, so GitHub can accept the null
- */
+/** The booleans of the PUT body; each takes null here, since the one shape serves both kinds of entry (refuseNullsThePutRefuses states the two contracts). */
 const PutControls = {
   enforce_admins: control("enforce_admins").nullable().optional(),
   required_linear_history: control("required_linear_history").nullable().optional(),
@@ -230,8 +224,8 @@ const PutControls = {
   allow_fork_syncing: control("allow_fork_syncing").nullable().optional(),
 } satisfies Record<PutControl, z.ZodType>;
 
-/** The keys of the block above, for the literal entry's null refusal (index.ts). */
-export const PUT_CONTROLS = Object.keys(PutControls);
+/** The controls of the block above that the PUT answers 422 to a null under: all but the two it marks nullable. */
+const NON_NULLABLE_CONTROLS = Object.keys(PutControls).filter((key) => !NULLABLE_CONTROLS.has(key));
 
 /** The review settings the PUT takes as a bare boolean, under the same two contracts; the GET serves them bare too. */
 const ReviewToggles = {
@@ -246,8 +240,8 @@ const ReviewToggles = {
     .optional(),
 };
 
-/** The keys of the block above, for the same refusal. */
-export const REVIEW_TOGGLES = Object.keys(ReviewToggles);
+/** The keys of the block above; the PUT answers 422 to a null under each. */
+const REVIEW_TOGGLES = Object.keys(ReviewToggles);
 
 const RequiredPullRequestReviews = z.looseObject(
   {
@@ -323,6 +317,46 @@ function refuseGetOnlyKeys(
   ancestors.delete(value);
 }
 
+/** zod's own issue for a null where a boolean goes, so validation words the refusal like any null with no empty state. */
+const NULL_FOR_BOOLEAN = { code: "invalid_type", expected: "boolean", input: null } as const;
+
+/**
+ * GitHub states two contracts for a null under a boolean of the PUT body. One shape serves both kinds of entry, so
+ * the shape takes the null and this refuses it on a literal entry:
+ *
+ *   the protection PUT (a literal entry)  -> 422, except under the two controls it marks nullable, where null is off
+ *   the rule mutation (a wildcard entry)  -> every twin is a nullable Boolean input, so GitHub can accept the null
+ */
+function refuseNullsThePutRefuses(
+  protection: Record<string, unknown>,
+  refineCtx: z.RefinementCtx,
+): void {
+  for (const key of NON_NULLABLE_CONTROLS) {
+    if (protection[key] === null) {
+      refineCtx.addIssue({ ...NULL_FOR_BOOLEAN, path: ["protection", key] });
+    }
+  }
+
+  const reviews = protection.required_pull_request_reviews;
+  if (!isPlainObject(reviews)) {
+    return;
+  }
+
+  for (const key of REVIEW_TOGGLES) {
+    if (reviews[key] === null) {
+      refineCtx.addIssue({
+        ...NULL_FOR_BOOLEAN,
+        path: ["protection", "required_pull_request_reviews", key],
+      });
+    }
+  }
+}
+
+/** A JSON Schema `properties` map typing each key a boolean. */
+function booleans(keys: readonly string[]): Record<string, unknown> {
+  return Object.fromEntries(keys.map((key) => [key, { type: "boolean" }]));
+}
+
 /** The schema's keys under each open protection mapping, by dotted path: the PUT's vocabulary there. index.ts notes a declared key outside it that the GET never echoes. */
 export const PROTECTION_MAPPING_KEYS = {
   required_status_checks: Object.keys(RequiredStatusChecks.shape),
@@ -365,6 +399,9 @@ export const BranchProtectionConfig = z
 
 export type BranchProtectionConfig = z.infer<typeof BranchProtectionConfig>;
 
+/** What makes a name a wildcard pattern: git refnames forbid `*`, `?`, and `[`, so one can never collide with a literal branch. */
+export const WILDCARD_NAME = /[*?[]/;
+
 export const BranchConfig = open({
   name: z.string(),
   protection: BranchProtectionConfig.nullable(),
@@ -395,7 +432,32 @@ export const BranchConfig = open({
       }
     }),
   )
-  .meta({ id: "BranchConfig" });
+  .check(
+    rule((entry, refineCtx) => {
+      // The name or the protection may be raw beside its own shape issue; a regex would coerce a raw name.
+      const literal = typeof entry.name === "string" && !WILDCARD_NAME.test(entry.name);
+      if (literal && isPlainObject(entry.protection)) {
+        refuseNullsThePutRefuses(entry.protection, refineCtx);
+      }
+    }),
+  )
+  .meta({
+    id: "BranchConfig",
+    // The null refusal's published twin, read from the same two lists: a refinement does not reach z.toJSONSchema.
+    ...conditional(
+      { properties: { name: { not: { pattern: WILDCARD_NAME.source } } } },
+      {
+        properties: {
+          protection: {
+            properties: {
+              ...booleans(NON_NULLABLE_CONTROLS),
+              required_pull_request_reviews: { properties: booleans(REVIEW_TOGGLES) },
+            },
+          },
+        },
+      },
+    ),
+  });
 export type BranchConfig = z.infer<typeof BranchConfig>;
 
 export const BranchesConfig = z.array(BranchConfig);
