@@ -13,6 +13,7 @@ live_state:
   pull_creation_cap:
     enabled: true
     max_open_pull_requests: 5
+    include_drafts: true
   pull_bypass_list:
     - login: octocat
 inputs:
@@ -30,6 +31,7 @@ expect:
       pull_request_creation_cap:
         enabled: true
         max_open_pull_requests: 5
+        include_drafts: true
       pull_request_creation_bypass:
         - octocat
   never:

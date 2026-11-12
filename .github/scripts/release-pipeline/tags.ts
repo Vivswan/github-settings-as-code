@@ -1,7 +1,8 @@
 /**
  * The packaged commits and the refs that name them: a main commit's package under its build tag, the version tag
  * minted once on the release's package, and the pointers (latest, vX) that move forward along main alone. Every
- * push is a create-once or a lease, judged by re-reading origin, never by git's words.
+ * push is a create-once, a lease, or the prune's deletion, and a refused one is judged by re-reading origin, never
+ * by git's words.
  */
 
 import { execFileSync } from "node:child_process";
@@ -310,14 +311,24 @@ function ensurePackaged(cwd: string, sourceSha: string, tree: string, runUrl?: s
   );
 }
 
-/** The build tags beyond the `keep` newest by position, deleted in one push. Two runs pruning at once commute: the
- * server answers the deletion of a ref a rival deleted first with a warning, not a refusal. A ref under build/ this
- * pipeline would not name stops the prune: sorted in, it could push a genuine tag out of the window. */
-export function pruneBuildTags(cwd: string, keep = KEPT_BUILD_TAGS): string[] {
-  const refs = git(cwd, "ls-remote", "origin", `${BUILD_TAG_PREFIX}*`)
+/** Every ref origin holds under build/, by name. */
+function remoteBuildRefs(cwd: string): string[] {
+  return git(cwd, "ls-remote", "origin", `${BUILD_TAG_PREFIX}*`)
     .split("\n")
     .map((line) => line.split("\t")[1] ?? "")
-    .filter((ref) => ref !== "" && !ref.endsWith("^{}"))
+    .filter((ref) => ref !== "" && !ref.endsWith("^{}"));
+}
+
+/**
+ * The build tags beyond the `keep` newest by position, deleted in one push. A ref under build/ this pipeline would
+ * not name stops the prune: sorted in, it could push a genuine tag out of the window.
+ *
+ * Two runs pruning at once commute. The server answers a deletion a rival made before this push with a warning, and
+ * one that lands after the push read origin's refs with a refusal, so a refused push counts as done when origin
+ * holds none of the tags it named.
+ */
+export function pruneBuildTags(cwd: string, keep = KEPT_BUILD_TAGS): string[] {
+  const refs = remoteBuildRefs(cwd)
     .map((ref) => {
       const position = Number(ref.match(BUILD_TAG)?.[1]);
       if (Number.isNaN(position)) {
@@ -331,7 +342,13 @@ export function pruneBuildTags(cwd: string, keep = KEPT_BUILD_TAGS): string[] {
     .slice(keep)
     .map((tag) => tag.ref);
   if (refs.length > 0) {
-    git(cwd, "push", "origin", ...refs.map((ref) => `:${ref}`));
+    const refused = push(cwd, "origin", ...refs.map((ref) => `:${ref}`));
+    if (refused !== null) {
+      const held = new Set(remoteBuildRefs(cwd));
+      if (refs.some((ref) => held.has(ref))) {
+        throw refused;
+      }
+    }
   }
   return refs;
 }
@@ -443,7 +460,7 @@ interface PackageCommitOptions {
 }
 
 interface PackageCommitResult extends EnsuredTag {
-  /** The build tags this run deleted, beyond the kept window. */
+  /** The build tags beyond the kept window: deleted by this run, or by a rival pruning at once. */
   pruned: string[];
 
   /** latest's move: forward to this package, or left where it is. */
@@ -486,7 +503,7 @@ interface PackagedRelease {
   /** The packaged commit the version tag names. */
   packagedSha: string;
 
-  /** The build tags this run deleted, beyond the kept window. */
+  /** The build tags beyond the kept window: deleted by this run, or by a rival pruning at once. */
   pruned: string[];
 
   /** latest's move: forward to this package, or left where it is. */

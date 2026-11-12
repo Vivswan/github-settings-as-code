@@ -50,12 +50,18 @@ describe("validateSecretRef (syntax phase, never reads the environment)", () => 
       "operator",
       { name: "INPUTX" },
     ],
-    // The surrounding text may itself be half a secret; it must not be echoed.
+    // What reads as an embedded reference may be part of a literal secret, so the error names the entry and the rule and echoes no part of the value.
     [
-      "a value that embeds $NAME without being one is rejected, naming the fragment",
+      "a value that embeds $NAME without being one is rejected by the rule, echoing no part of the value",
       "prefix-$TOKEN",
       "operator",
-      { says: ["$TOKEN"], never: ["prefix-"] },
+      { says: [LABEL, "a $NAME reference"], never: ["prefix-", "TOKEN"] },
+    ],
+    [
+      "a literal whose `$` run reads as a reference is rejected by the same rule, echoing no part of it",
+      "Pa$$W0RD_SECRET9",
+      "operator",
+      { says: [LABEL, "a $NAME reference"], never: ["W0RD", "SECRET9", "Pa$"] },
     ],
     [
       "a literal value is rejected and never echoed",

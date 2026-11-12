@@ -318,7 +318,7 @@ describe("secret values are judged at validation, under the document's provenanc
     expect(
       issuesOf({ webhooks: [{ config: { url: "https://x.test/h", secret: "prefix-$TOKEN" } }] }),
     ).toEqual([
-      'webhooks: the webhook "https://x.test/h" config.secret embeds $TOKEN without being a whole-value reference; it would otherwise ship verbatim as the secret. Make the entire value a single $NAME reference',
+      'webhooks: the webhook "https://x.test/h" config.secret embeds a $NAME reference without being a whole-value reference; it would otherwise ship verbatim as the secret. Make the entire value a single $NAME reference',
     ]);
   });
 

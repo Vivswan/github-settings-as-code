@@ -6,11 +6,14 @@
  *                -> that branch's git ref is read, which needs Contents: read and succeeds whether or not the file exists
  *                -> the token could have read the file, so it is missing
  *
- * A failed ref read leaves the proof inconclusive: a denied grant, or an empty repository whose branch has no commit.
+ * A refused ref read leaves the proof inconclusive: a denied grant (403, 404), or an empty repository (409, no commit yet).
  */
 
 import type { GitHubClient } from "./api.js";
 import { type ApiError, classifyApiError } from "./api-error.js";
+
+/** The status of a ref read on a repository with no commit. */
+const EMPTY_REPOSITORY = 409;
 
 export async function getRepoFile(
   api: GitHubClient,
@@ -64,7 +67,9 @@ export async function getRepoFile(
   if (!("error" in refProbe)) {
     return { missing: true };
   }
-  if (classifyApiError(refProbe.error) !== "permission") {
+  const inconclusive =
+    refProbe.error.status === EMPTY_REPOSITORY || classifyApiError(refProbe.error) === "permission";
+  if (!inconclusive) {
     return { error: refProbe.error };
   }
   return {

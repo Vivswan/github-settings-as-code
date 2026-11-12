@@ -133,15 +133,39 @@ function teamsBySlug(
   );
 }
 
-/** The drift line a declared team's probe earns, or undefined once its live role matches. */
+/**
+ * A probe 404 for a team the repository's list names, in the words plan() and snapshot() share. Neither can tell
+ * no access from a probe the token is denied, and check mode and a snapshot write nothing that would surface the
+ * denial, so both readings are named. `so` is what the caller does under the first reading.
+ */
+function listedProbe404(
+  ctx: TeamsContext,
+  section: SectionMeta,
+  opts: { so?: string; rerun: "check" | "snapshot" },
+): string {
+  const so = opts.so === undefined ? "" : `, so ${opts.so}`;
+  return (
+    `listed with access to ${ctx.repo.slug}, but the access probe answered 404, read here as no access${so}. ` +
+    "A fine-grained token missing the grant gets the same answer; if the team does have access, " +
+    `${sectionGrant(section)}, then ${opts.rerun} again`
+  );
+}
+
+/** The drift line a declared team's probe earns, or undefined once its live role matches; `listed` says the repository's list names the team, which a probe 404 contradicts. */
 function declaredTeamDrift(
-  repo: string,
+  ctx: TeamsContext,
+  section: SectionMeta,
   team: TeamConfig,
   role: string,
-  probe: TeamAccess,
+  found: { probe: TeamAccess; listed: boolean },
 ): string | undefined {
+  const label = `teams[${team.name}]`;
+  const { probe } = found;
   if (!probe.access) {
-    return `teams[${team.name}]: no access to ${repo}; apply will grant "${role}"`;
+    const grant = `apply will grant "${role}"`;
+    return found.listed
+      ? `${label}: ${listedProbe404(ctx, section, { so: grant, rerun: "check" })}`
+      : `${label}: no access to ${ctx.repo.slug}; ${grant}`;
   }
 
   const wantRole = roleForPermission(role);
@@ -150,7 +174,7 @@ function declaredTeamDrift(
     return undefined;
   }
 
-  return valueDrift(`teams[${team.name}]`, JSON.stringify(wantRole), JSON.stringify(liveRole), {
+  return valueDrift(label, JSON.stringify(wantRole), JSON.stringify(liveRole), {
     remedy: "apply will set the declared permission",
   });
 }
@@ -221,13 +245,7 @@ function snapshotRole(ctx: TeamsContext, section: SectionMeta, team: LiveTeam): 
 
   return probeTeamRole(ctx, team.slug).map((probe): SnapshotRole => {
     if (!probe.access) {
-      // No write follows to surface a denial, so the note names both readings of the 404.
-      return {
-        leftOut:
-          `listed with access to ${ctx.repo.slug}, but the access probe answered 404, read here as no access. ` +
-          "A fine-grained token missing the grant gets the same answer; if the team does have access, " +
-          `${sectionGrant(section)}, then snapshot again`,
-      };
+      return { leftOut: listedProbe404(ctx, section, { rerun: "snapshot" }) };
     }
     if (probe.role === undefined) {
       return {
@@ -260,7 +278,8 @@ export const teamsSection = {
       );
       const plan: SectionPlan<TeamsOp> = { ops: [], notes: [], drift: [] };
       // The listing is read BEFORE the declared walk, so the undeclared teams are judged against the state the grants
-      // below start from; a declared team's role still comes from the probe, which names a custom role.
+      // below start from; a declared team's role still comes from the probe, which names a custom role, and the
+      // listing only says whether a probe 404 contradicts it.
       const live = yield* ctx.read.list
         .listAll(LiveTeam)
         .andThen((teams) => teamsBySlug(section, teams));
@@ -268,7 +287,8 @@ export const teamsSection = {
       for (const team of desired) {
         const role = team.permission ?? DEFAULT_ROLE;
         const probe = yield* probeTeamRole(ctx, team.name);
-        const drift = declaredTeamDrift(ctx.repo.slug, team, role, probe);
+        const listed = live.has(teamKey(team.name));
+        const drift = declaredTeamDrift(ctx, section, team, role, { probe, listed });
         if (drift === undefined) {
           continue;
         }

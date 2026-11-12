@@ -156,6 +156,29 @@ describe("pages", () => {
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([GET]);
   });
 
+  test.each([
+    ["https_enforced", { https_enforced: true }],
+    ["cname", { cname: "docs.example.com" }],
+    ["public", { public: false }],
+  ] as const)(
+    "no live site and only %s declared: the create requires build_type or source, so the plan is drift naming the fix and no operation",
+    async (_key, declared) => {
+      // Without this, the plan carries a create whose body is {}, which GitHub rejects, and then an update of a site that does not exist.
+      const api = new MockApi({}); // GET /pages 404s
+      expect(await plan(api, declared)).toEqual({
+        ops: [],
+        notes: [
+          "pages: GitHub reports no Pages site. A fine-grained token missing the Pages permission gets the same answer; if this repo does have a Pages site, grant the token Pages read and write",
+        ],
+        drift: [
+          "pages: declared in the settings file but GitHub Pages is not enabled on the repo, and GitHub enables a site only from build_type or source, " +
+            "so apply changes nothing - declare build_type or source to enable the site, or remove the pages section",
+        ],
+      });
+      expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([GET]);
+    },
+  );
+
   test("a live site is updated in place only where it diverges", async () => {
     const api = new MockApi({ [GET]: { data: { build_type: "legacy", cname: null } } });
     const result = await plan(api, { build_type: "workflow" });

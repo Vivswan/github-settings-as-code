@@ -98,7 +98,8 @@ async function processTarget(ctx: {
   injectMarker: boolean;
   channel: TargetChannel;
 }): Promise<TargetResult> {
-  const { api, target, defaults, cfg, injectMarker, channel } = ctx;
+  const { target, defaults, cfg, injectMarker, channel } = ctx;
+  const api = channel.client(ctx.api);
   const fail = (richMessage: string): TargetResult => targetFailure(channel.io, richMessage);
 
   // Injection needs the typed labels, so it follows validation; the injected document is validated again inside.

@@ -36,6 +36,11 @@ coverage:
         Snapshot reads back the repository-level limit (an inherited one is left out with a note, and
         the expiry duration is not readable), the cap when the feature exists and is enabled, and the
         bypass list when it has members.
+      - >-
+        A read-only Administration grant reads the limit and is denied the cap and the bypass list,
+        which GitHub gates at write: under on-missing-permission: warn the snapshot leaves each of
+        the two keys out with a note naming the grant and still writes the limit, and under fail the
+        section fails.
   - area: >-
       [Pull request creation
       cap](https://docs.github.com/en/rest/interactions/repos#update-pull-request-creation-cap-for-a-repository)
@@ -45,8 +50,8 @@ coverage:
       - >-
         `pull_request_creation_cap` routes to GET/PATCH
         /repos/{owner}/{repo}/interaction-limits/pulls/creation-cap: persistent desired state with no
-        self-expiry (enabled plus max_open_pull_requests 1-1000, read back verbatim), so check diffs it
-        exactly and apply PATCHes only on divergence - no re-arm.
+        self-expiry (enabled, max_open_pull_requests 1-1000, and include_drafts, read back verbatim),
+        so check diffs it exactly and apply PATCHes only on divergence - no re-arm.
       - >-
         GitHub gates the cap GET at write, so a read-only Administration grant cannot check this key.
       - >-
@@ -101,6 +106,9 @@ schema:
   InteractionLimitsConfig.pull_request_creation_cap.max_open_pull_requests: >-
     The maximum number of open pull requests one user may have, a whole number from 1 to 1000
     (GitHub's range); anything else fails at parse time.
+  InteractionLimitsConfig.pull_request_creation_cap.include_drafts: >-
+    Whether draft pull requests count toward the cap. GitHub documents a boolean; the value is sent
+    as written, its type unchecked when the file is parsed.
   InteractionLimitsConfig.pull_request_creation_bypass: >-
     User logins exempt from the pull request creation cap, routed to GET/PUT/DELETE
     /repos/{r}/interaction-limits/pulls/bypass-list and reconciled: apply removes the undeclared

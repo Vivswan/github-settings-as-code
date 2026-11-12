@@ -101,7 +101,7 @@ async function runTarget(
         async () =>
           engineOutcome(
             await runForRepo(
-              api,
+              channel.client(api),
               {
                 repo: cfg.repo,
                 settings: injected.settings,

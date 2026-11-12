@@ -1,7 +1,8 @@
 /**
  * The fixture harness behind the release pipeline tests: a bare origin plus clones playing the CI checkouts, a git
  * shim first on PATH that refuses a push outside the fixture area and plays scripted remotes (rivals, refusals,
- * a landing between a read and the write it informs), and the helpers the test files share.
+ * a landing between a read and the write it informs), origin's hooks for what lands inside a push, and the helpers
+ * the test files share.
  */
 
 import { afterAll, beforeAll, expect } from "bun:test";
@@ -16,7 +17,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { devNull, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 export function git(cwd: string, ...args: string[]): string {
@@ -46,8 +47,22 @@ let realPath: string | undefined;
 /** The real git, which the shim execs. */
 let realGit = "";
 
-/** The per-file hooks: the shim goes first on PATH before the file's tests and comes off after them, and the
- * fixture roots the file created are removed; a test file calls this once at module scope. */
+/** The caller's GIT_* variables, out of the environment while a file's tests run; undefined until they were. */
+let callerGit: Record<string, string> | undefined;
+
+/** What stands in for them: no global and no system config, so a git the suite runs reads its own repository's
+ * config alone. Identity stays in each clone's config, which GIT_AUTHOR_* and GIT_COMMITTER_* would outrank. */
+const SEALED_GIT = { GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull };
+
+/** Every GIT_* variable the environment holds now. */
+const gitVariables = (): [string, string][] =>
+  Object.entries(process.env).filter(
+    (entry): entry is [string, string] => entry[0].startsWith("GIT_") && entry[1] !== undefined,
+  );
+
+/** The per-file hooks: before the file's tests the shim goes first on PATH and the caller's GIT_* variables leave
+ * the environment, after them both are put back, and the fixture roots the file created are removed; a test file
+ * calls this once at module scope. */
 export function installReleasePipelineFixture(): void {
   afterAll(() => {
     for (const root of roots.splice(0)) {
@@ -98,9 +113,22 @@ export function installReleasePipelineFixture(): void {
     writeFileSync(join(shimDir, "git"), script, { mode: 0o755 });
     realPath = process.env.PATH ?? "";
     process.env.PATH = `${shimDir}:${realPath}`;
+    // The fixture's git calls and the pipeline's both inherit this environment: a GIT_DIR or GIT_CONFIG left in it
+    // (git exports GIT_DIR to a hook) would send them into the repository the tests were launched from.
+    callerGit = Object.fromEntries(gitVariables());
+    for (const name of Object.keys(callerGit)) {
+      delete process.env[name];
+    }
+    Object.assign(process.env, SEALED_GIT);
   });
   // Undo only what beforeAll got to, so a setup failure surfaces as itself.
   afterAll(() => {
+    if (callerGit !== undefined) {
+      for (const [name] of gitVariables()) {
+        delete process.env[name];
+      }
+      Object.assign(process.env, callerGit);
+    }
     if (realPath !== undefined) {
       process.env.PATH = realPath;
     }
@@ -656,6 +684,22 @@ export function withPushPlans(
     .split("\n")
     .filter((line) => line !== "")
     .map((line) => line.split(" "));
+}
+
+/**
+ * What origin runs inside every later push, after the push read origin's refs and before origin writes any: the gap
+ * a push plan, which runs before the push starts, cannot reach. `pre-receive` plays a rival landing there, and
+ * `update` declines the ref in $1 by exiting non-zero.
+ *
+ * Origin's own hooksPath, so a developer's global one cannot answer instead.
+ */
+export function originHooks(fx: Fixture, hooks: { "pre-receive"?: string; update?: string }): void {
+  const dir = join(fx.root, "origin-hooks");
+  mkdirSync(dir);
+  for (const [name, script] of Object.entries(hooks)) {
+    writeFileSync(join(dir, name), `#!/bin/sh\n${script}`, { mode: 0o755 });
+  }
+  git(fx.origin, "config", "core.hooksPath", dir);
 }
 
 /** The moving pointer's ref. */
