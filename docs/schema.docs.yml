@@ -7,7 +7,8 @@ schema:
     `shallow` unions the entries by the section's key and swaps a same-key entry for this
     document's; `deep` unions by key and merges a same-key pair field by field, a nested keyed
     list (a ruleset's rules, by type) unioning the same way. Consumed by the render, never applied:
-    the rendered document carries no `_layering`, and apply and check ignore it like any `_` key.
+    the rendered document carries no `_layering`, and apply and check ignore it. It and `_undeclared`
+    are the only underscore keys a document's top level takes: any other one is refused.
   SettingsFile._undeclared: >-
     The file-wide undeclared policy: what apply does to a live resource a list does not declare, for
     every list in this document that takes the `_undeclared` knob (the knobbed sections and an

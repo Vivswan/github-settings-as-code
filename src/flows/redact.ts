@@ -8,6 +8,7 @@
 
 import type { Target } from "../discovery/targets.js";
 import type { RunOutcome } from "../engine/outcome.js";
+import { type GitHubClient, redactedClient } from "../github/api.js";
 import type { RepoVisibility } from "../github/repo-visibility.js";
 import { type SlugKey, slugKey } from "../github/slug.js";
 import { type CollectedLine, type Io, prefixedIo } from "../io.js";
@@ -243,6 +244,9 @@ export interface TargetChannel {
   /** Sink for lines that already name their source (validation warnings): unprefixed, or the same capture. */
   unprefixed: Io;
 
+  /** The client the target's requests go through: `api` itself in the clear, its redactedClient() view when redacted. */
+  client(api: GitHubClient): GitHubClient;
+
   /** Seals or opens the target's end state: everything in its detail but the slug, which the channel holds. */
   close(end: Omit<TargetDetail, "slug">): TargetOutcome["detail"];
 }
@@ -252,6 +256,7 @@ export function publicChannel(io: Io, slug: string, attributed: boolean): Target
     display: slug,
     io: prefixedIo(io, attributed ? `${slug}: ` : ""),
     unprefixed: io,
+    client: (api) => api,
     close: ({ outcomes, note, file }) => ({ slug, outcomes, note, file }),
   };
 }
@@ -262,6 +267,7 @@ export function redactedChannel(io: Io, slug: string, display: string): TargetCh
     display,
     io: capture.io,
     unprefixed: capture.io,
+    client: redactedClient,
     close: ({ outcomes, note, file }) =>
       markPrivate({ slug, outcomes, note, file, transcript: capture.drain() }),
   };

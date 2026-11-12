@@ -25,7 +25,7 @@ import { type OnMissingPermission, snapshotContext } from "../sections/contract/
 import { SECTIONS } from "../sections/registry.js";
 import type { MustBeNever } from "../types.js";
 import { canonicalDocument, compareByCodePoint, renderCanonicalYaml } from "./canonical.js";
-import { type ValidatedSettings, validateSettingsDoc } from "./orchestrate.js";
+import { underKey, type ValidatedSettings, validateSettingsDoc } from "./orchestrate.js";
 import type { RunOutcome } from "./outcome.js";
 import { SectionSelection } from "./section-selection.js";
 
@@ -76,12 +76,6 @@ type SectionRead =
 
 /** What a section without live state says for itself in the outcome and the file header. */
 const NOTHING_TO_DECLARE = "nothing exists on the repository, so the section is omitted";
-
-/** A line under its section's key, prefixed once: a section's own notes already lead with the key. */
-function underKey(key: SectionKey, line: string): string {
-  const own = line.startsWith(key) && /^[:.[]/.test(line.slice(key.length));
-  return own ? line : `${key}: ${line}`;
-}
 
 /**
  * The client as one section's snapshot sees it, reporting whether a GET on `read`'s route
@@ -135,9 +129,7 @@ function failedSnapshot(
     return { key, status: "failed", detail: [failure.detail] };
   }
 
-  const prefixed = failure.message.startsWith(`${key}:`)
-    ? failure.message
-    : `${key}: ${failure.message}`;
+  const prefixed = underKey(key, failure.message);
   io.annotate("error", prefixed);
   return { key, status: "failed", detail: [prefixed] };
 }

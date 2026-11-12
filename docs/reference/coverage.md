@@ -374,6 +374,7 @@ The side-by-side comparison with the Probot Settings app lives in the migration 
 
 - Covers build_type, source, cname, https_enforced, and any PUT field GitHub adds; pages: null disables the site.
 - POST /repos/{owner}/{repo}/pages (create accepts only build_type/source) then PUT for the rest; existing sites get straight PUT passthrough; pages: null issues DELETE, mirroring branches' protection: null.
+- The create requires build_type or source, so a declaration with neither, against a repository without a site, sends no write: check reports drift naming the fix (declare build_type or source), and apply reports the same line as a notice and changes nothing.
 - In a mode: render fold, pages: null is written as the section's value even over a lower layer's pages declaration, so the rendered file turns the site off (the layering guide owns that rule); a multi-repo defaults-file never merges into a target's file.
 - Snapshot reads the live site back on the declared keys; a repository without Pages is omitted rather than declared null.
 
@@ -411,9 +412,10 @@ The side-by-side comparison with the Probot Settings app lives in the migration 
 
 - Direct collaborators only. PUT/DELETE /repos/{owner}/{repo}/collaborators/{username} (affiliation=direct); new users get invitations.
 - Vocabulary mapping push<->write, pull<->read for check mode; custom org role names pass through.
-- Undeclared direct collaborators are REMOVED by default (kept as notes under the wrapped `_undeclared: keep` form); the owner is never touched.
+- Undeclared direct collaborators are REMOVED by default (kept as notes under the wrapped `_undeclared: keep` form).
+- The repository owner is never touched: it is never removed as undeclared, and an entry naming it (an organization's own login included) plans no write and earns a note saying to remove the entry.
 - Snapshot reads the direct collaborators and the pending username invitations back as entries under the delete default, each role through the inverse mapping (write -> push, read -> pull, custom role names verbatim).
-- The snapshot leaves out the repository owner, email invitations, and expired invitations with a note; a live role no declaration plans as (a custom role named "push" or "pull") fails the collaborators section, and the snapshot is written as partial without it.
+- The snapshot leaves out the repository owner, email invitations, and expired invitations with a note; a live role no declaration plans as (a custom role named "push" or "pull") fails the collaborators section, and a failed section fails the target: the result is `failed` and no file is written for it.
 
 **Repository invitations** (`collaborators`)
 
@@ -426,6 +428,7 @@ The side-by-side comparison with the Probot Settings app lives in the migration 
 
 - Org repos only. PUT/DELETE /orgs/{org}/teams/{slug}/repos/{owner}/{repo}; the section probes GET /orgs/{owner} and no-ops with a note on personal accounts (404 only; 403/5xx still fail).
 - Both modes probe each declared team's access with the v3.repository media type to read role_name, and the grant is issued only when the team lacks access or its live role diverges.
+- A declared team the repository's team list names, whose probe answers 404, is still planned as a grant, and its check line names both readings of the 404 (no access, or a fine-grained token missing the grant), as the snapshot's note does.
 - The repository's team list (GET /repos/{owner}/{repo}/teams) names the undeclared teams: kept by default and noted (a team is often granted by the org for reasons outside one repository's file).
 - Under the wrapped `_undeclared: delete` form a team's DIRECT grant is revoked, while access granted at the organization or enterprise level is noted as beyond the repository's reach.
 - A declared child team whose access comes through an undeclared parent's grant loses it with that revocation (the probe reads the inherited role as converged): declare the parent too, or keep.
@@ -449,10 +452,11 @@ The side-by-side comparison with the Probot Settings app lives in the migration 
 - In a mode: render fold, interaction_limits: null is written as the section's value even over a lower layer's declaration, mirroring pages: null, so the rendered file clears the limit.
 - A 409 means an organization- or user-level limit overrides the repository's; writes surface that as a note, not a failure, while check mode still reports a mismatched declaration as drift - the org is the place to change it.
 - Snapshot reads back the repository-level limit (an inherited one is left out with a note, and the expiry duration is not readable), the cap when the feature exists and is enabled, and the bypass list when it has members.
+- A read-only Administration grant reads the limit and is denied the cap and the bypass list, which GitHub gates at write: under on-missing-permission: warn the snapshot leaves each of the two keys out with a note naming the grant and still writes the limit, and under fail the section fails.
 
 **Pull request creation cap** (`interaction_limits`)
 
-- `pull_request_creation_cap` routes to GET/PATCH /repos/{owner}/{repo}/interaction-limits/pulls/creation-cap: persistent desired state with no self-expiry (enabled plus max_open_pull_requests 1-1000, read back verbatim), so check diffs it exactly and apply PATCHes only on divergence - no re-arm.
+- `pull_request_creation_cap` routes to GET/PATCH /repos/{owner}/{repo}/interaction-limits/pulls/creation-cap: persistent desired state with no self-expiry (enabled, max_open_pull_requests 1-1000, and include_drafts, read back verbatim), so check diffs it exactly and apply PATCHes only on divergence - no re-arm.
 - GitHub gates the cap GET at write, so a read-only Administration grant cannot check this key.
 - Where the cap is unavailable the endpoints answer 405, which apply surfaces as a note (like the 409) and check as honest drift.
 

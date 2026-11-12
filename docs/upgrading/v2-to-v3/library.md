@@ -5,7 +5,7 @@ title: "Library API"
 
 # Upgrading from v2 to v3: library API
 
-Sections 9, 23, 27, 35, 54, 56, 58, and 60 of the [v2 to v3 guide](../v2-to-v3.md), whose index page carries the summary table and the order of operations.
+Sections 9, 23, 27, 35, 54, 56, 58, 60, 62, and 63 of the [v2 to v3 guide](../v2-to-v3.md), whose index page carries the summary table and the order of operations.
 
 ## 9. Library: the public entry and the v3 names
 
@@ -214,3 +214,25 @@ v3            const { repos } = parseReposInput(input)._unsafeUnwrap();
 ```
 
 Fix: read `target.repo.slug` (or `owner` and `name`) where you read `target.slug`, and build a `RemoteTarget` from each `RepoRef` in `parsed.repos`.
+
+## 63. Library: `SettingsFile` applies a section schema as the action does
+
+For `@vivswan/github-settings-as-code` consumers. The old form is the pre-release v3 builds', as in section 56.
+
+- **A key the action passes through survives the parse.** The pre-release builds dropped a label's undeclared `owner` without a word.
+- **A key the section's schema refuses fails the parse,** naming the key. The pre-release builds dropped `actions.selected_actions_url`, so the document parsed.
+- **The checks beside the schema stay with `validateSettings`:** an unknown top-level section, a closed section's unknown entry key, a duplicate entry, a secret value's form, the keys a wildcard branch entry may carry.
+
+```text
+pre-release   SettingsFile.safeParse({ labels: [{ name: "bug", color: "d73a4a", owner: "platform" }] })
+              // success: {"labels":[{"name":"bug","color":"d73a4a"}]}
+              SettingsFile.safeParse({ actions: { enabled: true, selected_actions_url: "https://api.github.com/x" } })
+              // success: {"actions":{"enabled":true}}
+
+v3            SettingsFile.safeParse({ labels: [{ name: "bug", color: "d73a4a", owner: "platform" }] })
+              // success: {"labels":[{"name":"bug","color":"d73a4a","owner":"platform"}]}
+              SettingsFile.safeParse({ actions: { enabled: true, selected_actions_url: "https://api.github.com/x" } })
+              // failure: actions.selected_actions_url: selected_actions_url is a value GitHub reports, not a setting it accepts (...), so a declared value could never be applied; remove it from the settings file
+```
+
+Fix: remove or move each key the parse names. Code that leaned on the parse to drop a key drops it itself.

@@ -86,14 +86,14 @@ Here the vault step exports `WEBHOOK_SECRET` into the job environment, and the s
 
 ## What happens at run time
 
-In apply mode, the action resolves every declared reference up front, after the read-only preflight and before the first write of any section. Resolution failures fail the repository cleanly with zero mutations:
+In apply mode, the action resolves up front every reference declared in a section the run applies: before the first write of any section, and after the read-only preflight when `on-missing-permission: fail` runs one. A section the `sections` input excludes is not applied, so its references are never resolved. Resolution failures fail the repository cleanly with zero mutations:
 
 - An UNSET variable fails, naming the reference and pointing at the step's `env` block.
 - A SET-BUT-EMPTY variable also fails. An empty vault lookup must not write an empty secret, so a failed lookup cannot pass silently.
 
 Every resolved plaintext is registered with the runner's secret masker before it is used anywhere. That is on top of the protections the client always applies to secret-bearing requests:
 
-- **Debug traces** show `***` in place of the value.
+- **Debug traces** withhold the whole payload of a request that carries a resolved secret: `payload: <withheld: the request carried a resolved secret>`.
 - **The response body of a failed secret-carrying request** is withheld wholesale, since an error body can echo the rejected value.
 
 The value itself never appears in a drift line, a change line, a note, or a report.

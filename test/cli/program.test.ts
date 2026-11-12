@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { writeFileSync } from "node:fs";
+import { readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CliHost } from "../../src/cli/commands.js";
 import { main } from "../../src/cli/program.js";
@@ -101,34 +101,100 @@ describe("check and apply", () => {
 
   test.each([false, true])(
     "a failure after the parse is reported through the mask boundary, exit 1 (verbose: %p)",
-    (verbose) =>
+    async (verbose) => {
+      // The client factory throws inside the run, its message carrying the token, and the report must not.
+      // Without --verbose the remedy asks for it; with it the stack is the report.
+      const stdout = memoryStream();
+      const stderr = memoryStream();
+      const host: CliHost = {
+        env: {},
+        createClient: () => {
+          throw new Error(`no client for ${TOKEN}`);
+        },
+      };
+      const code = await main(
+        ["node", "gsac", "check", ...target, ...(verbose ? ["--verbose"] : [])],
+        { host, streams: { stdout: stdout.stream, stderr: stderr.stream }, colors: false },
+      );
+      expect(code).toBe(1);
+      expect(stdout.text() + stderr.text()).not.toContain(TOKEN);
+      const message = "Error: no client for ***";
+      if (!verbose) {
+        expect(stderr.text()).toBe(
+          `error: github-settings-as-code stopped unexpectedly: ${message}. Re-run with --verbose for the stack; if it recurs, file a bug with that output attached\n`,
+        );
+        return;
+      }
+      // The stack's frames carry this machine's paths, so the line is pinned around them.
+      expect(stderr.text()).toStartWith(
+        `error: github-settings-as-code stopped unexpectedly: ${message}\n    at `,
+      );
+      expect(stderr.text()).toEndWith(
+        ". The stack above is the report: if it recurs, file a bug with it attached\n",
+      );
+      expect(stderr.text()).not.toContain("Re-run with --verbose");
+    },
+  );
+
+  // Opened only when the summary was appended, a path that could not be was found out after the run's requests had landed.
+  test.each<[string, (dir: string) => string, string]>([
+    ["under a directory that does not exist", (dir) => join(dir, "no-such-dir", "summary.md"), ""],
+    [
+      "at a file that already holds a block",
+      (dir) => {
+        const file = join(dir, "summary.md");
+        writeFileSync(file, "## earlier\n");
+        return file;
+      },
+      "## earlier\n",
+    ],
+  ])(
+    "--summary %s is opened before the run, and the run's summary is appended to what the file held",
+    (_where, arrange, held) =>
       withTempDir("gsac-cli-", async (dir) => {
-        // The summary file's directory does not exist, so the write throws inside
-        // the run; the path carries the token, and the report must not. Without
-        // --verbose the remedy asks for it; with it the stack is the report.
-        const summary = join(dir, "missing", `${TOKEN}.md`);
-        const masked = summary.replaceAll(TOKEN, "***");
-        const result = await cli(
-          ["check", ...target, "--summary", summary, ...(verbose ? ["--verbose"] : [])],
-          new MockApi({ "GET /repos/o/r": { data: { has_wiki: false, private: false } } }),
-        );
-        expect(result.code).toBe(1);
-        expect(result.stdout + result.stderr).not.toContain(TOKEN);
-        const message = `Error: ENOENT: no such file or directory, open '${masked}'`;
-        if (!verbose) {
-          expect(result.stderr).toBe(
-            `error: github-settings-as-code stopped unexpectedly: ${message}. Re-run with --verbose for the stack; if it recurs, file a bug with that output attached\n`,
-          );
-          return;
-        }
-        // The stack's frames carry this machine's paths, so the line is pinned around them.
-        expect(result.stderr).toStartWith(
-          `error: github-settings-as-code stopped unexpectedly: ${message}\n    at `,
-        );
-        expect(result.stderr).toEndWith(
-          ". The stack above is the report: if it recurs, file a bug with it attached\n",
-        );
-        expect(result.stderr).not.toContain("Re-run with --verbose");
+        const summary = arrange(dir);
+        const api = new MockApi({
+          "GET /repos/o/r": { data: { has_wiki: true, private: false } },
+        }).allowMutations("PATCH /repos/o/r");
+        const result = await cli(["apply", ...target, "--summary", summary, "--json"], api);
+        expect({ code: result.code, stdout: JSON.parse(result.stdout) }).toEqual({
+          code: 0,
+          stdout: { result: "applied", "skipped-sections": [], "repos-result": {} },
+        });
+        expect(api.mutations().map((call) => `${call.method} ${call.path}`)).toEqual([
+          "PATCH /repos/o/r",
+        ]);
+        const written = readFileSync(summary, "utf8");
+        expect(written).toStartWith(`${held}## github-settings-as-code (apply)\n`);
+        expect(written).toContain("| repository | :white_check_mark: applied |");
+      }),
+  );
+
+  test.each<[string, (dir: string) => string, string]>([
+    ["a directory", (dir) => dir, "EISDIR: illegal operation on a directory"],
+    [
+      "a link into a directory that does not exist",
+      (dir) => {
+        const link = join(dir, "summary.md");
+        symlinkSync(join(dir, "missing", "summary.md"), link);
+        return link;
+      },
+      "ENOENT: no such file or directory",
+    ],
+  ])(
+    "a --summary path that is %s cannot be opened, so it is refused before any request, naming --summary",
+    (_what, arrange, reason) =>
+      withTempDir("gsac-cli-", async (dir) => {
+        const summary = arrange(dir);
+        const api = new MockApi({});
+        const problem = `cannot write the summary to ${summary}: Error: ${reason}, open '${summary}'. Check that --summary names a writable path`;
+        const result = await cli(["apply", ...target, "--summary", summary, "--json"], api);
+        expect(api.calls).toEqual([]);
+        expect({ ...result, stdout: JSON.parse(result.stdout) }).toEqual({
+          code: 1,
+          stdout: { result: "failed", problem },
+          stderr: `error: ${problem}\n`,
+        });
       }),
   );
 });
