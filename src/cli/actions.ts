@@ -35,10 +35,17 @@ export function actionsRunner(
   };
 }
 
+/**
+ * `text` on one line, each line break in the runner's spelling (%0D, %0A). The runner ends a line at CR or LF and
+ * reads a line starting `::` as a workflow command, so text after a raw break would open a line of its own.
+ */
+export function oneLine(text: string): string {
+  return text.replace(/\r/g, "%0D").replace(/\n/g, "%0A");
+}
+
 /** One `::name::message` line with the runner's data escaping (%, CR, LF), as @actions/core issues it. */
 export function workflowCommand(name: "add-mask" | AnnotationLevel, message: string): string {
-  const data = message.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
-  return `::${name}::${data}${EOL}`;
+  return `::${name}::${oneLine(message.replace(/%/g, "%25"))}${EOL}`;
 }
 
 /** One GITHUB_OUTPUT record in the heredoc form the runner reads, with the fresh delimiter @actions/core mints per record. */

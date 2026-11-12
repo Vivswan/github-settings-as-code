@@ -140,12 +140,12 @@ Two inputs have no command-line form: `--private-report artifact` is refused (th
 
 Four flags are the command line's own, and `init` has one more, `--force` (replace an existing settings file):
 
-| Flag               | Does                                                                                                                                                                                  |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--token <value>`  | The token; `GITHUB_TOKEN` when absent                                                                                                                                                 |
-| `--json`           | Print the outputs as one JSON object on stdout; log lines move to stderr                                                                                                              |
-| `--summary <file>` | Append the run's markdown summary (the action's step summary) to this file; under GitHub Actions the step summary itself when absent; `init`, `validate`, and `permissions` have none |
-| `--verbose`        | Show the debug trace on stderr                                                                                                                                                        |
+| Flag               | Does                                                                                                                                                                                                                                                                         |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--token <value>`  | The token; `GITHUB_TOKEN` when absent                                                                                                                                                                                                                                        |
+| `--json`           | Print the outputs as one JSON object on stdout; log lines move to stderr                                                                                                                                                                                                     |
+| `--summary <file>` | Append the run's markdown summary (the action's step summary) to this file, creating its directories; a path that cannot be written is refused before any request; under GitHub Actions the step summary itself when absent; `init`, `validate`, and `permissions` have none |
+| `--verbose`        | Show the debug trace on stderr                                                                                                                                                                                                                                               |
 
 ## Output and exit codes
 

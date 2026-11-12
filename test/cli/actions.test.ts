@@ -11,7 +11,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { actionsIo } from "../../src/action/io.js";
 import { actionsRunner } from "../../src/cli/actions.js";
-import { cliIo, maskedStreams } from "../../src/cli/io.js";
+import { cliIo, maskedStreams, settleSummaryFile } from "../../src/cli/io.js";
 import type { Io } from "../../src/index.js";
 import { MockApi } from "../mock-api.js";
 import { withTempDir } from "../temp-dir.js";
@@ -35,6 +35,7 @@ function drive(io: Io): void {
   io.annotate("notice", "100% done\r\nnext line");
   io.annotate("warning", "skipped teams");
   io.annotate("error", "PATCH /repos/o/r failed: 500 boom");
+  io.log('labels: created "a\r\nb" at 100%');
   io.output("result", "partial");
   io.output("repos-result", '{\n  "o/r": { "result": "partial" }\n}');
   io.summary("## first");
@@ -46,6 +47,25 @@ function sameDelimiters(text: string): string {
   return text.replace(/ghadelimiter_[0-9a-f-]{36}/g, "ghadelimiter_<uuid>");
 }
 
+/** What the action's Io puts on stdout over the real @actions/core: its commands, and its log lines as console.log ends them. */
+function actionStdout(calls: (io: Io) => void): string {
+  const chunks: string[] = [];
+  const write = spyOn(process.stdout, "write").mockImplementation((chunk) => {
+    chunks.push(String(chunk));
+    return true;
+  });
+  const log = spyOn(console, "log").mockImplementation((line) => {
+    chunks.push(`${line}\n`);
+  });
+  try {
+    calls(actionsIo);
+  } finally {
+    write.mockRestore();
+    log.mockRestore();
+  }
+  return chunks.join("");
+}
+
 /** The action's Io over the real @actions/core, its stdout and runner files captured. */
 function driveAction(dir: string): { stdout: string; output: string; summary: string } {
   const output = join(dir, "action-output.txt");
@@ -54,18 +74,8 @@ function driveAction(dir: string): { stdout: string; output: string; summary: st
   writeFileSync(output, "");
   process.env.GITHUB_OUTPUT = output;
   process.env.GITHUB_STEP_SUMMARY = summary;
-  const chunks: string[] = [];
-  const write = spyOn(process.stdout, "write").mockImplementation((chunk) => {
-    chunks.push(String(chunk));
-    return true;
-  });
-  try {
-    drive(actionsIo);
-  } finally {
-    write.mockRestore();
-  }
   return {
-    stdout: chunks.join(""),
+    stdout: actionStdout(drive),
     output: readFileSync(output, "utf8"),
     summary: readFileSync(summary, "utf8"),
   };
@@ -87,7 +97,8 @@ function driveCli(dir: string, summaryFile?: string) {
     json: false,
     verbose: true,
     colors: false,
-    summaryFile,
+    summaryFile:
+      summaryFile === undefined ? undefined : settleSummaryFile(summaryFile)._unsafeUnwrap(),
   });
   return {
     ...opened,
@@ -111,6 +122,8 @@ describe("the CLI under GitHub Actions", () => {
           "::notice::100%25 done%0D%0Anext line",
           "::warning::skipped teams",
           "::error::PATCH /repos/o/r failed: 500 boom",
+          // A log line carries the runner's spelling of a line break and keeps its `%`: nothing decodes a log line.
+          'labels: created "a%0D%0Ab" at 100%',
           "",
         ].join("\n"),
       );
@@ -138,6 +151,43 @@ describe("the CLI under GitHub Actions", () => {
       expect(cli.summary()).toBe(action.summary);
       expect(action.summary).toBe("## first\n| a |\n|---|\n");
     }));
+
+  // The runner ends a line at LF, CRLF, or a lone CR, and reads a line starting `::` as a workflow command, so a
+  // line break in a name a settings file or GitHub supplied would let that name issue one from the admin's run.
+  test.each([
+    [
+      "LF",
+      "x\n::error file=README.md,line=1::spoofed",
+      "x%0A::error file=README.md,line=1::spoofed",
+    ],
+    [
+      "CRLF",
+      "x\r\n::error file=README.md,line=1::spoofed",
+      "x%0D%0A::error file=README.md,line=1::spoofed",
+    ],
+    [
+      "a lone CR",
+      "x\r::error file=README.md,line=1::spoofed",
+      "x%0D::error file=README.md,line=1::spoofed",
+    ],
+  ])(
+    "a logged name holding %s stays on its own line on both faces, so no output line starts a workflow command",
+    (_break, name, escaped) =>
+      withTempDir("gsac-actions-", (dir) => {
+        const logs = (io: Io): void => {
+          io.log(`drift: labels["${name}"]: missing`);
+          io.log("result: drift");
+        };
+        const cli = driveCli(dir);
+        logs(cli.io);
+        for (const stdout of [actionStdout(logs), cli.stdout()]) {
+          const lines = stdout.split(/\r\n|\r|\n/);
+          expect(lines).toEqual([`drift: labels["${escaped}"]: missing`, "result: drift", ""]);
+          // The runner trims a line's leading whitespace before it looks for the command marker.
+          expect(lines.filter((line) => line.trimStart().startsWith("::"))).toEqual([]);
+        }
+      }),
+  );
 
   test("--summary <file> takes the summary from the runner's step summary; an unset GITHUB_OUTPUT drops the record", () =>
     withTempDir("gsac-actions-", (dir) => {

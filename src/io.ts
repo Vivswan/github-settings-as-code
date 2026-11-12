@@ -30,6 +30,10 @@ export interface MaskPair {
 export interface Io extends MaskPair {
   annotate(level: AnnotationLevel, message: string): void;
 
+  /**
+   * One call is one line. A sink that prints escapes a line break in `line`, so text a settings file or GitHub
+   * supplied cannot open a line of its own, which a runner reads as a workflow command when it starts `::`.
+   */
   log(line: string): void;
 
   /** A trace line, shown only when the run has step debug logging enabled. */

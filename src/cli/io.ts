@@ -5,7 +5,17 @@
  * beside that redaction, so a gsac step and the action step read alike.
  */
 
-import { appendFileSync } from "node:fs";
+import {
+  appendFileSync,
+  closeSync,
+  constants,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  rmSync,
+} from "node:fs";
+import { dirname } from "node:path";
 import { Writable } from "node:stream";
 import {
   type ConsolaReporter,
@@ -14,6 +24,7 @@ import {
   LogLevels,
   type LogType,
 } from "consola";
+import { err, ok, type Result } from "neverthrow";
 import pc from "picocolors";
 import {
   type AnnotationLevel,
@@ -23,7 +34,7 @@ import {
   type OutputName,
   redactRanges,
 } from "../index.js";
-import { type ActionsRunner, outputRecord, workflowCommand } from "./actions.js";
+import { type ActionsRunner, oneLine, outputRecord, workflowCommand } from "./actions.js";
 
 export interface CliStreams {
   readonly stdout: Writable;
@@ -103,6 +114,40 @@ export function maskedStreams(streams: CliStreams, runner?: ActionsRunner): Mask
   };
 }
 
+declare const settledSummaryFile: unique symbol;
+
+/** A `--summary` path proved appendable before the run; settleSummaryFile() alone mints one, so the Io never holds a path nothing tried. */
+export type SummaryFile = string & { readonly [settledSummaryFile]: true };
+
+/**
+ * `path` settled before the run sends a request: its directories are created, as the rendered and snapshot files
+ * create theirs, and an append is proved possible. The error is the whole refusal, naming `--summary`.
+ */
+export function settleSummaryFile(path: string): Result<SummaryFile, string> {
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    if (existsSync(path)) {
+      closeSync(openSync(path, constants.O_WRONLY | constants.O_APPEND));
+      return ok(path as SummaryFile);
+    }
+
+    // A link to a file not yet written is left to the append, which creates that file: an exclusive create stops at a link.
+    const pendingLink = lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink() === true;
+    if (!pendingLink) {
+      // Created to prove it can be, then removed: the run has yet to read its inputs, and a settings file named
+      // here by mistake must still be missing when it is read.
+      closeSync(openSync(path, "ax"));
+      rmSync(path);
+    }
+
+    return ok(path as SummaryFile);
+  } catch (error) {
+    return err(
+      `cannot write the summary to ${path}: ${String(error)}. Check that --summary names a writable path`,
+    );
+  }
+}
+
 export interface CliIoOptions {
   /** The masked boundary every write goes through. */
   readonly streams: MaskedStreams;
@@ -113,8 +158,8 @@ export interface CliIoOptions {
   /** Show the debug trace. */
   readonly verbose: boolean;
 
-  /** The file summary blocks are appended to; none falls back to the runner's step summary, or drops them. */
-  readonly summaryFile?: string;
+  /** The settled `--summary` file summary blocks are appended to; none falls back to the runner's step summary, or drops them. */
+  readonly summaryFile?: SummaryFile;
 
   /** Color the level labels. */
   readonly colors: boolean;
@@ -172,7 +217,7 @@ export function cliIo(options: CliIoOptions): CliIo {
   const consola = createConsola({ level, reporters: [reporter], throttle: 0 });
   const logStream = options.json ? streams.stderr : streams.stdout;
   const { runner } = streams;
-  const summaryFile = options.summaryFile ?? runner?.summaryFile;
+  const summaryFile: string | undefined = options.summaryFile ?? runner?.summaryFile;
   const outputs = new Map<OutputName, string>();
   const annotate: Io["annotate"] =
     runner === undefined
@@ -181,7 +226,8 @@ export function cliIo(options: CliIoOptions): CliIo {
   return {
     io: {
       annotate,
-      log: (line) => logStream.write(`${line}\n`),
+      // Redacted before the line breaks are escaped: a masked value that spans lines no longer equals itself once escaped.
+      log: (line) => logStream.write(`${oneLine(streams.redact(line))}\n`),
       debug: (line) => consola.debug(line),
       summary: (markdown) => {
         if (summaryFile !== undefined) {

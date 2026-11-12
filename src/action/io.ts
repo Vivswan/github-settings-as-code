@@ -43,9 +43,18 @@ function appendSummary(markdown: string): void {
   appendFileSync(file, `${markdown}\n`);
 }
 
+/**
+ * `line` with each line break in the runner's spelling (%0D, %0A), as @actions/core escapes a command's data. The
+ * runner ends a line at CR or LF and reads a line starting `::` as a workflow command, so text after a raw break
+ * would issue one. `%` stays as written: nothing decodes a log line. test/cli/actions.test.ts holds the CLI's log to this form.
+ */
+function oneLine(line: string): string {
+  return line.replace(/\r/g, "%0D").replace(/\n/g, "%0A");
+}
+
 export const actionsIo: Io = {
   annotate,
-  log: (line) => console.log(line),
+  log: (line) => console.log(oneLine(line)),
   debug: (line) => core.debug(line),
   summary: appendSummary,
   output: setOutput,

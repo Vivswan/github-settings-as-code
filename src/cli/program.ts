@@ -7,6 +7,7 @@
  */
 
 import { Command, CommanderError, Option } from "commander";
+import { ok, type Result } from "neverthrow";
 import pc from "picocolors";
 import {
   describeProblem,
@@ -38,7 +39,15 @@ import {
   once,
   tokenValues,
 } from "./inputs.js";
-import { type CliIo, type CliStreams, cliIo, type MaskedStreams, maskedStreams } from "./io.js";
+import {
+  type CliIo,
+  type CliStreams,
+  cliIo,
+  type MaskedStreams,
+  maskedStreams,
+  type SummaryFile,
+  settleSummaryFile,
+} from "./io.js";
 
 /** Every subcommand, in help order; the package smoke asserts the installed help names each. */
 export const CLI_COMMANDS = [
@@ -108,7 +117,9 @@ interface Wiring {
   readonly bold: (text: string) => string;
   readonly execute: (cfg: RunConfig, io: Io) => Promise<RunEnd>;
   readonly executeInit: (cfg: InitConfig, io: Io) => Promise<Rendered>;
-  readonly openIo: (globals: Globals) => CliIo;
+
+  /** The Io a command writes through; `summaryFile` is the settled `--summary` of a command that writes a summary. */
+  readonly openIo: (globals: Globals, summaryFile?: SummaryFile) => CliIo;
   readonly exit: (code: number) => void;
 }
 
@@ -174,7 +185,18 @@ function addModeCommands(program: Command, wiring: Wiring): void {
 
     command.action(async function (this: Command) {
       const values = this.optsWithGlobals<Globals & Record<string, unknown>>();
-      const { io, flush } = wiring.openIo(values);
+      const summaryFile: Result<SummaryFile | undefined, string> =
+        values.summary === undefined ? ok(undefined) : settleSummaryFile(values.summary);
+      if (summaryFile.isErr()) {
+        // No run started, so this ends as a file-only command's failure does: the error line and the failed envelope.
+        const refused: Rendered = { code: 1, lines: [], json: failedEnvelope(summaryFile.error) };
+        wiring.openIo(values).io.annotate("error", summaryFile.error);
+        present(wiring.streams, refused, values);
+        wiring.exit(refused.code);
+        return;
+      }
+
+      const { io, flush } = wiring.openIo(values, summaryFile.value);
       const read = argvReader(mode, values);
       // The envelope carries the fatal problem's text beside the outputs; the line itself is already on stderr.
       let fatal: string | undefined;
@@ -283,12 +305,12 @@ export function buildProgram(options: ProgramOptions): {
     bold: paint.bold,
     execute,
     executeInit,
-    openIo: (globals) =>
+    openIo: (globals, summaryFile) =>
       cliIo({
         streams,
         json: globals.json === true,
         verbose: globals.verbose === true,
-        summaryFile: globals.summary,
+        summaryFile,
         colors,
       }),
     exit: (code) => {

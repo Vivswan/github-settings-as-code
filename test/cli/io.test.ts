@@ -6,9 +6,16 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+import {
+  lstatSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
-import { type CliIoOptions, cliIo, maskedStreams } from "../../src/cli/io.js";
+import { type CliIoOptions, cliIo, maskedStreams, settleSummaryFile } from "../../src/cli/io.js";
 import { withTempDir } from "../temp-dir.js";
 import { memoryStream } from "./streams.js";
 
@@ -23,6 +30,16 @@ function open(options: Partial<Omit<CliIoOptions, "streams">> = {}) {
     ...options,
   });
   return { ...opened, stdout: stdout.text, stderr: stderr.text };
+}
+
+/** Each entry of `dir` with what it holds: a file's text, or where a link points. */
+function listing(dir: string): string[] {
+  return readdirSync(dir).map((name) => {
+    const path = join(dir, name);
+    return lstatSync(path).isSymbolicLink()
+      ? `${name} -> ${readlinkSync(path)}`
+      : `${name}: ${readFileSync(path, "utf8")}`;
+  });
 }
 
 /** Every channel written once, the way a run writes them. */
@@ -69,6 +86,14 @@ describe("the CLI Io", () => {
     );
   });
 
+  test("a masked value that spans lines is redacted before its line breaks are escaped", () => {
+    // Escaped first, the value in the line would no longer equal the value in the registry, and it would print.
+    const { io, stdout } = open();
+    io.mask("first half\nsecond half");
+    io.log("deploy key: first half\nsecond half\ndone");
+    expect(stdout()).toBe("deploy key: ***%0Adone\n");
+  });
+
   test("--verbose shows the debug trace on stderr; without it the trace is dropped", () => {
     const quiet = open();
     quiet.io.debug("GET /repos/o/r -> 200");
@@ -87,7 +112,7 @@ describe("the CLI Io", () => {
   test("summary blocks append to the named file and are dropped without one", () =>
     withTempDir("gsac-io-", async (dir) => {
       const summary = join(dir, "summary.md");
-      const named = open({ summaryFile: summary });
+      const named = open({ summaryFile: settleSummaryFile(summary)._unsafeUnwrap() });
       named.io.summary("## first");
       named.io.summary("## second");
       expect(readFileSync(summary, "utf8")).toBe("## first\n## second\n");
@@ -108,6 +133,35 @@ describe("the CLI Io", () => {
       expect(readdirSync(dir)).toEqual(["summary.md"]);
       expect(readFileSync(summary, "utf8")).toBe("## first\n## second\n");
     }));
+
+  // The check runs before the run reads its inputs. A file it left behind would be read as an input named there by
+  // mistake, and a link to a file not yet written must still lead the summary there.
+  test.each<[string, (dir: string) => void, string, string]>([
+    ["a path that does not exist", () => {}, "summary.md", ""],
+    [
+      "a file that holds a block",
+      (dir) => writeFileSync(join(dir, "summary.md"), "## kept\n"),
+      "summary.md",
+      "## kept\n",
+    ],
+    [
+      "a link to a file not yet written",
+      (dir) => symlinkSync("run.md", join(dir, "summary.md")),
+      "run.md",
+      "",
+    ],
+  ])(
+    "settling --summary at %s leaves the directory as it found it, and the block still lands",
+    (_kind, arrange, lands, kept) =>
+      withTempDir("gsac-io-", (dir) => {
+        arrange(dir);
+        const found = listing(dir);
+        const summaryFile = settleSummaryFile(join(dir, "summary.md"))._unsafeUnwrap();
+        expect(listing(dir)).toEqual(found);
+        open({ summaryFile }).io.summary("## block");
+        expect(readFileSync(join(dir, lands), "utf8")).toBe(`${kept}## block\n`);
+      }),
+  );
 
   test("identical consecutive lines are all printed, never folded", () => {
     // consola folds repeats within a second by default; a drift report with
