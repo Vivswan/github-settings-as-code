@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { validateSectionShapes } from "../../../src/engine/validate.js";
 import { branchesSection, protectionSnapshot } from "../../../src/sections/branches/index.js";
+import { loadSpec } from "../../e2e/openapi/validate.js";
 
 /** Every issue as "path: message", so a case pins the whole verdict and not one line of it. */
 function issues(entries: unknown[]): string[] {
@@ -8,6 +10,53 @@ function issues(entries: unknown[]): string[] {
     ? []
     : parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`);
 }
+
+/** The file's problems as a run prints them, a refused null reworded to the values that exist. */
+function problems(entries: unknown[]): readonly string[] {
+  const verdict = validateSectionShapes({ branches: entries }, "fixture");
+  return verdict.isErr() ? verdict.error.issues : [];
+}
+
+/** A bare boolean of GitHub's protection PUT body: its dotted path under protection, and whether the PUT takes null there. */
+interface PutBoolean {
+  site: string;
+  nullable: boolean;
+}
+
+interface DescriptorNode {
+  type?: unknown;
+  nullable?: boolean;
+  properties?: Record<string, DescriptorNode>;
+}
+
+function booleansUnder(node: DescriptorNode, path: string[]): PutBoolean[] {
+  return Object.entries(node.properties ?? {}).flatMap(([key, inner]) =>
+    inner.type === "boolean"
+      ? [{ site: [...path, key].join("."), nullable: inner.nullable === true }]
+      : booleansUnder(inner, [...path, key]),
+  );
+}
+
+/**
+ * Read off GitHub's own descriptor, so a boolean the PUT gains is held to the same refusals. `strict` keeps its
+ * own rows: it was typed before, under a wording that also covers its absence.
+ */
+const PUT_BOOLEANS = booleansUnder(
+  loadSpec().paths["/repos/{owner}/{repo}/branches/{branch}/protection"]?.put?.requestBody
+    ?.content?.["application/json"]?.schema as DescriptorNode,
+  [],
+).filter(({ site }) => site !== "required_status_checks.strict");
+
+/** A protection declaring `value` at a dotted site. */
+function declaring(site: string, value: unknown): Record<string, unknown> {
+  return site.split(".").reduceRight<unknown>((inner, key) => ({ [key]: inner }), value) as Record<
+    string,
+    unknown
+  >;
+}
+
+const QUOTED_ADVICE =
+  ' must be an unquoted true or false (YAML parses "no"/"off"/"yes" as strings, not booleans), so the toggle direction is unambiguous';
 
 const WILDCARD_KEYS =
   "enforce_admins, required_linear_history, allow_force_pushes, allow_deletions, " +
@@ -197,6 +246,58 @@ describe("branches protection parse rules", () => {
     );
   });
 
+  test("the descriptor walk reaches the three kinds of boolean the rows below loop over", () => {
+    // The control: a walk that found nothing would pass every loop below without pinning anything.
+    expect(PUT_BOOLEANS).toContainEqual({ site: "enforce_admins", nullable: true });
+    expect(PUT_BOOLEANS).toContainEqual({ site: "allow_deletions", nullable: false });
+    expect(PUT_BOOLEANS).toContainEqual({
+      site: "required_pull_request_reviews.dismiss_stale_reviews",
+      nullable: false,
+    });
+  });
+
+  test.each(
+    PUT_BOOLEANS.flatMap(({ site }) => ["main", "release/*"].map((name) => ({ site, name }))),
+  )(
+    "a quoted $site is refused on $name, naming the YAML gotcha: the PUT answers 422 to it and the rule mutation's Boolean input cannot take a string",
+    ({ site, name }) => {
+      expect(problems([{ name, protection: declaring(site, "yes") }])).toEqual([
+        `branches[0].protection.${site}: ${site}${QUOTED_ADVICE}`,
+      ]);
+      expect(problems([{ name, protection: declaring(site, true) }])).toEqual([]);
+      expect(problems([{ name, protection: declaring(site, false) }])).toEqual([]);
+    },
+  );
+
+  test.each(PUT_BOOLEANS)(
+    "$site: null on a literal branch is refused unless the PUT marks the boolean nullable (nullable: $nullable), since the PUT answers 422 to it at apply",
+    ({ site, nullable }) => {
+      expect(problems([{ name: "main", protection: declaring(site, null) }])).toEqual(
+        nullable ? [] : [`branches[0].protection.${site} has no empty state; write true or false`],
+      );
+    },
+  );
+
+  test.each(PUT_BOOLEANS)(
+    "$site: null still passes on a wildcard rule, whose mutation input types every twin as a nullable Boolean, so GitHub can accept the file's first apply",
+    ({ site }) => {
+      expect(problems([{ name: "release/*", protection: declaring(site, null) }])).toEqual([]);
+    },
+  );
+
+  test("required_signatures and strict refuse null on every entry, wildcard included", () => {
+    // The two toggles typed before the rows above: their wildcard refusals stand beside the nulls a wildcard rule may carry.
+    for (const name of ["main", "release/*"]) {
+      expect(problems([{ name, protection: { required_signatures: null } }])).toEqual([
+        "branches[0].protection.required_signatures has no empty state; write true or false",
+      ]);
+      const checks = { strict: null, contexts: [] };
+      expect(problems([{ name, protection: { required_status_checks: checks } }])).toEqual([
+        "branches[0].protection.required_status_checks.strict has no empty state; write true or false",
+      ]);
+    }
+  });
+
   // The GET expands each actor into an object; the PUT takes the login/slug string, so a copied
   // list reached the PUT as objects and 422d there.
   const holders = [
@@ -287,18 +388,20 @@ describe("branches protection parse rules", () => {
       "0.protection.url: protection.url is a link GitHub's GET response carries and the protection PUT has no word for; remove it",
       "0.protection.name: protection.name is GitHub's GET-only echo, which the protection PUT has no word for; remove it (the entry's name already names the branch)",
       "0.protection.enabled: protection.enabled is GitHub's GET-only echo, which the protection PUT has no word for; remove it (the control's own key carries the toggle)",
-      "0.protection.enforce_admins.url: protection.enforce_admins.url is a link GitHub's GET response carries and the protection PUT has no word for; remove it",
-      "0.protection.enforce_admins.enabled: protection.enforce_admins.enabled is GitHub's GET wrapper around the toggle, which the protection PUT takes as a bare boolean; declare enforce_admins: true instead",
     ];
+    // The wrapper is a typed control's failure too, refused at the control with the boolean to declare; its url and enabled keys fold into that line.
+    const wrapper =
+      "0.protection.enforce_admins: protection.enforce_admins is GitHub's GET wrapper around the toggle, which the protection PUT takes as a bare boolean; declare enforce_admins: true instead";
     expect(issues([{ name: "main", protection: getBody }])).toEqual([
       '0.protection.restrictions.users.0: protection.restrictions.users carries an actor object copied from GitHub\'s GET response, which the protection PUT takes as the login string; write "octocat" instead',
+      wrapper,
       ...keySweep,
     ]);
     const stringActors = {
       ...getBody,
       restrictions: { ...getBody.restrictions, users: ["octocat"] },
     };
-    expect(issues([{ name: "main", protection: stringActors }])).toEqual(keySweep);
+    expect(issues([{ name: "main", protection: stringActors }])).toEqual([wrapper, ...keySweep]);
     expect(issues([{ name: "main", protection: protectionSnapshot(getBody) }])).toEqual([]);
   });
 
@@ -307,12 +410,17 @@ describe("branches protection parse rules", () => {
     const self: Record<string, unknown> = { users: [], teams: [] };
     self.restrictions = self;
     expect(issues([{ name: "main", protection: self }])).toEqual([]);
-    const wrapper = { enabled: true };
+    // Shared between the two review-side holders, which the key walk still reaches (a wrapper under a typed control stops at the control).
+    const holder = { users: [], users_url: "https://api.github.com/teams/1/members" };
+    const reviews = { dismissal_restrictions: holder, bypass_pull_request_allowances: holder };
     expect(
-      issues([{ name: "main", protection: { enforce_admins: wrapper, lock_branch: wrapper } }]).map(
+      issues([{ name: "main", protection: { required_pull_request_reviews: reviews } }]).map(
         (issue) => issue.slice(0, issue.indexOf(":")),
       ),
-    ).toEqual(["0.protection.enforce_admins.enabled", "0.protection.lock_branch.enabled"]);
+    ).toEqual([
+      "0.protection.required_pull_request_reviews.dismissal_restrictions.users_url",
+      "0.protection.required_pull_request_reviews.bypass_pull_request_allowances.users_url",
+    ]);
   });
 
   test("every shape the PUT and the rule mutation take parses clean, off controls and edge values included", () => {

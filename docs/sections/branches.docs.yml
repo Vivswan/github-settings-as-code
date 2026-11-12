@@ -35,6 +35,21 @@ coverage:
         dismissal_restrictions, or bypass_pull_request_allowances, where the PUT takes login/slug
         strings (the refusal names the string to write).
       - >-
+        Every boolean of the PUT body is typed: the eight controls (enforce_admins through
+        allow_fork_syncing) and the review settings dismiss_stale_reviews,
+        require_code_owner_reviews, and require_last_push_approval. A quoted value ("yes", "no") is
+        refused at parse on a literal branch and a wildcard rule alike, and a copied {url, enabled}
+        wrapper at its control, naming the boolean to declare.
+      - >-
+        null means off under enforce_admins and allow_force_pushes, the two controls whose PUT
+        schema spells off that way: check compares it as false and both the PUT and a wildcard
+        rule's mutation are sent false, so a check right after an apply is clean.
+      - >-
+        Under any other of those booleans a literal branch refuses null at parse (the PUT answers 422
+        to it). A wildcard rule still takes it, since the mutation's Boolean inputs are nullable;
+        write false there to turn a control off. required_signatures and
+        required_status_checks.strict refuse null on every entry.
+      - >-
         Check mode flattens the GET shape ({enabled} wrappers, actor objects -> login/slug strings,
         *_url dropped) to compare like with like (src/sections/branches/index.ts flattenProtection).
       - >-
@@ -185,10 +200,25 @@ schema:
   BranchConfig.protection: PUT .../protection payload; null removes protection (Probot parity).
   BranchProtectionConfig: >-
     The protection PUT payload, passed through verbatim except its routed keys; a key the GET never
-    echoes is noted at check time as never converging. What the file alone shows wrong is refused
-    upfront, naming the fix: the GET-only keys a copied GET response carries
-    (`name`, `enabled`, `enforcement_level`, `url` and `*_url`, at any depth), a status-check
-    requirement without `strict` or a check list, and a review count outside 0-6.
+    echoes is noted as never converging. Refused upfront, naming the fix: a copied GET response's
+    keys (`name`, `enabled`, `enforcement_level`, `url` and `*_url`, at any depth), a status-check
+    requirement without `strict` or a check list, a review count outside 0-6, a quoted boolean,
+    and, on a literal branch, a `null` the PUT does not take.
+  BranchProtectionConfig.enforce_admins: >-
+    Enforce the protection for administrators too. `null` is the PUT's own spelling of off here: it
+    reads as `false` on a literal branch and a wildcard rule alike, and is sent as `false`.
+  BranchProtectionConfig.required_linear_history: >-
+    Require a linear commit history, so no merge commit can be pushed. An unquoted `true` or
+    `false`, like every boolean here; a literal branch refuses `null`.
+  BranchProtectionConfig.allow_force_pushes: >-
+    Allow force pushes by anyone with write access. `null` is the PUT's own spelling of off here: it
+    reads as `false` on a literal branch and a wildcard rule alike, and is sent as `false`.
+  BranchProtectionConfig.allow_deletions: Allow anyone with write access to delete the branch.
+  BranchProtectionConfig.block_creations: >-
+    With `restrictions`, also block a push that creates a matching branch unless its actor may push.
+  BranchProtectionConfig.required_conversation_resolution: Require every review conversation to be resolved before merging.
+  BranchProtectionConfig.lock_branch: Make the branch read-only, so nobody can push to it.
+  BranchProtectionConfig.allow_fork_syncing: Whether a locked branch still lets users pull changes from upstream.
   BranchProtectionConfig.required_status_checks: >-
     Require status checks to pass before merging; `null` turns the requirement off. A mapping
     carries `strict` and one of `contexts` or `checks`, since GitHub's protection PUT rejects the
@@ -208,9 +238,12 @@ schema:
     GitHub's read-back spelling of the same, is sent as `-1`); an omitted id pins whichever App
     reported it last.
   BranchProtectionConfig.required_pull_request_reviews: >-
-    Require pull request reviews before merging; `null` turns the requirement off. Every review
-    setting beside the count and the two actor holders (`dismiss_stale_reviews`,
-    `require_code_owner_reviews`, ...) passes through to the PUT.
+    Require pull request reviews before merging; `null` turns the requirement off. A key beside the
+    ones described here passes through to the PUT.
+  BranchProtectionConfig.required_pull_request_reviews|0.dismiss_stale_reviews: Dismiss approving reviews when someone pushes a new commit.
+  BranchProtectionConfig.required_pull_request_reviews|0.require_code_owner_reviews: Require a review from a code owner before merging.
+  BranchProtectionConfig.required_pull_request_reviews|0.require_last_push_approval: >-
+    Require the most recent push to be approved by someone other than the person who pushed it.
   BranchProtectionConfig.required_pull_request_reviews|0.required_approving_review_count: >-
     Approving reviews required before merging: 1 to 6, or 0 to require no approvals. GitHub accepts
     no other value, so the file is refused upfront instead of the PUT failing at apply.
