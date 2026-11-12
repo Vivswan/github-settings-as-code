@@ -19,6 +19,19 @@ describe("expectSealed", () => {
     );
   });
 
+  test("a hidden side that holds no text fails, naming the side: a run that wrote nothing was not swept", () => {
+    expect(() => expectSealed({ log: "", summary: "" }, control, ["o/priv"])).toThrow(
+      "the hidden side holds no text, so the sweep read nothing",
+    );
+  });
+
+  test("an empty needle list fails, though only a cast gets one past the type", () => {
+    const hidden = { log: "private repository #1: drift" };
+    expect(() => expectSealed(hidden, control, [] as unknown as [string])).toThrow(
+      "no needle was given, so the sweep looked for nothing",
+    );
+  });
+
   test("a needle absent from the hidden side and present in the control passes", () => {
     const hidden = { log: "private repository #1: drift" };
     expect(() => expectSealed(hidden, control, ["o/priv"])).not.toThrow();

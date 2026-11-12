@@ -24,7 +24,23 @@ export function publicSurfaces(
   };
 }
 
-/** Fails naming every needle found on a surface of `hidden`, and every needle found on no surface of `control`. */
+/** What leaves a sweep nothing to read or to look for: a side with no text on any surface, and a needle list a cast or a run-time build left empty. */
+function nothingSwept(
+  sides: Record<"hidden" | "control", Surfaces>,
+  needles: readonly string[],
+): string[] {
+  const empty = Object.entries(sides)
+    .filter(([, surfaces]) => Object.values(surfaces).every((text) => text === ""))
+    .map(([side]) => `the ${side} side holds no text, so the sweep read nothing`);
+  return needles.length === 0
+    ? [...empty, "no needle was given, so the sweep looked for nothing"]
+    : empty;
+}
+
+/**
+ * Fails naming every needle found on a surface of `hidden`, and every needle found on no surface of `control`. A side
+ * holding no text and an empty needle list fail too: a sweep that read or looked for nothing proves nothing.
+ */
 export function expectSealed(hidden: Surfaces, control: Surfaces, needles: Needles): void {
   const findings = needles.flatMap((needle) => {
     const reached = Object.entries(hidden)
@@ -39,5 +55,5 @@ export function expectSealed(hidden: Surfaces, control: Surfaces, needles: Needl
           `\`${needle}\` is on no control surface (${controls}), so its sweep cannot fail`,
         ];
   });
-  expect(findings).toEqual([]);
+  expect([...nothingSwept({ hidden, control }, needles), ...findings]).toEqual([]);
 }

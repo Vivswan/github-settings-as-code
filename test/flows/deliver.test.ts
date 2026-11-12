@@ -18,7 +18,6 @@ import {
   REDACTED_NOTE,
   redactedChannel,
   type TargetChannel,
-  WITHHELD_REPORT_NOTICE,
 } from "../../src/flows/redact.js";
 import type { Io } from "../../src/io.js";
 import { isPrivate } from "../../src/private.js";
@@ -240,7 +239,7 @@ describe("withDelivery", () => {
           `api GET /repos/o/priv/issues?state=all&labels=${MARKER_LABEL}&per_page=100&page=1`,
           "api PATCH /repos/o/priv/issues/7",
           "log: report: updated issue #7 in private repository #1",
-          `annotate warning: private repository #1: drift - labels. ${REDACTED_NOTE}`,
+          "annotate warning: private repository #1: drift - labels. details hidden: the repository is private or internal. Set private-repos: show to reveal them, or run the action inside that repository",
         ]);
 
         events.length = 0;
@@ -253,10 +252,11 @@ describe("withDelivery", () => {
           },
           async () => outcome("clean"),
         );
-        // Pinned whole: a line equal to this slug-free text cannot name o/maybe. A sweep for the slug would have no
+        // Pinned whole, as literal text: a line equal to it cannot name o/maybe. A sweep for the slug would have no
         // control, since this target closed in the clear prints no line at all.
         expect(events).toEqual([
-          `annotate notice: private repository #2: ${WITHHELD_REPORT_NOTICE}`,
+          "annotate notice: private repository #2: visibility could not be verified (the repository-metadata probe failed or was inconclusive - typically the token cannot read the target repository), " +
+            "so the private report was withheld rather than risk delivering it to a public repository. Grant the token metadata read access and re-run; a transient API failure also leaves visibility unverified",
         ]);
       },
     );

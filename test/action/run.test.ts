@@ -5,7 +5,6 @@ import { Decrypter, generateX25519Identity, identityToRecipient } from "age-encr
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { run } from "../../src/action/run.js";
 import type { Layering } from "../../src/engine/layers.js";
-import { REDACTED_NOTE, WITHHELD_REPORT_NOTICE } from "../../src/flows/redact.js";
 import { type Io, maskRegistry } from "../../src/io.js";
 import { describeProblem, type Problem } from "../../src/problem.js";
 import type { ArtifactUploader } from "../../src/report/artifact-report.js";
@@ -261,12 +260,12 @@ describe("run in multi-repo mode (env glue)", () => {
     }
   });
 
-  /** The whole public summary of a hidden single-repo target whose one section, repository, ended `status`. */
+  /** The whole public summary of a hidden single-repo target whose one section, repository, ended `status`, as literal text. */
   const sealedSummary = (status: string) =>
     [
       "## github-settings-as-code (check)",
       "",
-      `${status} - ${REDACTED_NOTE}`,
+      `${status} - details hidden: the repository is private or internal. Set private-repos: show to reveal them, or run the action inside that repository`,
       "",
       "| Section | Status | Detail |",
       "|---|---|---|",
@@ -415,12 +414,13 @@ describe("run in multi-repo mode (env glue)", () => {
     expect(await run({ api: api, io: testIo })).toBe(1); // drift exits 1
     expect(api.calls.some((c) => c.path.includes("/issues"))).toBe(false);
     expect(api.calls.some((c) => c.method === "POST" && c.path.endsWith("/labels"))).toBe(false);
-    // Pinned whole, every surface: no report is delivered and the same run in the clear prints the slug nowhere, so
-    // a sweep for it would have no control. Text equal to these lines cannot name o/maybe.
+    // Pinned whole as literal text, every surface: no report is delivered and the same run in the clear prints the
+    // slug nowhere, so a sweep for it would have no control. Text equal to these lines cannot name o/maybe.
     expect(captured).toEqual([
       "mask: o/maybe",
-      `notice: private repository #1: ${WITHHELD_REPORT_NOTICE}`,
-      `warning: private repository #1: drift - repository. ${REDACTED_NOTE}`,
+      "notice: private repository #1: visibility could not be verified (the repository-metadata probe failed or was inconclusive - typically the token cannot read the target repository), " +
+        "so the private report was withheld rather than risk delivering it to a public repository. Grant the token metadata read access and re-run; a transient API failure also leaves visibility unverified",
+      "warning: private repository #1: drift - repository. details hidden: the repository is private or internal. Set private-repos: show to reveal them, or run the action inside that repository",
       "result: drift",
     ]);
     expect(summaries).toEqual([sealedSummary(":warning: drift")]);

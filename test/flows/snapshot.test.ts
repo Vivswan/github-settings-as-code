@@ -210,14 +210,14 @@ describe("runSnapshot, file form", () => {
       const hidden = await recorded("redact");
       expect(spoken(hidden)).toEqual([
         TAKEN_EVENT,
-        `annotate error: private repository #1: failed - labels (404). ${REDACTED_NOTE}`,
+        "annotate error: private repository #1: failed - labels (404). details hidden: the repository is private or internal. Set private-repos: show to reveal them, or run the action inside that repository",
         "log: result: failed",
       ]);
       expect(hidden.summaries[0]).toContain(
         "| labels | :x: failed | hidden (private repository), HTTP 404 |",
       );
       const shown = await recorded("show");
-      expectSealed(publicSurfaces(hidden), publicSurfaces(shown), ["/repos/o/r/labels"]);
+      expectSealed(publicSurfaces(hidden), publicSurfaces(shown), ["o/r", "/repos/o/r/labels"]);
     }));
 
   test("a private target's skipped section shows the denial's status and nothing else of it: no slug, no path, none of GitHub's words", () =>
@@ -242,7 +242,7 @@ describe("runSnapshot, file form", () => {
       const hidden = await recorded("redact");
       expect([...hidden.annotations, ...hidden.logs]).toEqual([
         expect.stringMatching(/^notice: snapshot taken /),
-        `warning: private repository #1: partial - labels (403). ${REDACTED_NOTE}`,
+        "warning: private repository #1: partial - labels (403). details hidden: the repository is private or internal. Set private-repos: show to reveal them, or run the action inside that repository",
         "result: partial",
       ]);
       expect(hidden.summaries[0]).toContain(
@@ -1098,8 +1098,21 @@ describe("runSnapshot, dir form", () => {
           "GET /repos/o/p": { data: { private: true, visibility: "private" } },
           ...labelsRoute("o/a", [BUG]),
           ...labelsRoute("o/p", [{ name: "secret-project", color: "000000", description: "hush" }]),
+          "GET /repos/o/a/rulesets?per_page=100&page=1": { data: [] },
+          // A snapshot notes an inherited ruleset by its name, so these two carry the label's values: the same run in
+          // the clear prints both, and the sweep for them below can fail.
+          "GET /repos/o/p/rulesets?per_page=100&page=1": {
+            data: [
+              { id: 1, name: "secret-project", source_type: "Organization" },
+              { id: 2, name: "hush", source_type: "Organization" },
+            ],
+          },
         });
-        const cfg = dirCfg(join(dir, privateRepos), { reposInput: "o/a,o/p", privateRepos });
+        const cfg = dirCfg(join(dir, privateRepos), {
+          reposInput: "o/a,o/p",
+          sections: only("labels", "rulesets"),
+          privateRepos,
+        });
         const raw = captureIo();
         expect(await run(api, cfg, raw.io)).toBe(0);
         expect(parseYaml(readFileSync(join(cfg.snapshotDir, "o", "p.yml"), "utf8"))).toEqual(
@@ -1109,9 +1122,13 @@ describe("runSnapshot, dir form", () => {
       };
       const hidden = await recorded("redact");
       expect([...hidden.io.masked()]).toEqual(["o/p"]);
-      // The label's name and description are no needles: snapshot prints no value of any target, hidden or shown.
       const shown = await recorded("show");
-      expectSealed(publicSurfaces(hidden), publicSurfaces(shown), ["o/p", "p.yml"]);
+      expectSealed(publicSurfaces(hidden), publicSurfaces(shown), [
+        "o/p",
+        "p.yml",
+        "secret-project",
+        "hush",
+      ]);
       expect(hidden.outputs).toEqual({
         result: "snapshot",
         "skipped-sections": "",
@@ -1178,7 +1195,7 @@ describe("runSnapshot, dir form", () => {
       expect(spoken(raw)).toEqual([
         TAKEN_EVENT,
         `log: o/a: snapshot written to ${join(cfg.snapshotDir, "o", "a.yml")}`,
-        `annotate error: private repository #1: failed - labels (404). ${REDACTED_NOTE}`,
+        "annotate error: private repository #1: failed - labels (404). details hidden: the repository is private or internal. Set private-repos: show to reveal them, or run the action inside that repository",
         "log: result: failed",
       ]);
       // Nothing was written, so the File column says so in the clear: an absent file is not a value the seal hides.
@@ -1188,7 +1205,7 @@ describe("runSnapshot, dir form", () => {
       );
       // The file's path is no needle: a failed target writes none, so it prints nowhere, hidden or shown.
       const shown = await recorded("show");
-      expectSealed(publicSurfaces(raw), publicSurfaces(shown.raw), ["/repos/o/p/labels"]);
+      expectSealed(publicSurfaces(raw), publicSurfaces(shown.raw), ["o/p", "/repos/o/p/labels"]);
     }));
 
   test("a fleet whose every target fails writes nothing and the summary says so", () =>
