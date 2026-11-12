@@ -5,7 +5,7 @@
 
 import { err, ok, Result, safeTry } from "neverthrow";
 import { z } from "zod";
-import { subsetDiff } from "../../engine/diff.js";
+import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import type { UndeclaredPolicy } from "../../types.js";
 import { type DeclaredIssue, duplicateFieldIssues } from "../contract/declared.js";
 import { missingDrift, undeclaredDrift, undeclaredNote } from "../contract/drift.js";
@@ -20,6 +20,7 @@ import {
 } from "./endpoints.js";
 import type { LiveEnvironmentBody } from "./index.js";
 import type { NestedPlan } from "./nested.js";
+import { BRANCH_POLICY_REPORTED_KEYS, reportedKeysNote } from "./reported-keys.js";
 import type { DeploymentBranchPolicyConfig } from "./schema.js";
 
 /** "delete" like the nested variables list: patterns are readable, recreatable configuration. */
@@ -40,6 +41,10 @@ function livePolicyType(policy: LiveBranchPolicy): string {
 }
 
 const POLICY = { list: "deployment branch-policy", entry: "policy" };
+
+function patternLabel(envName: string, name: string): string {
+  return `environments[${envName}].deployment_branch_policies[${name}]`;
+}
 
 function livePolicyId(policy: LiveBranchPolicy, envName: string): Result<string, SectionFailure> {
   if (policy.id === undefined) {
@@ -134,7 +139,7 @@ function patternOps(
   existing: LiveBranchPolicy | undefined,
   hidden: boolean,
 ): Result<EnvironmentRestOp[], SectionFailure> {
-  const label = `environments[${envName}].deployment_branch_policies[${pattern.name}]`;
+  const label = patternLabel(envName, pattern.name);
   if (!existing) {
     return ok([
       {
@@ -180,6 +185,38 @@ function patternOps(
   ]);
 }
 
+/** What follows for a declared pattern key GitHub does not take, in the two halves both of its notes end on. */
+const KEY_OUTCOME = ["the pattern is unaffected", "and no check reports that as drift"] as const;
+
+/**
+ * The notes one declared pattern earns for keys outside its shape. Such a key rides the create call alone and no
+ * run compares it, so no drift line can name it: a key GitHub only reports is named from the declaration alone,
+ * any other once the live pattern exists and does not echo it.
+ */
+function undeclaredKeyNotes(
+  envName: string,
+  pattern: DeploymentBranchPolicyConfig,
+  existing: LiveBranchPolicy | undefined,
+): string[] {
+  const label = patternLabel(envName, pattern.name);
+  const { name: _name, type: _type, ...extra } = pattern as Record<string, unknown>;
+  const reported: readonly string[] = BRANCH_POLICY_REPORTED_KEYS.filter((key) =>
+    Object.hasOwn(extra, key),
+  );
+  const notes =
+    reported.length > 0
+      ? [reportedKeysNote(label, reported, "POST", `so ${KEY_OUTCOME.join(" ")}`)]
+      : [];
+  if (existing === undefined) {
+    return notes;
+  }
+  const unechoed = phantomKeys(extra, existing).filter((key) => !reported.includes(key));
+  if (unechoed.length > 0) {
+    notes.push(phantomNote(label, unechoed, "deployment branch policy", ...KEY_OUTCOME));
+  }
+  return notes;
+}
+
 /** A keep-note or the delete for each live pattern the list does not name. */
 function undeclaredPolicyOps(
   envName: string,
@@ -211,7 +248,7 @@ function undeclaredPolicyOps(
         },
         drift: [
           undeclaredDrift(BRANCH_POLICIES_DEFAULT_POLICY, {
-            label: `environments[${envName}].deployment_branch_policies[${name}]`,
+            label: patternLabel(envName, name),
             action: "DELETE it",
           }),
         ],
@@ -250,8 +287,10 @@ export async function planBranchPolicies(
     const declared = new Set(entries.map((pattern) => pattern.name));
 
     for (const pattern of entries) {
-      const ops = yield* patternOps(envName, pattern, liveByName.get(pattern.name), hidden);
+      const existing = liveByName.get(pattern.name);
+      const ops = yield* patternOps(envName, pattern, existing, hidden);
       planned.ops.push(...ops);
+      planned.notes.push(...undeclaredKeyNotes(envName, pattern, existing));
     }
 
     const undeclared = yield* undeclaredPolicyOps(envName, liveByName, declared, policy);

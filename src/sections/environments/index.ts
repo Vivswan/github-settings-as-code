@@ -38,6 +38,7 @@ import {
   planPinned,
   snapshotPins,
 } from "./pins.js";
+import { ENVIRONMENT_REPORTED_KEYS, reportedKeysNote } from "./reported-keys.js";
 import { EnvironmentConfig, EnvironmentsConfig, environmentKey } from "./schema.js";
 import { sharedSecretNotes, snapshotNested, withPins } from "./snapshot.js";
 
@@ -169,16 +170,30 @@ export function flattenEnvironment(live: LiveEnvironmentBody): Record<string, un
  * the write over. The live body is split the way the entry was, so only the PUT's own keys take part in that sweep.
  * The entry passes unknown keys through, so a key the GET never echoes would re-PUT on every apply without
  * converging; `notes` names it. An entry key the GET omits (deployment_branch_policy on an environment that never
- * set one) is drift the PUT resolves, so only a key outside the entry shape is noted. An environment that does
- * not exist yet earns the missing line alone.
+ * set one) is drift the PUT resolves, so only a key outside the entry shape is noted. A key GitHub only reports is
+ * named from the declaration alone, never a second time as a key the GET lacks, so a missing environment earns it too.
  */
 function environmentDrift(
   label: string,
   settings: Record<string, unknown>,
   live: LiveEnvironmentBody | undefined,
 ): { drift: string[]; omitted: string[]; notes: string[] } {
+  const reported: readonly string[] = ENVIRONMENT_REPORTED_KEYS.filter((key) =>
+    Object.hasOwn(settings, key),
+  );
+  const notes =
+    reported.length > 0
+      ? [
+          reportedKeysNote(
+            label,
+            reported,
+            "PUT",
+            "so GitHub answers this environment's PUT with a 422 whenever apply sends one",
+          ),
+        ]
+      : [];
   if (live === undefined) {
-    return { drift: [missingDrift(label)], omitted: [], notes: [] };
+    return { drift: [missingDrift(label)], omitted: [], notes };
   }
 
   const flattened = flattenEnvironment(live);
@@ -187,10 +202,11 @@ function environmentDrift(
     sweep: replaceSweep(EnvironmentConfig),
   }).map((delta) => renderDelta(label, delta));
   const phantom = phantomKeys(settings, flattened).filter(
-    (key) => !Object.hasOwn(EnvironmentConfig.shape, key),
+    (key) => !Object.hasOwn(EnvironmentConfig.shape, key) && !reported.includes(key),
   );
-  const notes =
-    phantom.length > 0 ? [phantomNote(label, phantom, "environment", "this PUT will re-run")] : [];
+  if (phantom.length > 0) {
+    notes.push(phantomNote(label, phantom, "environment", "this PUT will re-run"));
+  }
   return { drift: [...subsetDiff(settings, flattened, label), ...omitted], omitted, notes };
 }
 

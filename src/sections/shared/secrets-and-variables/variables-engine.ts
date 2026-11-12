@@ -4,9 +4,12 @@
  * (../../environments/nested.ts) plan through it; the frame is ./named-scope.ts.
  */
 
+import type { components, operations } from "@octokit/openapi-types";
 import type { Result } from "neverthrow";
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../../engine/diff.js";
+import { agree } from "../../../text.js";
+import type { MustBeNever } from "../../../types.js";
 import { valueDrift } from "../../contract/drift.js";
 import type { SectionFailure } from "../../contract/errors.js";
 import type { SectionMeta } from "../../contract/module.js";
@@ -24,6 +27,41 @@ export const LiveVariable = z.looseObject({ name: z.string(), value: z.string() 
 export type LiveVariable = z.infer<typeof LiveVariable>;
 
 type PlainPayload = PlainData;
+
+/** A field the variable GET reports that neither write takes; every scope serves the one variable object. */
+type ReportedVariableKey = Exclude<
+  keyof components["schemas"]["actions-variable"],
+  keyof operations["actions/create-repo-variable"]["requestBody"]["content"]["application/json"]
+>;
+
+/** Named by a note in every run; the satisfies and the MustBeNever below pin the list both ways to the vendored spec. */
+const REPORTED_KEYS = [
+  "created_at",
+  "updated_at",
+] as const satisfies readonly ReportedVariableKey[];
+
+type _ReportedKeysComplete = MustBeNever<
+  Exclude<ReportedVariableKey, (typeof REPORTED_KEYS)[number]>
+>;
+
+/** One variable's declared keys GitHub only reports, and the note naming them, read off the declaration alone. */
+function reportedKeys(
+  label: string,
+  extraKeys: object,
+): { keys: readonly string[]; notes: string[] } {
+  const keys: readonly string[] = REPORTED_KEYS.filter((key) => Object.hasOwn(extraKeys, key));
+  if (keys.length === 0) {
+    return { keys, notes: [] };
+  }
+  const list = keys.map((key) => `"${key}"`).join(", ");
+  const count = keys.length;
+  const them = agree(count, "it", "them");
+  const note =
+    `${label}: ${list} ${agree(count, "is a value", "are values")} GitHub reports, not ${agree(count, "a setting", "settings")} it accepts ` +
+    `(the GET returns ${them}, the PATCH does not take ${them}), so a declared value that differs from the live one drifts on every check and its update re-runs on every apply without converging; ` +
+    `remove ${them} from the settings file`;
+  return { keys, notes: [note] };
+}
 
 /** The index signature types the passthrough fields as plain data, so spreading them into a body needs no cast. */
 export interface VariableEntry {
@@ -98,6 +136,8 @@ export function planVariables<
       const label = `${scope.label}[${variable.name}]`;
       const existing = liveOf(variable);
       const { name: _name, value: _value, ...extraKeys } = variable;
+      const reported = reportedKeys(label, extraKeys);
+      notes.push(...reported.notes);
       if (!existing) {
         ops.push(
           scope.create({
@@ -127,7 +167,9 @@ export function planVariables<
       if (first === undefined) {
         continue;
       }
-      const phantom = phantomKeys(extraKeys, existing);
+      const phantom = phantomKeys(extraKeys, existing).filter(
+        (key) => !reported.keys.includes(key),
+      );
       if (phantom.length > 0) {
         notes.push(phantomNote(label, phantom, "variable", "this update will re-run"));
       }

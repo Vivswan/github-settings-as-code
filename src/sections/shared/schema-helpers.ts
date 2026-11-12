@@ -351,6 +351,7 @@ export function sealedSecretConfig(id: string) {
   return open({ name: secretName, value: z.string() }).meta({ id });
 }
 
+// COMPAT(v4): a declared created_at or updated_at still parses, rides the write, and is named by a note; delete the note in secrets-and-variables/variables-engine.ts and refuse both here, the rule the actions section's reported-only sweep applies.
 /** A repository-scope plain-text variable entry; the environments section's nested list is the same shape. */
 export function variableConfig(id: string) {
   return open({ name: variableName, value: variableValue }).meta({ id });

@@ -25,6 +25,11 @@ coverage:
         [replace-write rule](semantics.md)).
       - Undeclared environments are left untouched.
       - >-
+        A key the entry shape does not declare rides the PUT. One the GET reports and the PUT does not
+        take (id, node_id, url, html_url, created_at, updated_at, protection_rules) is named by a
+        note in every run. Any other, unless declared null or as an empty string, is named by a note
+        once the environment exists and its GET does not echo the key.
+      - >-
         In check mode against a missing environment the declared variables, secrets, patterns, and
         protection rules cannot be listed, so notes say they are unverifiable until it exists; against
         a live environment whose custom_branch_policies flag is off, the patterns earn the same note
@@ -53,6 +58,9 @@ coverage:
         PATCH/DELETE .../variables/{name}: create missing, update divergent values, and delete
         undeclared ones by default (the wrapped `_undeclared: keep` form keeps them as notes).
       - Names match case-insensitively, values are plain text by design.
+      - >-
+        A declared created_at or updated_at, which the GET reports and neither write takes, is named
+        by a note in every run.
   - area: "[Environment secrets](https://docs.github.com/en/rest/actions/secrets)"
     keys: secrets
     endpoints: [listSecrets, secretsPublicKey, putSecret, removeSecret]
@@ -84,6 +92,11 @@ coverage:
         Type is immutable upstream, so the change is delete + recreate; the upstream PUT is
         deliberately unused - its body is the name alone, and the name is the pattern's identity, so
         it can never help reconciliation.
+      - >-
+        A pattern key outside name and type rides the create call and no run compares it, so it adds
+        no drift. One the GET reports (id, node_id) is named by a note in every run. Any other, unless
+        declared null or as an empty string, is named by a note once the live pattern exists and does
+        not echo the key.
       - >-
         Declaring the key requires the singular `deployment_branch_policy` sibling with
         custom_branch_policies: true (rejected upfront otherwise, since the pattern writes would 404
