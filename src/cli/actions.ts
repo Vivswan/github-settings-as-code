@@ -9,8 +9,14 @@ import { randomUUID } from "node:crypto";
 import { EOL } from "node:os";
 import type { AnnotationLevel, OutputName } from "../index.js";
 
-/** `::` where the runner looks for it: at the start of a line, after the whitespace it trims, which JavaScript's `\s` covers but for NEL. */
-const LINE_OPENING_COMMAND = /^([\s\u0085]*)::/gm;
+/**
+ * `::` where the runner reads it: at the start of a line, after the white space its TrimStart() removes. A line
+ * starts at the start of a chunk or after CR or LF, the only characters the runner's reader ends one at. The white
+ * space is the 25 characters .NET's Char.IsWhiteSpace accepts: U+0009..U+000D, U+0020, U+0085, U+00A0, U+1680,
+ * U+2000..U+200A, U+2028, U+2029, U+202F, U+205F, U+3000.
+ */
+const LINE_OPENING_COMMAND =
+  /(^|[\r\n])([\t-\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]*)::/g;
 
 export interface ActionsRunner {
   /** GITHUB_OUTPUT; the runner always sets it, so an unset one only drops the record, as the action's Io does. */
@@ -55,7 +61,7 @@ export function oneLine(text: string): string {
  *   the runner reads `##[` anywhere in a line                               -> it is written %23%23[
  */
 export function withoutCommands(text: string): string {
-  return text.replace(LINE_OPENING_COMMAND, "$1%3A%3A").replace(/##\[/g, "%23%23[");
+  return text.replace(LINE_OPENING_COMMAND, "$1$2%3A%3A").replace(/##\[/g, "%23%23[");
 }
 
 /** One `::name::message` line with the runner's data escaping (%, CR, LF), as @actions/core issues it. */

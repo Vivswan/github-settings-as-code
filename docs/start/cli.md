@@ -166,7 +166,7 @@ As a GitHub Actions step (`GITHUB_ACTIONS=true` in the environment, as the runne
 - **An annotation** is a `::notice::`, `::warning::`, or `::error::` command on stdout instead of the stderr line.
 - **The outputs** land in the step outputs (`GITHUB_OUTPUT`).
 - **The summary** lands in the step summary (`GITHUB_STEP_SUMMARY`) unless `--summary` names a file.
-- **Every other line**, the `--json` object's text included, has `##[` written `%23%23[` and a leading `::` written `%3A%3A`, since the runner reads both as workflow commands.
+- **Every other line** has `##[` written `%23%23[`, the `--json` object's text included, and a `::` that opens a line written `%3A%3A`, since the runner reads both as workflow commands.
 
 Those commands share stdout with the `--json` object, so a step reads the outputs from the step outputs, not by parsing stdout; the one-object rule below holds in a terminal.
 

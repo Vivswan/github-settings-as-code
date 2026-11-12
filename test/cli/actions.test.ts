@@ -42,9 +42,27 @@ function drive(io: Io): void {
   io.summary("| a |\n|---|");
 }
 
-/** The runner's two parsers, as its source reads a line: `::` after the whitespace .NET trims (NEL included), or `##[` anywhere. */
+/**
+ * From Microsoft's reference for Char.IsWhiteSpace, not from the code under test: the 25 characters the runner's
+ * TrimStart() removes before it looks for `::`.
+ *
+ *   U+0009..U+000D, U+0085                     -> the control characters the reference names
+ *   U+0020, U+00A0, U+1680, U+2000..U+200A,
+ *   U+202F, U+205F, U+3000                     -> the SpaceSeparator category
+ *   U+2028, U+2029                             -> the LineSeparator and ParagraphSeparator categories
+ */
+const DOTNET_WHITE_SPACE: readonly number[] = [
+  0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x20, 0x85, 0xa0, 0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004,
+  0x2005, 0x2006, 0x2007, 0x2008, 0x2009, 0x200a, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000,
+];
+
+/** The runner's two parsers, as its source reads a line: `::` after the white space TrimStart() removes, or `##[` anywhere. */
 function runnerReadsCommand(line: string): boolean {
-  return /^[\s\u0085]*::/.test(line) || line.includes("##[");
+  let start = 0;
+  while (DOTNET_WHITE_SPACE.includes(line.charCodeAt(start))) {
+    start += 1;
+  }
+  return line.startsWith("::", start) || line.includes("##[");
 }
 
 /** The drift line a list section logs for a declared entry the repository lacks, the name as the settings file gave it. */
@@ -205,6 +223,80 @@ describe("the CLI under GitHub Actions", () => {
       }),
   );
 
+  // The runner masks a registered secret only where its text stands as registered, so an escape that ran first would
+  // print the secret in a form anyone can reverse. Redaction sees the text as logged; the escapes come after it.
+  test.each<[string, string | undefined, string, string]>([
+    [
+      "a registered secret holding `##[` reaches both faces as the redaction and in no other form",
+      "pw##[tag]123",
+      "value=pw##[tag]123",
+      "value=***",
+    ],
+    [
+      "a registered secret holding a line break reaches both faces as the redaction and in no other form",
+      "key-line-1\nkey-line-2",
+      "value=key-line-1\nkey-line-2",
+      "value=***",
+    ],
+    [
+      "a registered secret that begins with `::` reaches both faces as the redaction and in no other form",
+      "::tok-456",
+      "::tok-456 is the value",
+      "*** is the value",
+    ],
+    [
+      "an unregistered value of the same shapes is still escaped on both faces",
+      undefined,
+      "::tok-789 holds x##[tag]\nand a break",
+      "%3A%3Atok-789 holds x%23%23[tag]%0Aand a break",
+    ],
+  ])("%s", (_case, secret, line, written) =>
+    withTempDir("gsac-actions-", (dir) => {
+      const logs = (io: Io): void => {
+        if (secret !== undefined) {
+          io.mask(secret);
+        }
+        io.log(line);
+      };
+      const cli = driveCli(dir);
+      logs(cli.io);
+      // The add-mask command carries the value by design: it is how the runner learns the mask.
+      const logged = (stdout: string): string[] =>
+        stdout.split("\n").filter((printed) => !printed.startsWith("::add-mask::"));
+      expect({ action: logged(actionStdout(logs)), cli: logged(cli.stdout()) }).toEqual({
+        action: [written, ""],
+        cli: [written, ""],
+      });
+    }),
+  );
+
+  test("both faces take exactly .NET's white-space characters as the leading whitespace before `::`", () =>
+    withTempDir("gsac-actions-", (dir) => {
+      // CR and LF are left out: a log line escapes them, and the rows above cover that. Surrogate halves are no characters.
+      const codes = Array.from({ length: 0x10000 }, (_, code) => code).filter(
+        (code) => code !== 0x0a && code !== 0x0d && (code < 0xd800 || code > 0xdfff),
+      );
+      const logs = (io: Io): void => {
+        for (const code of codes) {
+          io.log(`${String.fromCharCode(code)}::x`);
+        }
+      };
+      const cli = driveCli(dir);
+      logs(cli.io);
+      for (const stdout of [actionStdout(logs), cli.stdout()]) {
+        const lines = stdout.split("\n");
+        const trimmed = codes.filter(
+          (code, at) => lines[at] === `${String.fromCharCode(code)}%3A%3Ax`,
+        );
+        const changed = codes.filter((code, at) => lines[at] !== `${String.fromCharCode(code)}::x`);
+        expect(trimmed).toEqual(
+          DOTNET_WHITE_SPACE.filter((code) => code !== 0x0a && code !== 0x0d),
+        );
+        // The one other line that changes is `:::x`, which opens with the command marker itself.
+        expect(changed.filter((code) => !trimmed.includes(code))).toEqual([0x3a]);
+      }
+    }));
+
   // Under a runner the stream rewrites both forms in every chunk that is not a finished command, whichever write
   // carried it, so a write added later is covered without wrapping it. On a terminal nothing reads commands.
   test.each<[string, Record<string, string>, (name: string, problem: string) => string[][]]>([
@@ -214,6 +306,7 @@ describe("the CLI under GitHub Actions", () => {
       (_name, problem) => [
         [
           "::add-mask::ghp_secret",
+          "::add-mask::pw##[tag]123",
           `::error::${problem}`,
           '{"result":"failed","problem":"labels[1].name: \\"x%23%23[error]y\\" names the same label"}',
         ],
@@ -221,7 +314,9 @@ describe("the CLI under GitHub Actions", () => {
           'labels: created label "x%23%23[error]y"',
           "%3A%3Anotice::from a settings value",
           'debug: POST /repos/o/r/labels -> 201 payload: {"name":"x%23%23[error]y"}',
+          "debug: Authorization: ***",
           "  %3A%3Awarning::from a write added later",
+          "safe\u2028::file.yml opens no line, but\r%3A%3Athis does",
         ],
       ],
     ],
@@ -234,7 +329,9 @@ describe("the CLI under GitHub Actions", () => {
           `labels: created label "${name}"`,
           "::notice::from a settings value",
           `debug: POST /repos/o/r/labels -> 201 payload: {"name":"${name}"}`,
+          "debug: Authorization: ***",
           "  ::warning::from a write added later",
+          "safe\u2028::file.yml opens no line, but\r::this does",
           `error: ${problem}`,
         ],
       ],
@@ -250,10 +347,15 @@ describe("the CLI under GitHub Actions", () => {
     const name = "x##[error]y";
     const problem = `labels[1].name: "${name}" names the same label`;
     io.mask("ghp_secret");
+    io.mask("pw##[tag]123");
     io.log(`labels: created label "${name}"`);
     io.log("::notice::from a settings value");
     io.debug(`POST /repos/o/r/labels -> 201 payload: {"name":"${name}"}`);
+    // A write that is no log line, holding a mask the rewrite would break: the stream redacts first.
+    io.debug("Authorization: pw##[tag]123");
     streams.stderr.write("  ::warning::from a write added later\n");
+    // The runner's reader ends a line at CR or LF and nowhere else, U+2028 included.
+    streams.stderr.write("safe\u2028::file.yml opens no line, but\r::this does\n");
     io.annotate("error", problem);
     io.output("result", "failed");
     flush(problem);
