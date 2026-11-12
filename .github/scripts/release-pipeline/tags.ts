@@ -531,7 +531,8 @@ interface PackagedRelease {
 }
 
 /** The marker of the release `tag` names must sit on its merge commit: release-please starts the next changelog at
- * the marker, ignores a marker it could not create, and reports nothing for one on another commit. */
+ * the marker, ignores a marker it could not create, and reports nothing for one on another commit. packageRelease
+ * calls this before its first push, and each refusal names the push that repairs it. */
 function assertMarker(cwd: string, tag: string, sourceSha: string): void {
   const ref = `refs/tags/${MARKER_PREFIX}${tag}`;
   const at = observeRemote(cwd, ref).peeled;
@@ -560,7 +561,6 @@ export const FROZEN =
  * pushes (and giving @latest a value even where post-green cannot push).
  *
  *   source off origin's main          -> stop before any push: the frozen tag would be poisoned
- *   the marker off the merge commit   -> stop before any push, naming the push that repairs it
  *   the build tag packages it         -> tagged there (normally minted by post-green earlier in this run)
  *   no build tag (pruned, or skipped) -> minted here through post-green's path; a package the window has moved past goes again at once
  */

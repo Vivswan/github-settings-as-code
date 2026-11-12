@@ -1,6 +1,6 @@
 /**
  * The release pipeline's git topology. main stays source-only, and every ref a consumer names points at a packaged
- * commit: the child of one main commit, carrying that commit's build. The one tag on main is release-please's marker.
+ * commit: the child of one main commit, carrying that commit's build. A release puts one tag on main: its marker.
  *
  *   packaged commit                = parent: the main commit; tree: its tree + lib/index.js + lib/settings.schema.json + lib/pkg/,
  *                                     package.json minus its preparation scripts
@@ -14,14 +14,12 @@
  * and a rerun mints the same name and verifies instead of appending. latest and vX move through movePointer alone.
  * Every subcommand is the whole `run:` of a workflow step; no step runs two.
  *
- * release-please cuts the DRAFT release under the name source-vX.Y.Z and creates that tag on the merge commit (`draft`
- * and `force-tag-creation` on, component `source`); it finds its previous release by the tag. The release hook parses
- * the name into vX.Y.Z, checks the marker, mints the version refs, and renames the draft. release-please creates or
- * refreshes the release PR only when a releasable commit lands (release-please-config.json leaves always-update
- * off); that refresh is what publishes the `next` pre-release.
+ * release-please cuts the DRAFT release as source-vX.Y.Z, creates that tag on the merge commit, and finds its
+ * previous release by it (release-please-config.json: `draft` and `force-tag-creation` on, component `source`). The
+ * release hook parses the name into vX.Y.Z, checks the marker, mints the version refs, and renames the draft. Only a
+ * releasable commit creates or refreshes the release PR (always-update off), which publishes the `next` pre-release.
  *
- * This file dispatches; the sections live under release-pipeline/ rather than lib/, which holds what several
- * scripts share while these belong to this one.
+ * This file dispatches; its sections live under release-pipeline/, as lib/ holds only what several scripts share.
  *
  * Node builtins only: bun runs this before `bun install`.
  */
@@ -182,7 +180,10 @@ export const COMMANDS: Record<string, Handler> = {
     }
   },
   "rename-draft": () => {
-    renameDraft(requireEnv("MARKER"), requireEnv("TAG"));
+    const marker = requireEnv("MARKER");
+    const tag = requireEnv("TAG");
+    renameDraft(marker, tag);
+    console.error(`release ${marker} now carries tag ${tag} and title ${tag}`);
   },
 };
 

@@ -1034,6 +1034,8 @@ describe("the push probe", () => {
   test("the outputs each script declares are exactly the ones its subcommands' branches write, so the wiring relation reads the truth", async () => {
     const [, probe] = probeInvocation();
     const sha = "b8df084c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a";
+    const release = (isDraft: boolean, targetCommitish: string) =>
+      JSON.stringify({ isDraft, targetCommitish });
     const assets = (...names: string[]) =>
       JSON.stringify({ assets: names.map((name) => ({ name })) });
     // Every branch of every subcommand a script dispatches from a workflow step, as runs; a declared subcommand this
@@ -1053,9 +1055,11 @@ describe("the push probe", () => {
         "resolve-source": async () =>
           (
             await Promise.all([
-              runDraftRead("resolve-source", { stdout: `${sha}\n` }, 0),
-              runDraftRead("resolve-source", { stdout: "main\n" }, 1),
-              runDraftRead("resolve-source", { stderr: "release not found\n", status: 4 }, 4),
+              runDraftRead("resolve-source", { stdout: release(true, sha) }, 0),
+              runDraftRead("resolve-source", { stdout: release(false, sha) }, 1),
+              runDraftRead("resolve-source", { stdout: release(true, "main") }, 1),
+              runDraftRead("resolve-source", { stderr: "release not found\n", status: 1 }, 1),
+              runDraftRead("resolve-source", { stderr: "HTTP 502: Bad Gateway\n", status: 4 }, 4),
             ])
           ).flat(),
         "verify-assets": async () =>

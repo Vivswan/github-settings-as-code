@@ -69,5 +69,5 @@ bun run fuzz --seed <iterationSeed> --iterations 1    # replay one failing itera
 Three repo-owned hooks share the ref work; the git topology lives in `.github/scripts/release-pipeline/tags.ts` and its test.
 
 - `post-green.yml` packages every green push under its `build/` tag, prunes the window, and moves `latest`.
-- `update-release.yml` checks the release's `source-vX.Y.Z` marker, mints `vX.Y.Z`, and moves the major. It packages the merge commit when no build tag does, reconciles `latest` and the build-tag window as post-green does, and last renames the draft release to `vX.Y.Z`.
+- `update-release.yml` checks the release's `source-vX.Y.Z` marker, mints `vX.Y.Z`, and moves the major. It packages the merge commit when no build tag does, and reconciles `latest` and the build-tag window as post-green does. It then renames the draft release to `vX.Y.Z` and, last, publishes the release to npm.
 - `update-release-pr.yml` publishes the `next` pre-release to npm.

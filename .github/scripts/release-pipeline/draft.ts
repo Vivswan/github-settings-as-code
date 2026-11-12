@@ -3,6 +3,7 @@
  * gives, the assets it carries before anything publishes, and the rename that hands it to the publish stage.
  */
 
+import { spawnSync } from "node:child_process";
 import { capture, run } from "../lib/workflow-step.js";
 import { FULL_SHA } from "./git.js";
 import { versionTagOf } from "./tags.js";
@@ -13,27 +14,71 @@ export const STEP_OUTPUTS = { "resolve-source": ["sha", "tag"] } as const;
 /** What the package job uploads to the draft; the managed publish stage attaches attestation.json after the check. */
 export const RELEASE_ASSETS = ["index.js", "settings.schema.json"];
 
+/** gh's whole stderr when no release, draft or published, carries the name it was asked for. */
+const NO_RELEASE = "release not found";
+
+/** The two fields of the release `resolveSource` reads, under gh's names for them. */
+interface SourceView {
+  isDraft: boolean;
+  targetCommitish: string;
+}
+
+/** The release named `marker` as gh reads it, or null when none carries the name. Any other failure ends the step with gh's stderr and status. */
+function viewSource(marker: string): SourceView | null {
+  const view = spawnSync("gh", ["release", "view", marker, "--json", "isDraft,targetCommitish"], {
+    stdio: ["inherit", "pipe", "pipe"],
+    encoding: "utf8",
+  });
+  if (view.error !== undefined) {
+    throw view.error;
+  }
+
+  if (view.status !== 0 && view.stderr.trim() === NO_RELEASE) {
+    return null;
+  }
+
+  if (view.status !== 0) {
+    process.stderr.write(view.stderr);
+    process.exit(view.status ?? 1);
+  }
+
+  return JSON.parse(view.stdout) as SourceView;
+}
+
 /** The version tag the draft's marker name gives, and the draft's target commitish, where release-please records the
  * merge commit. The release's identity is read from the draft and never from the run's own sha, so a newer push's
- * run can recover an older merge's pending release; anything but a full sha (a branch name on a hand-made draft) is
- * refused before a checkout or a tag could name it. */
+ * run can recover an older merge's pending release.
+ *
+ *   no release under the name  -> refused: the hook's rename took the name, and nothing proceeds under the new one
+ *   a published release        -> refused: release-please published the marker's name itself (`"draft": false`)
+ *   a target that is no sha    -> refused before a checkout or a tag could name it (a branch name on a hand-made draft)
+ */
 export function resolveSource(marker: string): { sha: string; tag: string } | { refusal: string } {
   const tag = versionTagOf(marker);
-  const target = capture([
-    "gh",
-    "release",
-    "view",
-    marker,
-    "--json",
-    "targetCommitish",
-    "--jq",
-    ".targetCommitish",
-  ]);
-  return FULL_SHA.test(target)
-    ? { sha: target, tag }
-    : {
-        refusal: `draft ${marker}'s target commitish is '${target}', not a commit SHA; refusing to package an unidentified source.`,
-      };
+  const view = viewSource(marker);
+  if (view === null) {
+    return {
+      refusal:
+        `no release is named ${marker}.\n` +
+        `If the release ${tag} exists, this release is past this job: re-run only the jobs that failed.`,
+    };
+  }
+
+  if (!view.isDraft) {
+    return {
+      refusal:
+        `release ${marker} is published, not a draft: users already see the marker's name as a release, so nothing is packaged from it.\n` +
+        'Fix release-please-config.json by PR: "draft": true on package ".".',
+    };
+  }
+
+  if (!FULL_SHA.test(view.targetCommitish)) {
+    return {
+      refusal: `draft ${marker}'s target commitish is '${view.targetCommitish}', not a commit SHA; refusing to package an unidentified source.`,
+    };
+  }
+
+  return { sha: view.targetCommitish, tag };
 }
 
 /** The draft's asset names beside attestation.json, sorted. Publishing freezes the asset list, so an incomplete one

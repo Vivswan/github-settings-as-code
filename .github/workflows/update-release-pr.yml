@@ -15,11 +15,11 @@ on:
   workflow_call:
     inputs:
       pr_number:
-        description: The release PR's number
+        description: The release PR's number, declared because the managed ci.yml passes it and read by no job here
         required: true
         type: string
       head_branch:
-        description: The release PR's head branch (push updates back to it)
+        description: The release PR's head branch, declared because the managed ci.yml passes it and read by no job here
         required: true
         type: string
 

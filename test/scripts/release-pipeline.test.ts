@@ -762,9 +762,12 @@ describe("the release hook's reads of the draft", () => {
     });
   }
   const sha = "b8df084c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a";
-  const VIEW_SOURCE = "release view source-v2.1.0 --json targetCommitish --jq .targetCommitish";
+  const VIEW_SOURCE = "release view source-v2.1.0 --json isDraft,targetCommitish";
   const VIEW_ASSETS = "release view source-v2.1.0 --json assets";
   const RENAME = "release edit source-v2.1.0 --tag v2.1.0 --title v2.1.0 --verify-tag";
+  /** gh's answer to VIEW_SOURCE, as it prints the two fields. */
+  const release = (isDraft: boolean, targetCommitish: string): string =>
+    `${JSON.stringify({ isDraft, targetCommitish })}\n`;
   const assets = (...names: string[]): string =>
     `${JSON.stringify({ assets: names.map((name) => ({ name })) })}\n`;
 
@@ -787,7 +790,7 @@ describe("the release hook's reads of the draft", () => {
     [
       "resolve-source: a draft targeting the merge commit writes it and the version tag source-v2.1.0 names as the step outputs",
       "resolve-source",
-      { stdout: `${sha}\n` },
+      { stdout: release(true, sha) },
       {
         stdout: "",
         stderr: "",
@@ -797,9 +800,24 @@ describe("the release hook's reads of the draft", () => {
       },
     ],
     [
+      // release-please publishes the release itself under `"draft": false`, before this hook runs.
+      "resolve-source: a published release is refused where a draft passes, naming the config key that hands the hook a draft",
+      "resolve-source",
+      { stdout: release(false, sha) },
+      {
+        stdout:
+          "::error::release source-v2.1.0 is published, not a draft: users already see the marker's name as a release, so nothing is packaged from it.\n" +
+          'Fix release-please-config.json by PR: "draft": true on package ".".\n',
+        stderr: "",
+        status: 1,
+        outputs: [],
+        calls: [VIEW_SOURCE],
+      },
+    ],
+    [
       "resolve-source: a draft targeting a branch name is refused before anything checks it out",
       "resolve-source",
-      { stdout: "main\n" },
+      { stdout: release(true, "main") },
       {
         stdout:
           "::error::draft source-v2.1.0's target commitish is 'main', not a commit SHA; refusing to package an unidentified source.\n",
@@ -810,10 +828,31 @@ describe("the release hook's reads of the draft", () => {
       },
     ],
     [
-      "resolve-source: a gh that fails ends the step with its status and stderr, writing no output",
+      // The hook's rename leaves no release under the marker's name, so a job re-run after it lands here.
+      "resolve-source: gh finding no release under the handed name is said in the hook's words, pointing at the renamed release",
       "resolve-source",
-      { stderr: "release not found\n", status: 4 },
-      { stdout: "", stderr: "release not found\n", status: 4, outputs: [], calls: [VIEW_SOURCE] },
+      { stderr: "release not found\n", status: 1 },
+      {
+        stdout:
+          "::error::no release is named source-v2.1.0.\n" +
+          "If the release v2.1.0 exists, this release is past this job: re-run only the jobs that failed.\n",
+        stderr: "",
+        status: 1,
+        outputs: [],
+        calls: [VIEW_SOURCE],
+      },
+    ],
+    [
+      "resolve-source: any other gh failure ends the step with gh's status and stderr, writing no output",
+      "resolve-source",
+      { stderr: "HTTP 502: Bad Gateway (https://api.github.com/graphql)\n", status: 4 },
+      {
+        stdout: "",
+        stderr: "HTTP 502: Bad Gateway (https://api.github.com/graphql)\n",
+        status: 4,
+        outputs: [],
+        calls: [VIEW_SOURCE],
+      },
     ],
     [
       "verify-assets: both packaged assets beside the attestation pass silently",
@@ -870,10 +909,16 @@ describe("the release hook's reads of the draft", () => {
       { stdout: "", stderr: "release not found\n", status: 4, outputs: [], calls: [VIEW_ASSETS] },
     ],
     [
-      "rename-draft: the draft takes the version tag as its tag and title, held to a tag origin has, and stays a draft",
+      "rename-draft: the draft takes the version tag as its tag and title, held to a tag origin has, and the step logs both names",
       "rename-draft",
       {},
-      { stdout: "", stderr: "", status: 0, outputs: [], calls: [RENAME] },
+      {
+        stdout: "",
+        stderr: "release source-v2.1.0 now carries tag v2.1.0 and title v2.1.0\n",
+        status: 0,
+        outputs: [],
+        calls: [RENAME],
+      },
     ],
     [
       "rename-draft: a gh that fails ends the step with its status and stderr",
@@ -897,10 +942,10 @@ describe("the release hook's reads of the draft", () => {
   test.each<[subcommand: string, unset: string]>([
     ["resolve-source", "MARKER"],
     ["verify-assets", "MARKER"],
-    ["rename-draft", "MARKER"],
-    ["rename-draft", "TAG"],
   ])("%s without %s is refused before gh is asked", async (subcommand, unset) => {
-    expect(await runWithGh({ stdout: `${sha}\n` }, { [unset]: undefined }, subcommand)).toEqual({
+    expect(
+      await runWithGh({ stdout: release(true, sha) }, { [unset]: undefined }, subcommand),
+    ).toEqual({
       stdout: "",
       stderr: `${unset} must be set for this step\n`,
       status: 1,
@@ -919,24 +964,24 @@ describe("the release hook's reads of the draft", () => {
   ])(
     "resolve-source: handed %s, it refuses the name before gh is asked and derives no version tag",
     async (_what, handed) => {
-      expect(await runWithGh({ stdout: `${sha}\n` }, { MARKER: handed }, "resolve-source")).toEqual(
-        {
-          stdout: "",
-          stderr:
-            `release-pipeline resolve-source: the handed tag "${handed}" is not source-vX.Y.Z, the name release-please gives a release here; ` +
-            "refusing to derive a version tag from it.\n" +
-            'Fix release-please-config.json by PR: "include-component-in-tag": true at the top, "component": "source" on package ".".\n',
-          status: 1,
-          outputs: [],
-          calls: [],
-        },
-      );
+      expect(
+        await runWithGh({ stdout: release(true, sha) }, { MARKER: handed }, "resolve-source"),
+      ).toEqual({
+        stdout: "",
+        stderr:
+          `release-pipeline resolve-source: the handed tag "${handed}" is not source-vX.Y.Z, the name release-please gives a release here; ` +
+          "refusing to derive a version tag from it.\n" +
+          'Fix release-please-config.json by PR: "include-component-in-tag": true at the top, "component": "source" on package ".".\n',
+        status: 1,
+        outputs: [],
+        calls: [],
+      });
     },
   );
 
   test("handed source-v2.1.0, the hook mints v2.1.0 on the merge commit's package and pushes no source-v* tag", async () => {
     const fx = seedFixture();
-    const resolved = await runWithGh({ stdout: `${fx.mergeSha}\n` }, {}, "resolve-source");
+    const resolved = await runWithGh({ stdout: release(true, fx.mergeSha) }, {}, "resolve-source");
     expect(resolved.outputs).toEqual([`sha=${fx.mergeSha}`, "tag=v2.1.0"]);
     const [sourceSha = "", tag = ""] = resolved.outputs.map((line) => line.slice(4));
     let step: ReturnType<typeof runStep> | undefined;
