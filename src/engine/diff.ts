@@ -73,10 +73,10 @@ export interface DeltaOptions {
 }
 
 /**
- * Where the write's slice stops knowing the keys. The sweep skips `passthrough` (the dotted paths the slice leaves
- * untyped, `rules[].parameters`, `bypass_actors[]`) because it cannot tell a default GitHub filled from a value the
- * file left out: a live `require_code_owner_review: true` beside a declared pull_request rule reads clean, and the
- * PUT resets it. `nullable` names the paths whose clearing spelling is `null`.
+ * Where the write's slice stops knowing the keys. The sweep skips `passthrough`, the dotted paths where the slice
+ * stops typing keys, and everything below them. In a ruleset those are `rules[]` and `bypass_actors[]`, each an open
+ * mapping that passes unknown keys through: a live `require_code_owner_review: true` beside a declared pull_request
+ * rule reads clean, and the PUT resets it. `nullable` names the paths whose clearing spelling is `null`.
  */
 export interface ReplaceSweep {
   readonly passthrough: readonly string[];

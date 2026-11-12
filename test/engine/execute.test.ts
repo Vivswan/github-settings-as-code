@@ -969,7 +969,7 @@ describe("executePlan", () => {
   test("a thunk receives a frozen projection holding the resolver and nothing else", async () => {
     // A caller may pass a wider object as tools; the thunk must see nothing on it beyond the resolver.
     const api = new MockApi({}).allowMutations("POST /repos/o/r/labels");
-    const leaky = { ...TOOLS, api, repo: REPO, check: false as const };
+    const leaky = { ...TOOLS, api, repo: REPO };
     let seen: unknown;
     const plan = planOf({
       role: "create",

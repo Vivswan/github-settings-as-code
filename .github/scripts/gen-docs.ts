@@ -122,7 +122,7 @@ export function sectionsCells(
 }
 
 // The generator's boundary: the table rule is the author's to meet, so a faulty row stops the build naming it.
-export function renderSectionsRows(cells: ReadonlyArray<readonly string[]>): string {
+function renderSectionsRows(cells: ReadonlyArray<readonly string[]>): string {
   const fault = tableFault(SECTIONS_TABLE_HEADER, cells, "keyed");
   if (fault !== undefined) {
     throw new Error(fault);
@@ -664,7 +664,7 @@ function parseCoveragePage(body: string): Result<CoveragePage, string> {
 const RESULT_TAIL =
   ", worst first across the run's targets; the exit code is 1 exactly when it is `failed`, or `drift` in mode: check";
 
-export function renderOutputsList(results: readonly string[]): string {
+function renderOutputsList(results: readonly string[]): string {
   return `${results.map((value) => `\`${value}\``).join(" / ")}${RESULT_TAIL}`;
 }
 

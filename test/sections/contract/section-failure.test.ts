@@ -79,8 +79,6 @@ describe("the kinds the helpers add beside failureFor's", () => {
   const ctx: SectionContext = {
     api: new MockApi({}),
     repo: { owner: "o", name: "r", slug: "o/r" },
-    check: false,
-    resolveSecret: () => "",
   };
 
   test("malformed: a page that is not a list, and a body off the documented shape", async () => {

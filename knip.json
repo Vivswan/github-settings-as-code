@@ -3,7 +3,6 @@
   "entry": [
     "src/main.ts",
     "src/schema.ts",
-    ".github/scripts/*.ts",
     "**/*.test.ts",
     "test/sections/*/snapshot-row.ts",
     "src/upstream-gaps/gap.ts"
