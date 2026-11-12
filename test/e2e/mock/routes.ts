@@ -9,6 +9,7 @@
  * GraphQL has no body allowlist: its schema check follows the route match, as GitHub validates before it runs anything.
  */
 
+import type { GraphQLFormattedError } from "graphql";
 import { isPlainObject } from "../../../src/plain-data.js";
 import type { SectionKey } from "../../../src/schema.js";
 import { endpointPath, toleratedStatuses } from "../../../src/sections/contract/endpoints.js";
@@ -58,7 +59,8 @@ import {
   type Requirement,
   SECTION_BY_KEY,
 } from "./grading.js";
-import { graphqlRequestErrors } from "./graphql-request.js";
+import { completedGraphqlAnswer } from "./graphql-answer.js";
+import { type AcceptedGraphqlRequest, acceptedGraphqlRequest } from "./graphql-request.js";
 import { GRAPHQL_HANDLERS, HANDLERS } from "./handlers.js";
 import { decodeNodeId, type NodeFamily } from "./node-id.js";
 import { acceptedBody } from "./request-body.js";
@@ -67,7 +69,6 @@ import {
   asObject,
   type GraphqlErrorReply,
   type GraphqlHandler,
-  type GraphqlHandlerResult,
   type Json,
   type MockResponse,
 } from "./support.js";
@@ -274,20 +275,15 @@ function parseGraphqlRequest(
 }
 
 /**
- * The schema check. GitHub answers a document off its schema, or variables off the operation's declared types, with
- * HTTP 200 carrying errors and no data. The action shapes every document and variable itself, so the refusal is a
- * violation too: the scenario fails whatever outcome it expected.
+ * The schema check's refusal. GitHub answers a document off its schema, or variables off the operation's declared
+ * types, with HTTP 200 carrying errors and no data. The action shapes every document and variable itself, so the
+ * refusal is a violation too: the scenario fails whatever outcome it expected.
  */
 function graphqlSchemaRefusal(
   op: TaggedGraphqlOp,
-  query: string,
-  variables: Json,
+  errors: readonly GraphQLFormattedError[],
   log: LoggedRequest,
-): PipelineResult | null {
-  const errors = graphqlRequestErrors(query, op.name, variables);
-  if (errors === null) {
-    return null;
-  }
+): PipelineResult {
   return {
     response: { status: 200, body: { errors } },
     log: { ...log, status: 200 },
@@ -331,23 +327,43 @@ function graphqlDenial(
   return { response, log: denied, violation: barrierViolation };
 }
 
-/** Response guard, the status-subset analog: an undeclared error type is a mock design bug, not a scenario outcome. */
-function graphqlResponse(
+/** Response guard of an `errors` answer, the status-subset analog: an undeclared error type is a mock design bug, not a scenario outcome. */
+function graphqlErrorsResponse(
   key: string,
   op: TaggedGraphqlOp,
-  result: GraphqlHandlerResult,
-): MockResponse | { violation: string } {
-  if (result.errors === undefined) {
-    return { status: 200, body: { data: result.data } };
-  }
+  errors: readonly GraphqlErrorReply[],
+  violation: (message: string) => PipelineResult,
+): MockResponse | PipelineResult {
   const declared = toleratedGraphqlErrors(op);
-  const undeclared = result.errors.filter((entry) => !declared.includes(entry.type));
+  const undeclared = errors.filter((entry) => !declared.includes(entry.type));
   if (undeclared.length > 0) {
-    return {
-      violation: `GraphQL handler "${key}" answered undeclared error type(s) [${undeclared.map((e) => `${e.type}: "${e.message}"`).join(", ")}]; the operation declares only [${declared.join(", ")}] as tolerated outcomes`,
-    };
+    return violation(
+      `GraphQL handler "${key}" answered undeclared error type(s) [${undeclared.map((e) => `${e.type}: "${e.message}"`).join(", ")}]; the operation declares only [${declared.join(", ")}] as tolerated outcomes`,
+    );
   }
-  return { status: 200, body: { data: null, errors: result.errors } };
+  return { status: 200, body: { data: null, errors } };
+}
+
+/**
+ * Response guard of a `data` answer. The product receives what graphql-js completes from the handler's data under the
+ * request's own document, as from GitHub: no key the document did not select, and null under a selected nullable key
+ * the handler left out. Data that does not complete is an answer GitHub's schema could never give, the mock's own
+ * fault: a violation, whatever outcome the scenario expected.
+ */
+function graphqlDataResponse(
+  key: string,
+  op: TaggedGraphqlOp,
+  request: AcceptedGraphqlRequest,
+  data: Json,
+  violation: (message: string) => PipelineResult,
+): MockResponse | PipelineResult {
+  const completed = completedGraphqlAnswer(request, data);
+  if ("errors" in completed) {
+    return violation(
+      `GraphQL ${op.name} was answered off GitHub's schema by the mock handler "${key}": ${completed.errors.join("; ")}`,
+    );
+  }
+  return { status: 200, body: { data: completed.data } };
 }
 
 /**
@@ -373,9 +389,9 @@ export function handleGraphqlRequest(
   };
 
   // Ahead of every barrier: no fault, denial, or handler answers a request GitHub refuses before running it.
-  const refused = graphqlSchemaRefusal(op, query, variables, graphqlLog);
-  if (refused) {
-    return refused;
+  const accepted = acceptedGraphqlRequest(query, op.name, variables);
+  if ("errors" in accepted) {
+    return graphqlSchemaRefusal(op, accepted.errors, graphqlLog);
   }
 
   // Check-mode barrier before the fault barrier: a synthetic fault must not mask the one bug this barrier exists to catch.
@@ -413,9 +429,14 @@ export function handleGraphqlRequest(
     // Unreachable after assertGraphqlHandlerCompleteness at construction; loud rather than a silent undefined call.
     return violation(`no GraphQL handler registered for dispatched operation "${key}"`);
   }
-  const response = graphqlResponse(key, op, handler({ state: target.state, op, variables }));
-  if ("violation" in response) {
-    return violation(response.violation);
+  const result = handler({ state: target.state, op, variables });
+  // Data off the schema is refused under the operation's own log entry, so the runner still reads a read as a read.
+  const response =
+    result.errors === undefined
+      ? graphqlDataResponse(key, op, accepted, result.data, violationFor(graphqlLog))
+      : graphqlErrorsResponse(key, op, result.errors, violation);
+  if ("log" in response) {
+    return response;
   }
 
   const corrupted = takeCorruption(key, options, response, graphqlLog);
