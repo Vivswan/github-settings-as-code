@@ -13,7 +13,7 @@ coverage:
         code_scanning_default_setup.
       - >-
         A 202 answer means GitHub rolls the change out in a configuration run, which the log names; a
-        409 means a configuration run is already in progress (re-run the workflow after it finishes).
+        409 means a configuration run is already in progress (re-run after it finishes).
       - >-
         A 403 can mean code quality is unavailable on the repository or the repository is archived,
         rather than a missing permission, and a 422 (the change cannot be applied) carries GitHub's

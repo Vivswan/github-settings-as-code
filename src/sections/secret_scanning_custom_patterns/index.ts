@@ -59,7 +59,7 @@ const NOT_ENABLED_HINT =
 
 /** Exported so the troubleshooting guide's verbatim quote is test-pinned. */
 export const STALE_VERSION_HINT =
-  "the pattern changed on GitHub between this run's read and its write (stale custom_pattern_version); re-run the workflow";
+  "the pattern changed on GitHub between this run's read and its write (stale custom_pattern_version); re-run";
 
 /** The update and the remove both carry custom_pattern_version, so both can answer the 412 their hint names. */
 const ENDPOINTS = {
