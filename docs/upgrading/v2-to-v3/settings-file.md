@@ -35,6 +35,8 @@ v3 has one rule at the top level and on the wrappers: the underscore belongs to 
 
 A directive out of its place is refused like any unknown key: `{name: bug, _remove: true}` drops an entry, while a top-level `_remove: true` or `labels: {_remove: true, entries: []}` fails validation. A removal also needs a fold to act in: in a single document (a one-file apply or check) it fails validation naming its site, since there is no lower layer to remove from.
 
+Two cases draw a warning instead, in a document that otherwise validates, and the run goes on until the next major refuses them. A `_remove` on an entry of a list that is not keyed (a ruleset's `bypass_actors`) removes nothing and passes through as a field. A single document's top-level `_layering` outside its three values is read by nothing.
+
 ```yaml settings
 # owner: platform-team, see runbook RB-112
 labels:

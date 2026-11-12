@@ -3,12 +3,17 @@ schema:
   SettingsFile._layering: >-
     mode: render only: a layer-level default for how this document's list sections combine with
     the layers below it, overriding the run's layering input; a section's own wrapper-level
-    `_layering` overrides it again. `replace` lets each of this document's lists win wholesale;
+    `_layering` overrides it again.
+
+    `replace` lets each of this document's lists win wholesale;
     `shallow` unions the entries by the section's key and swaps a same-key entry for this
     document's; `deep` unions by key and merges a same-key pair field by field, a nested keyed
-    list (a ruleset's rules, by type) unioning the same way. Consumed by the render, never applied:
-    the rendered document carries no `_layering`, and apply and check ignore it. It and `_undeclared`
-    are the only underscore keys a document's top level takes: any other one is refused.
+    list (a ruleset's rules, by type) unioning the same way.
+
+    Consumed by the render, never applied: the rendered document carries no `_layering`, and
+    apply and check do not read it. On a single document they warn when its value is none of the
+    three, and the next major version refuses it there. It and `_undeclared` are the only
+    underscore keys a document's top level takes: any other one is refused.
   SettingsFile._undeclared: >-
     The file-wide undeclared policy: what apply does to a live resource a list does not declare, for
     every list in this document that takes the `_undeclared` knob (the knobbed sections and an
