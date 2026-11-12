@@ -16,6 +16,7 @@ import {
   snapshotRepository,
 } from "../../src/engine/snapshot.js";
 import type { GitHubClient } from "../../src/github/api.js";
+import type { SectionKey } from "../../src/schema.js";
 import { sectionFailure } from "../../src/sections/contract/errors.js";
 import type { SectionMeta } from "../../src/sections/contract/module.js";
 import { endpointPermission, sectionOperations } from "../../src/sections/contract/operations.js";
@@ -148,6 +149,9 @@ const opts = (policy: "fail" | "warn" = "fail") => ({
 
 const NOTHING = "nothing exists on the repository, so the section is omitted";
 
+const OMITTED_WITH_NOTES =
+  "nothing was read back to declare, so the section is omitted; its notes above say why";
+
 describe("snapshotRepository", () => {
   test("an all-grades token reads every supported section back and lists the rest unsupported", async () => {
     const api = registryFake(LIVE);
@@ -225,7 +229,7 @@ describe("snapshotRepository", () => {
       {
         key: "custom_properties",
         status: "snapshot",
-        detail: [expect.stringMatching(personal), NOTHING],
+        detail: [expect.stringMatching(personal), OMITTED_WITH_NOTES],
       },
     ]);
     expect(annotations).toEqual([
@@ -259,6 +263,91 @@ describe("snapshotRepository", () => {
     } finally {
       empty.mockRestore();
     }
+  });
+
+  test("an omitted section says nothing exists only when it has no note of its own; beside a denied read or a value left out it points at those notes", async () => {
+    const run = async (api: GitHubClient, policy: "fail" | "warn", ...keys: SectionKey[]) =>
+      renderable(
+        await snapshotRepository(
+          api,
+          { ...opts(policy), sections: SectionSelection.of({ only: keys })._unsafeUnwrap() },
+          captureIo().io,
+        ),
+      );
+    // A read-only Administration grant reads the base limit (none is set) and is denied the cap and the bypass list.
+    const readOnly = registryFake({}, { mask: { administration: "read" }, denialStyle: 403 });
+    const denied = await run(readOnly, "warn", "interaction_limits", "milestones");
+    const leftOut = (key: string) =>
+      expect.stringMatching(
+        new RegExp(
+          `^interaction_limits\\.${key}: left out of the snapshot - the token was denied GET `,
+        ),
+      );
+    expect(denied.outcomes.find((o) => o.key === "interaction_limits")).toEqual({
+      key: "interaction_limits",
+      status: "snapshot",
+      detail: [
+        leftOut("pull_request_creation_bypass"),
+        leftOut("pull_request_creation_cap"),
+        OMITTED_WITH_NOTES,
+      ],
+    });
+    // The control, in the same run: every milestones read succeeded and found nothing.
+    expect(denied.outcomes.find((o) => o.key === "milestones")).toEqual({
+      key: "milestones",
+      status: "snapshot",
+      detail: [NOTHING],
+    });
+    // "Above" is a position: the file header keeps the closing line under the section's notes.
+    const header = renderSnapshotYaml(denied, "https://example.test/settings.schema.json")
+      .split("\n")
+      .filter((line) => line.startsWith("# interaction_limits"));
+    expect(header).toHaveLength(3);
+    expect(header.at(-1)).toBe(`# interaction_limits: ${OMITTED_WITH_NOTES}`);
+
+    // A limit that does exist, set above the repository: left out, so "nothing exists" would be false.
+    const inherited = await run(
+      registryFake({
+        interaction_limits: {
+          limit: "existing_users",
+          origin: "organization",
+          expires_at: "2027-07-01T00:00:00Z",
+        },
+        interaction_limits_org_override: true,
+      }),
+      "fail",
+      "interaction_limits",
+    );
+    expect(inherited.outcomes).toEqual([
+      {
+        key: "interaction_limits",
+        status: "snapshot",
+        detail: [
+          'interaction_limits: left out of the snapshot - the live "existing_users" limit is set at the organization level, not on the repository',
+          OMITTED_WITH_NOTES,
+        ],
+      },
+    ]);
+  });
+
+  test("a denial's HTTP status rides on the section it failed or skipped, so a hidden target's public line can carry it", async () => {
+    const labels = SectionSelection.of({ only: ["labels"] })._unsafeUnwrap();
+    const outcomes = async (status: 403 | 404, policy: "fail" | "warn") => {
+      const api = denying(registryFake(LIVE), /^\/repos\/o\/r\/labels/, status);
+      const result = await snapshotRepository(
+        api,
+        { ...opts(policy), sections: labels },
+        captureIo().io,
+      );
+      return result.outcomes;
+    };
+    const denial = expect.stringMatching(/^the token was denied GET \/repos\/o\/r\/labels/);
+    expect(await outcomes(403, "fail")).toEqual([
+      { key: "labels", status: "failed", detail: [denial], httpStatus: 403 },
+    ]);
+    expect(await outcomes(404, "warn")).toEqual([
+      { key: "labels", status: "skipped", detail: [denial], httpStatus: 404 },
+    ]);
   });
 
   test("the sections allowlist limits the run to the named sections", async () => {
