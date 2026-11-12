@@ -42,6 +42,16 @@ function drive(io: Io): void {
   io.summary("| a |\n|---|");
 }
 
+/** The runner's two parsers, as its source reads a line: `::` after the whitespace .NET trims (NEL included), or `##[` anywhere. */
+function runnerReadsCommand(line: string): boolean {
+  return /^[\s\u0085]*::/.test(line) || line.includes("##[");
+}
+
+/** The drift line a list section logs for a declared entry the repository lacks, the name as the settings file gave it. */
+function drift(name: string): string {
+  return `drift: labels["${name}"]: missing`;
+}
+
 /** @actions/core mints one random delimiter per record; the pin compares the records around it. */
 function sameDelimiters(text: string): string {
   return text.replace(/ghadelimiter_[0-9a-f-]{36}/g, "ghadelimiter_<uuid>");
@@ -153,51 +163,53 @@ describe("the CLI under GitHub Actions", () => {
     }));
 
   // The runner reads two forms as a workflow command: `::` at the start of a line, after leading whitespace, and
-  // `##[` anywhere in one. A name a settings file or GitHub supplied would issue either from the admin's run.
+  // `##[` anywhere in one. Text a settings file or GitHub supplied would issue either from the admin's run.
   test.each([
     [
       "a line feed before `::`",
-      "x\n::error file=README.md,line=1::spoofed",
-      "x%0A::error file=README.md,line=1::spoofed",
+      drift("x\n::error file=README.md,line=1::spoofed"),
+      drift("x%0A::error file=README.md,line=1::spoofed"),
     ],
     [
       "CR LF before `::`",
-      "x\r\n::error file=README.md,line=1::spoofed",
-      "x%0D%0A::error file=README.md,line=1::spoofed",
+      drift("x\r\n::error file=README.md,line=1::spoofed"),
+      drift("x%0D%0A::error file=README.md,line=1::spoofed"),
     ],
     [
       "a lone CR before `::`",
-      "x\r::error file=README.md,line=1::spoofed",
-      "x%0D::error file=README.md,line=1::spoofed",
+      drift("x\r::error file=README.md,line=1::spoofed"),
+      drift("x%0D::error file=README.md,line=1::spoofed"),
     ],
-    ["`##[` and no line break", "x##[error]spoofed", "x%23%23[error]spoofed"],
-    ["both forms", "x\n::error::a##[error]b", "x%0A::error::a%23%23[error]b"],
+    ["`##[` and no line break", drift("x##[error]spoofed"), drift("x%23%23[error]spoofed")],
+    ["both forms", drift("x\n::error::a##[error]b"), drift("x%0A::error::a%23%23[error]b")],
+    [
+      "`::` at its own start, after whitespace",
+      "\t \u0085::error::spoofed: created",
+      "\t \u0085%3A%3Aerror::spoofed: created",
+    ],
   ])(
-    "a logged name holding %s is one line of plain text on both faces, so the runner reads no command in it",
-    (_form, name, escaped) =>
+    "a logged line holding %s is one line of plain text on both faces, so the runner reads no command in it",
+    (_form, line, plain) =>
       withTempDir("gsac-actions-", (dir) => {
         const logs = (io: Io): void => {
-          io.log(`drift: labels["${name}"]: missing`);
+          io.log(line);
           io.log("result: drift");
         };
         const cli = driveCli(dir);
         logs(cli.io);
         for (const stdout of [actionStdout(logs), cli.stdout()]) {
           const lines = stdout.split(/\r\n|\r|\n/);
-          expect(lines).toEqual([`drift: labels["${escaped}"]: missing`, "result: drift", ""]);
-          const commands = lines.filter(
-            (line) => line.trimStart().startsWith("::") || line.includes("##["),
-          );
-          expect(commands).toEqual([]);
+          expect(lines).toEqual([plain, "result: drift", ""]);
+          expect(lines.filter(runnerReadsCommand)).toEqual([]);
         }
       }),
   );
 
-  // The runner reads `##[` as a command anywhere in a line, so under one the stream rewrites it in every chunk that is
-  // not a finished command, whichever write carried it. A write added later is covered without wrapping it.
+  // Under a runner the stream rewrites both forms in every chunk that is not a finished command, whichever write
+  // carried it, so a write added later is covered without wrapping it. On a terminal nothing reads commands.
   test.each<[string, Record<string, string>, (name: string, problem: string) => string[][]]>([
     [
-      "under a runner the log, the debug trace, and the --json envelope lose `##[`, and a finished command keeps its text",
+      "under a runner the log, the debug trace, the --json envelope, and a bare stream write lose `##[` and a leading `::`, and a finished command keeps its text",
       { GITHUB_ACTIONS: "true" },
       (_name, problem) => [
         [
@@ -207,7 +219,9 @@ describe("the CLI under GitHub Actions", () => {
         ],
         [
           'labels: created label "x%23%23[error]y"',
+          "%3A%3Anotice::from a settings value",
           'debug: POST /repos/o/r/labels -> 201 payload: {"name":"x%23%23[error]y"}',
+          "  %3A%3Awarning::from a write added later",
         ],
       ],
     ],
@@ -218,7 +232,9 @@ describe("the CLI under GitHub Actions", () => {
         [JSON.stringify({ result: "failed", problem })],
         [
           `labels: created label "${name}"`,
+          "::notice::from a settings value",
           `debug: POST /repos/o/r/labels -> 201 payload: {"name":"${name}"}`,
+          "  ::warning::from a write added later",
           `error: ${problem}`,
         ],
       ],
@@ -226,17 +242,18 @@ describe("the CLI under GitHub Actions", () => {
   ])("%s", (_case, env, expected) => {
     const stdout = memoryStream();
     const stderr = memoryStream();
-    const { io, flush } = cliIo({
-      streams: maskedStreams({ stdout: stdout.stream, stderr: stderr.stream }, actionsRunner(env)),
-      json: true,
-      verbose: true,
-      colors: false,
-    });
+    const streams = maskedStreams(
+      { stdout: stdout.stream, stderr: stderr.stream },
+      actionsRunner(env),
+    );
+    const { io, flush } = cliIo({ streams, json: true, verbose: true, colors: false });
     const name = "x##[error]y";
     const problem = `labels[1].name: "${name}" names the same label`;
     io.mask("ghp_secret");
     io.log(`labels: created label "${name}"`);
+    io.log("::notice::from a settings value");
     io.debug(`POST /repos/o/r/labels -> 201 payload: {"name":"${name}"}`);
+    streams.stderr.write("  ::warning::from a write added later\n");
     io.annotate("error", problem);
     io.output("result", "failed");
     flush(problem);

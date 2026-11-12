@@ -8,7 +8,7 @@
 
 import { closeSync } from "node:fs";
 import { Command, CommanderError, Option } from "commander";
-import { ok, type Result } from "neverthrow";
+import { ok } from "neverthrow";
 import pc from "picocolors";
 import {
   describeProblem,
@@ -183,7 +183,7 @@ function addModeCommands(program: Command, wiring: Wiring): void {
 
     command.action(async function (this: Command) {
       const values = this.optsWithGlobals<Globals & Record<string, unknown>>();
-      const summary: Result<number | undefined, string> =
+      const summary =
         values.summary === undefined ? ok(undefined) : openSummaryFile(values.summary);
       if (summary.isErr()) {
         // No run started, so this ends as a file-only command's failure does: the error line and the failed envelope.
@@ -210,7 +210,7 @@ function addModeCommands(program: Command, wiring: Wiring): void {
           return failRun(io, problem);
         },
       );
-      // The run has written its summary by the time it settles, whichever way it ends.
+      // Nothing appends to the summary once the run has settled, whichever way it ends.
       const code = await (summaryFd === undefined ? run : run.finally(() => closeSync(summaryFd)));
       wiring.exit(code);
       flush(fatal);

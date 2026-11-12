@@ -9,6 +9,9 @@ import { randomUUID } from "node:crypto";
 import { EOL } from "node:os";
 import type { AnnotationLevel, OutputName } from "../index.js";
 
+/** `::` where the runner looks for it: at the start of a line, after the whitespace it trims, which JavaScript's `\s` covers but for NEL. */
+const LINE_OPENING_COMMAND = /^([\s\u0085]*)::/gm;
+
 export interface ActionsRunner {
   /** GITHUB_OUTPUT; the runner always sets it, so an unset one only drops the record, as the action's Io does. */
   readonly outputFile: string | undefined;
@@ -43,9 +46,16 @@ export function oneLine(text: string): string {
   return text.replace(/\r/g, "%0D").replace(/\n/g, "%0A");
 }
 
-/** `text` with `##[` written %23%23[: the runner also reads the older `##[command]` form, and that one anywhere in a line. */
-export function withoutLegacyCommand(text: string): string {
-  return text.replace(/##\[/g, "%23%23[");
+/**
+ * `text` with no line the runner reads as a workflow command, so text from a settings file or from live GitHub
+ * state, printed by any of the CLI's own writers, cannot issue one. Not covered: what a dependency prints itself,
+ * a marker split across two writes, and a writer that bypasses the stream on purpose.
+ *
+ *   the runner reads `::` at the start of a line, after leading whitespace -> that `::` is written %3A%3A
+ *   the runner reads `##[` anywhere in a line                               -> it is written %23%23[
+ */
+export function withoutCommands(text: string): string {
+  return text.replace(LINE_OPENING_COMMAND, "$1%3A%3A").replace(/##\[/g, "%23%23[");
 }
 
 /** One `::name::message` line with the runner's data escaping (%, CR, LF), as @actions/core issues it. */

@@ -44,14 +44,19 @@ function appendSummary(markdown: string): void {
 }
 
 /**
- * `line` as one log line the runner prints and never reads as a workflow command. test/cli/actions.test.ts holds
- * the CLI's log under a runner to the same output.
+ * `line` as one log line the runner cannot read as a workflow command, so text from a settings file or from live
+ * GitHub state, printed by this action's own writers, cannot issue one. Not covered: what a dependency prints
+ * itself, and a writer that bypasses this sink on purpose. test/cli/actions.test.ts holds the CLI to the same output.
  *
- *   the runner reads `::` at the start of a line, after leading whitespace -> CR and LF are written %0D and %0A
+ *   the runner reads `::` at the start of a line, after leading whitespace -> CR and LF are written %0D and %0A, a leading `::` %3A%3A
  *   the runner reads `##[` anywhere in a line                               -> it is written %23%23[
  */
 function plainLine(line: string): string {
-  return line.replace(/\r/g, "%0D").replace(/\n/g, "%0A").replace(/##\[/g, "%23%23[");
+  return line
+    .replace(/\r/g, "%0D")
+    .replace(/\n/g, "%0A")
+    .replace(/^([\s\u0085]*)::/, "$1%3A%3A")
+    .replace(/##\[/g, "%23%23[");
 }
 
 export const actionsIo: Io = {

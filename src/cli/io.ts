@@ -29,7 +29,7 @@ import {
   type ActionsRunner,
   oneLine,
   outputRecord,
-  withoutLegacyCommand,
+  withoutCommands,
   workflowCommand,
 } from "./actions.js";
 
@@ -91,9 +91,9 @@ export function maskedStreams(streams: CliStreams, runner?: ActionsRunner): Mask
     runner === undefined ? () => {} : (value) => command(workflowCommand("add-mask", value)),
   );
   const redact = (text: string): string => redactRanges(text, registry.masked());
-  // Under a runner a chunk that is no finished command also loses `##[`, so no writer has to remember it.
+  // Under a runner a chunk that is no finished command also loses what the runner reads as one, so no writer has to remember it.
   const rewrite =
-    runner === undefined ? redact : (text: string): string => withoutLegacyCommand(redact(text));
+    runner === undefined ? redact : (text: string): string => withoutCommands(redact(text));
   const stdout = new RedactingStream(streams.stdout, rewrite);
   /** A finished command line, queued behind the redacted writes before it. */
   function command(line: string): void {
