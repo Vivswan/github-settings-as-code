@@ -162,7 +162,7 @@ describe("a caller-supplied client that echoes a secret", () => {
           body: "",
         },
       }),
-      detail: `webhooks: creating webhook "https://x.test/h" failed - POST /repos/o/r/hooks: 403 ${SECRET_RESPONSE_WITHHELD}. The API rate limit was hit; re-run the workflow after the limit resets, or use a token with a higher rate limit`,
+      detail: `webhooks: creating webhook "https://x.test/h" failed - POST /repos/o/r/hooks: 403 ${SECRET_RESPONSE_WITHHELD}. The API rate limit was hit; re-run after the limit resets, or use a token with a higher rate limit`,
     },
     {
       answer: "returns a 422 whose message quotes the value",

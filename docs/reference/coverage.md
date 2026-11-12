@@ -406,7 +406,7 @@ The side-by-side comparison with the Probot Settings app lives in the migration 
 **Code quality setup** (`code_quality_setup`)
 
 - GET/PATCH /repos/{owner}/{repo}/code-quality/setup, PATCH body verbatim (state, languages, runner_type, runner_label, ai_findings_option), the near field-for-field mirror of code_scanning_default_setup.
-- A 202 answer means GitHub rolls the change out in a configuration run, which the log names; a 409 means a configuration run is already in progress (re-run the workflow after it finishes).
+- A 202 answer means GitHub rolls the change out in a configuration run, which the log names; a 409 means a configuration run is already in progress (re-run after it finishes).
 - A 403 can mean code quality is unavailable on the repository or the repository is archived, rather than a missing permission, and a 422 (the change cannot be applied) carries GitHub's message verbatim.
 - Check compares declared keys only, languages as a set in the PATCH's vocabulary, and notes a key the GET never echoes as never converging; parse refuses the GET-only schedule and updated_at.
 - GitHub gates the GET at write (the Codespaces secrets precedent), so a read-only Administration grant cannot run this section in check mode either; the declaration grades the read as write (src/sections/shared/setup-section.ts).
@@ -533,7 +533,7 @@ The side-by-side comparison with the Probot Settings app lives in the migration 
 - It refuses what PCRE syntax refuses (an unbalanced group or class, a dangling quantifier, a quantifier on an anchor, a trailing backslash, a range out of order, a group name declared twice) and the `(?` openings it does not know, such as the subroutine call `(?1)`, which Hyperscan refuses as well.
 - It cannot see what Hyperscan alone refuses (lookbehind, backreferences, the option modifiers GitHub documents as unsupported), and it leaves an extended-mode pattern (`(?x)`) unchecked, so GitHub can still refuse an expression at apply.
 - A live pattern the check cannot verify is left out of a snapshot with a note naming it, never a failed snapshot.
-- Writes ride optimistic concurrency whenever GitHub supplies a version: the list GET carries each pattern's custom_pattern_version, the PATCH/DELETE send it back, and a 412 means the pattern changed mid-run (re-run the workflow); a version-less pattern (the field is optional and nullable upstream) writes without the check, as the API allows.
+- Writes ride optimistic concurrency whenever GitHub supplies a version: the list GET carries each pattern's custom_pattern_version, the PATCH/DELETE send it back, and a 412 means the pattern changed mid-run (re-run); a version-less pattern (the field is optional and nullable upstream) writes without the check, as the API allows.
 - Undeclared patterns are KEPT by default (removing a pattern disposes of its alerts, so it stays a human opt-in; `_undeclared: delete` opts in), and every delete this action issues sends post_delete_action: "resolve_alerts" - never upstream's alert-deleting default - so the audit trail survives.
 - Needs secret scanning enabled (GitHub Advanced Security on private repositories); a 404 can mean that rather than a missing grant.
 - Snapshot reads the live patterns back (name, pattern, delimiters, must_match lists) under the keep default.

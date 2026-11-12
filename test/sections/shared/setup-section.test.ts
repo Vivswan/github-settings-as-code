@@ -98,7 +98,7 @@ const SETUP_FACTS: { readonly [K in SetupKey]: SetupFacts<K> } = {
     applyPayload: { state: "configured", query_suite: "extended" },
     changeLine: "applied code scanning default setup",
     conflict409:
-      "code_scanning_default_setup: PATCH /repos/o/r/code-scanning/default-setup: 409 Conflict. A code scanning default setup configuration run is already in progress on the repository; re-run the workflow after it finishes",
+      "code_scanning_default_setup: PATCH /repos/o/r/code-scanning/default-setup: 409 Conflict. A code scanning default setup configuration run is already in progress on the repository; re-run after it finishes",
     denied403:
       "code_scanning_default_setup: the token was denied PATCH " +
       '/repos/o/r/code-scanning/default-setup: 403 Forbidden. To fix, grant "Administration" ' +
@@ -128,7 +128,7 @@ const SETUP_FACTS: { readonly [K in SetupKey]: SetupFacts<K> } = {
     applyPayload: { state: "configured", ai_findings_option: "disabled" },
     changeLine: "applied code quality setup",
     conflict409:
-      "code_quality_setup: PATCH /repos/o/r/code-quality/setup: 409 Conflict. A code quality setup configuration run is already in progress on the repository; re-run the workflow after it finishes",
+      "code_quality_setup: PATCH /repos/o/r/code-quality/setup: 409 Conflict. A code quality setup configuration run is already in progress on the repository; re-run after it finishes",
     denied403:
       "code_quality_setup: the token was denied PATCH /repos/o/r/code-quality/setup: 403 " +
       'Forbidden. To fix, grant "Administration" (read and write) under the PAT\'s Repository ' +

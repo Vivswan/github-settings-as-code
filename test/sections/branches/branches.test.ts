@@ -190,7 +190,7 @@ const NULL_FILLED = {
 
 /** The whole failure for a user actor whose GraphQL lookup answers `user: null`. */
 const GHOST_ACTOR_ERROR =
-  'branches: force_push_bypassers actor "ghost": the GraphQL lookup succeeded but returned no node id, so the allowance cannot be applied; re-run the workflow, and report this if it persists';
+  'branches: force_push_bypassers actor "ghost": the GraphQL lookup succeeded but returned no node id, so the allowance cannot be applied; re-run, and report this if it persists';
 
 describe("branches", () => {
   const declared: Desired = [{ name: "main", protection: { enforce_admins: true } }];

@@ -68,7 +68,7 @@ export interface Scan {
 
 /** Every `COMPAT(` occurrence in `text` is a marker, the Markdown placeholder in inline code, or malformed. An occurrence runs to
  * the next one on its line, and its description ends where its comment does. */
-export function scanText(path: string, text: string): Scan {
+function scanText(path: string, text: string): Scan {
   const scan: Scan = { markers: [], malformed: [] };
   const markdown = path.endsWith(".md");
   text.split("\n").forEach((content, index) => {
@@ -106,7 +106,7 @@ function descriptionOf(body: string, before: string): string {
  * Symlinks are dropped: AGENTS.md is reached through three of them, and a marker is reported once. A tracked file
  * deleted from the working tree has nothing to scan; any other reason a listed path cannot be inspected is an error,
  * never a shorter scan. */
-export function listFiles(cwd: string): string[] {
+function listFiles(cwd: string): string[] {
   return execFileSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], {
     cwd,
     encoding: "utf8",
@@ -126,7 +126,7 @@ export function listFiles(cwd: string): string[] {
     });
 }
 
-export function scanTree(cwd: string): Scan {
+function scanTree(cwd: string): Scan {
   const scan: Scan = { markers: [], malformed: [] };
   for (const path of listFiles(cwd)) {
     const found = scanText(path, readFileSync(join(cwd, path), "utf8"));

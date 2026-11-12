@@ -261,10 +261,7 @@ export async function executePlan(
   repo: RepoRef,
   tools: ExecTools,
 ): Promise<PlanExecution> {
-  const run: PlanRun = {
-    ctx: { api, repo, check: false, resolveSecret: (reference) => tools.resolveSecret(reference) },
-    section,
-  };
+  const run: PlanRun = { ctx: { api, repo }, section };
   const changes: string[] = [];
   const notes: string[] = [];
   let landed = 0;

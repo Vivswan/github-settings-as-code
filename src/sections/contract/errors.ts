@@ -173,7 +173,7 @@ export function failureFor(
     // Secondary rate limits arrive as 403 and must not read as missing permissions.
     return {
       kind: "rate-limit",
-      message: `${section.key}: ${cause}. The API rate limit was hit; re-run the workflow after the limit resets, or use a token with a higher rate limit`,
+      message: `${section.key}: ${cause}. The API rate limit was hit; re-run after the limit resets, or use a token with a higher rate limit`,
     };
   }
   const op = context?.op;
@@ -195,7 +195,7 @@ export function failureFor(
   if (error.status >= 500) {
     return {
       kind: "server-error",
-      message: `${section.key}: ${cause}. GitHub returned a server error; re-run the workflow, and retry later if it persists`,
+      message: `${section.key}: ${cause}. GitHub returned a server error; re-run, and retry later if it persists`,
     };
   }
   if (error.status === 401) {

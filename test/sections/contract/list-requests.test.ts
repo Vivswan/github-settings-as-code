@@ -28,8 +28,6 @@ const PAGE_2 = `GET ${PATH}?per_page=100&page=2`;
 const ctx = (api: MockApi): SectionContext => ({
   api,
   repo: { owner: "o", name: "r", slug: "o/r" },
-  check: false,
-  resolveSecret: () => "",
 });
 
 const fullPage = (prefix: string) =>

@@ -37,11 +37,11 @@ Enabling scanning and declaring patterns cannot land in ONE apply under the defa
 
 ## A 412 on secret scanning custom patterns
 
-What you see: a `secret_scanning_custom_patterns` write fails with a 412 and the advice "the pattern changed on GitHub between this run's read and its write (stale custom_pattern_version); re-run the workflow".
+What you see: a `secret_scanning_custom_patterns` write fails with a 412 and the advice "the pattern changed on GitHub between this run's read and its write (stale custom_pattern_version); re-run".
 
 What it means: the pattern updates and deletes carry the version each pattern had when this run listed them, so a pattern someone edited on GitHub mid-run is not silently overwritten - GitHub rejects the stale write instead. Nothing is broken and nothing was clobbered.
 
-What to do: re-run the workflow. The fresh run reads the current versions and converges; if the 412 repeats, someone (or something) is editing the patterns concurrently on every run, and that editor is the thing to find.
+What to do: re-run. The fresh run reads the current versions and converges; if the 412 repeats, someone (or something) is editing the patterns concurrently on every run, and that editor is the thing to find.
 
 ## A 403 that is not about a grant
 
@@ -52,7 +52,7 @@ Two other things arrive as 403:
 
 ## Rate limited
 
-What you see: a failure ending "The API rate limit was hit; re-run the workflow after the limit resets, or use a token with a higher rate limit".
+What you see: a failure ending "The API rate limit was hit; re-run after the limit resets, or use a token with a higher rate limit".
 
 What it means: the retries already happened, or were deliberately skipped because the wait was too long. Which failures are retried, how many times, and the longest wait are in [Semantics](../reference/semantics.md). By the time this error surfaces, the run has waited as long as it reasonably could.
 

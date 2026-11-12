@@ -31,14 +31,7 @@ const READ_OP = graphqlOp<{ owner: string; repo: string }>()({
 });
 
 function ctx(api: MockApi): SectionContext {
-  return {
-    api,
-    repo: { owner: "o", name: "r", slug: "o/r" },
-    check: false,
-    resolveSecret: (reference: string): string => {
-      throw new Error(`test resolver has no value for ${reference}`);
-    },
-  };
+  return { api, repo: { owner: "o", name: "r", slug: "o/r" } };
 }
 
 describe("callGraphql", () => {
@@ -244,7 +237,7 @@ describe("tryCallGraphql tolerance", () => {
       tryCallGraphql(ctx(api), section, tolerantOp, { owner: "o", repo: "r" }).then(unwrap),
     ).rejects.toThrow(
       new Error(
-        "repository: GRAPHQL RepoToggles: 403 slow down. The API rate limit was hit; re-run the workflow after the limit resets, or use a token with a higher rate limit",
+        "repository: GRAPHQL RepoToggles: 403 slow down. The API rate limit was hit; re-run after the limit resets, or use a token with a higher rate limit",
       ),
     );
   });
