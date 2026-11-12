@@ -19,9 +19,6 @@ import { LAYER_FILE_PREFIX, RUNNER_ROOT_FILES } from "./constants.js";
 import type { LiveState } from "./mock/state.js";
 import { LIVE_STATE_KEYS } from "./mock/state.js";
 
-/** Only "mock" exists today; "live" is reserved for a future App-token tier scenarios can opt into. */
-const TierSchema = z.enum(["mock", "live"]);
-
 /** Every fine-grained PAT resource plus the organization "members" grant, which teams need and is not a PatResource. */
 export const MASK_KEYS = [
   "administration",
@@ -127,7 +124,8 @@ const ExpectSchema = z
     /**
      * Ordered "METHOD /path" prefixes the write log must contain as a subsequence; `{repo}` expands to
      * the scenario's owner/name. A GraphQL operation is spelled "GRAPHQL <opName>", and a GraphQL READ
-     * never appears in the write log despite its POST.
+     * never appears in the write log despite its POST. An empty list means the run sent no write at all;
+     * only an absent key asserts nothing.
      */
     mutations: z.array(z.string()).optional(),
     /**
@@ -188,6 +186,8 @@ const ExpectSchema = z
      *   converges         -> rerun in check mode, expecting exit 0 and zero writes
      *   apply_idempotent  -> rerun APPLY and prove it a fixpoint (assertApplyIdempotent), ending in a
      *                        converging check, so it subsumes `converges`; apply mode without the issue report channel
+     * The check must also have verified something: it reports `clean`, or every section it skipped is one the
+     * token's mask denied a read of and at least one section reads clean.
      */
     fixpoint: z.enum(["converges", "apply_idempotent"]).optional(),
     /** Multi-repo: the per-target rollup from the `repos-result` output, "owner/name" -> result string. */
@@ -316,7 +316,6 @@ const ScenarioSchema = z
   .object({
     name: z.string(),
     description: z.string().optional(),
-    tiers: z.array(TierSchema).default(["mock"]),
     settings: SettingsSchema.optional(),
     /**
      * The EXACT settings.yml text the single-repo run reads (a multi-repo target's is

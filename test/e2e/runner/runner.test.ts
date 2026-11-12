@@ -26,6 +26,7 @@ import {
   setReplay,
   snapshotCheckInputs,
   stripDebugLines,
+  unverifiedCheckFailures,
   writtenSnapshotLeaks,
   writtenSnapshotPaths,
   yamlStrings,
@@ -179,6 +180,91 @@ describe("roundTripFailures (the snapshot round trip's verdict)", () => {
     expect(roundTripFailures("snapshot round trip[s.yml]", check, requests, violations)).toEqual(
       want,
     );
+  });
+});
+
+describe("unverifiedCheckFailures (a converging check that did not report clean)", () => {
+  // Under on-missing-permission: warn a check exits 0 with every section skipped, having compared nothing; judged
+  // on exit code and writes alone, both fixpoint proofs would pass on it.
+  const repo = "/repos/e2e-owner/e2e-repo";
+  const read = (pathname: string, deniedBy?: string): LoggedRequest => ({
+    method: "GET",
+    pathname,
+    query: "",
+    status: deniedBy === undefined ? 200 : 403,
+    ...(deniedBy === undefined ? {} : { deniedBy }),
+  });
+  const check = (result: string, skipped: string, rows: string[], exitCode = 0) => ({
+    exitCode,
+    outputs: { result, "skipped-sections": skipped },
+    summary: ["| Section | Status | Detail |", "|---|---|---|", ...rows].join("\n"),
+    stdout: "",
+    stderr: "",
+    killedByHarness: false,
+  });
+  const cleanRow = (key: string): string => `| ${key} | :white_check_mark: clean | - |`;
+  const skippedRow = (key: string): string => `| ${key} | :fast_forward: skipped | - |`;
+  const nothingClean =
+    'proof: the check\'s result is "partial" and no section reads clean, so it verified nothing';
+  const unexplainedSkip =
+    "proof: the check's result is \"partial\", and it skipped [labels] though the token's mask denied no read there";
+
+  test.each<
+    [label: string, run: ReturnType<typeof check>, requests: LoggedRequest[], want: string[]]
+  >([
+    ["a clean check needs no further evidence", check("clean", "", []), [], []],
+    // A drifted check did compare, and its exit code already fails the proof: "verified nothing" would misstate it.
+    [
+      "a check that exited non-zero is left to its exit code",
+      check("drift", "", ["| labels | :warning: drift | - |"], 1),
+      [read(`${repo}/labels`)],
+      [],
+    ],
+    [
+      "every section skipped and nothing asked of the mock fails on both counts",
+      check("partial", "labels", [skippedRow("labels")]),
+      [],
+      [unexplainedSkip, nothingClean],
+    ],
+    [
+      "a skip the mask explains beside a clean section passes",
+      check("partial", "labels", [skippedRow("labels"), cleanRow("autolinks")]),
+      [read(`${repo}/labels`, "issues"), read(`${repo}/autolinks`)],
+      [],
+    ],
+    [
+      "a skip the mask explains with no section clean verified nothing",
+      check("partial", "labels", [skippedRow("labels")]),
+      [read(`${repo}/labels`, "issues")],
+      [nothingClean],
+    ],
+    [
+      "a skipped section whose read the mock answered is not explained",
+      check("partial", "labels", [skippedRow("labels"), cleanRow("autolinks")]),
+      [read(`${repo}/labels`), read(`${repo}/autolinks`)],
+      [unexplainedSkip],
+    ],
+    [
+      "a denied read of another section explains nothing",
+      check("partial", "labels", [skippedRow("labels"), cleanRow("autolinks")]),
+      [read(`${repo}/milestones`, "issues"), read(`${repo}/autolinks`)],
+      [unexplainedSkip],
+    ],
+    // A multi-repo summary repeats a key per target; read through the last-row-wins map, the clean row would be lost.
+    [
+      "a key clean on one target and skipped on the next still counts as checked",
+      check("partial", "labels", [cleanRow("labels"), skippedRow("labels")]),
+      [read("/repos/e2e-owner/svc-a/labels"), read("/repos/e2e-owner/svc-b/labels", "issues")],
+      [],
+    ],
+    [
+      "a fleet result of skipped (a target without a settings file) passes beside a clean section",
+      check("skipped", "", [cleanRow("labels")]),
+      [read("/repos/e2e-owner/svc-a/labels")],
+      [],
+    ],
+  ])("%s", (_label, run, requests, want) => {
+    expect(unverifiedCheckFailures("proof", run, requests)).toEqual(want);
   });
 });
 
@@ -366,6 +452,33 @@ describe("requestLogFailures (the request-log rules over recorded requests)", ()
     ],
   ])("%s", (_label, exp, want) => {
     expect(requestLogFailures(exp, recorded)).toEqual(want);
+  });
+
+  // An empty list is an empty subsequence, which every write log contains: read that way, a scenario that says
+  // "this run writes nothing" would pass on a run that wrote anything.
+  test.each<
+    [
+      label: string,
+      exp: Parameters<typeof requestLogFailures>[0],
+      log: LoggedRequest[],
+      want: string[],
+    ]
+  >([
+    [
+      "an empty mutations list beside a write fails, naming the write",
+      { mutations: [] },
+      recorded,
+      ["mutations: [] expects no write, but the run sent 1: PATCH /repos/o/r/issues/7"],
+    ],
+    [
+      "an empty mutations list beside reads alone passes",
+      { mutations: [] },
+      recorded.slice(0, 1),
+      [],
+    ],
+    ["no mutations key asserts nothing about the writes", {}, recorded, []],
+  ])("%s", (_label, exp, log, want) => {
+    expect(requestLogFailures(exp, log)).toEqual(want);
   });
 
   // The `{repo}` placeholder must expand in EVERY request-path list: a list left unexpanded is
@@ -576,7 +689,6 @@ describe("markReportTitle (counterfactual disambiguation)", () => {
 describe("failureArtifacts (a verdict the runner did not reach)", () => {
   const scenario: Scenario = {
     name: "fuzz-oracle-42",
-    tiers: ["mock"],
     settings: {},
     inputs: {},
     denial_style: "fine_grained",

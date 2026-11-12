@@ -179,7 +179,6 @@ describe("read gating fold", () => {
     const apply = predictOutcomes({ ...readOnly, mode: "apply" });
     expect(apply.preflightAborts).toBe("yes");
     expect(apply.fullyGranted).toBe(false);
-    expect(apply.writeDeniedSections).toEqual(["codespaces_secrets"]);
   });
 
   test("a mixed-gating section under a read-only grant unions the read and denied arms", () => {
@@ -204,7 +203,6 @@ describe("read gating fold", () => {
     expect(mixed).toEqual(predictSectionAt("labels", noGrant, "plain"));
     const apply = predictSectionAt("labels", { ...noGrant, mode: "apply" }, "mixed");
     expect([...apply.allowed]).toEqual(["failed"]);
-    expect(apply.mayWrite).toBe(false);
   });
 
   test("the preflight barrier is certain for a write-gated section and only possible for a mixed one", () => {
@@ -289,7 +287,7 @@ describe("predictSection rules", () => {
     label: string,
     key: SectionKey,
     overrides: Partial<ScenarioMeta>,
-    want: { allowed: Outcome[]; mayWrite?: boolean },
+    want: { allowed: Outcome[] },
   ];
   const expectAllowed = (
     _label: string,
@@ -299,9 +297,6 @@ describe("predictSection rules", () => {
   ) => {
     const p = predictSection(key, meta(overrides));
     expect([...p.allowed].sort()).toEqual(want.allowed);
-    if (want.mayWrite !== undefined) {
-      expect(p.mayWrite).toBe(want.mayWrite);
-    }
   };
 
   // labels is a denied-semantics section, pages an absent-semantics one: under fine_grained a none grade on pages
@@ -319,10 +314,10 @@ describe("predictSection rules", () => {
       { allowed: ["clean", "drift"] },
     ],
     [
-      "write granted: apply => {applied}, and may write",
+      "write granted: apply => {applied}",
       "labels",
       { mode: "apply", mask: { issues: "write" } },
-      { allowed: ["applied"], mayWrite: true },
+      { allowed: ["applied"] },
     ],
     [
       "none + 403 style: skipped under warn",
@@ -390,10 +385,10 @@ describe("predictSection rules", () => {
       { allowed: ["clean"] },
     ],
     [
-      "a matching witness pins apply to exactly applied, with no write",
+      "a matching witness pins apply to exactly applied",
       "labels",
       { mode: "apply", liveKinds: { labels: "matching" } },
-      { allowed: ["applied"], mayWrite: false },
+      { allowed: ["applied"] },
     ],
     [
       "a drift-update witness pins check to exactly drift",
@@ -445,7 +440,7 @@ describe("predictSection rules", () => {
       "read grade + matching witness in apply: applied despite the missing write grant",
       "labels",
       { mask: { issues: "read" }, mode: "apply", liveKinds: { labels: "matching" } },
-      { allowed: ["applied"], mayWrite: false },
+      { allowed: ["applied"] },
     ],
   ])("%s", expectAllowed);
 
@@ -463,7 +458,6 @@ describe("predictSection rules", () => {
         }),
       );
       expect([...p.allowed]).toEqual(["clean"]);
-      expect(p.mayWrite).toBe(false);
     }
   });
 
@@ -525,7 +519,6 @@ describe("predictSection rules", () => {
         grades: [],
         allowed: new Set(["excluded"]),
         posture: "denied",
-        mayWrite: false,
       },
     ],
     [
@@ -537,7 +530,6 @@ describe("predictSection rules", () => {
         grades: ["none"],
         allowed: new Set(["failed"]),
         posture: "denied",
-        mayWrite: false,
       },
     ],
     [
@@ -554,7 +546,6 @@ describe("predictSection rules", () => {
         grades: [],
         allowed: new Set(["excluded"]),
         posture: "absent",
-        mayWrite: false,
       },
     ],
     [
@@ -572,7 +563,6 @@ describe("predictSection rules", () => {
         grades: [],
         allowed: new Set(["excluded"]),
         posture: "denied",
-        mayWrite: false,
       },
     ],
   ])("%s", (_label, key, overrides, prediction) => {
@@ -595,19 +585,16 @@ describe("predictSection rules", () => {
           grades: [],
           allowed: new Set(["excluded"]),
           posture: "denied",
-          mayWrite: false,
         },
         {
           key: "pages",
           grades: ["write"],
           allowed: new Set(["applied"]),
           posture: "absent",
-          mayWrite: true,
         },
       ],
       allowedExitCodes: new Set([0]),
       noWritesInCheck: false,
-      writeDeniedSections: [],
       fullyGranted: true,
       preflightAborts: "no",
     });
@@ -620,19 +607,16 @@ describe("predictSection rules", () => {
           grades: ["none"],
           allowed: new Set(["failed"]),
           posture: "denied",
-          mayWrite: false,
         },
         {
           key: "pages",
           grades: ["write"],
           allowed: new Set(["applied"]),
           posture: "absent",
-          mayWrite: true,
         },
       ],
       allowedExitCodes: new Set([1]),
       noWritesInCheck: false,
-      writeDeniedSections: ["labels"],
       fullyGranted: false,
       preflightAborts: "yes",
     });
@@ -671,7 +655,6 @@ describe("predictSection rules", () => {
       grades: ["write"],
       allowed: new Set(["applied"]),
       posture: "denied",
-      mayWrite: false,
     });
 
     const checkP = predictSection(
@@ -688,7 +671,6 @@ describe("predictSection rules", () => {
       grades: ["write"],
       allowed: new Set(["clean"]),
       posture: "denied",
-      mayWrite: false,
     });
   });
 });
@@ -712,19 +694,16 @@ describe("predictOutcomes run level", () => {
           grades: ["write"],
           allowed: new Set(["applied"]),
           posture: "denied",
-          mayWrite: false,
         },
         {
           key: "labels",
           grades: ["write"],
           allowed: new Set(["applied"]),
           posture: "denied",
-          mayWrite: true,
         },
       ],
       allowedExitCodes: new Set([0]),
       noWritesInCheck: false,
-      writeDeniedSections: [],
       fullyGranted: true,
       preflightAborts: "no",
     });
@@ -738,19 +717,16 @@ describe("predictOutcomes run level", () => {
           grades: ["none"],
           allowed: new Set(["failed"]),
           posture: "absent",
-          mayWrite: false,
         },
         {
           key: "labels",
           grades: ["write"],
           allowed: new Set(["applied"]),
           posture: "denied",
-          mayWrite: true,
         },
       ],
       allowedExitCodes: new Set([1]),
       noWritesInCheck: false,
-      writeDeniedSections: ["teams"],
       fullyGranted: false,
       preflightAborts: "yes",
     });
@@ -1485,7 +1461,7 @@ describe("foldMergeLayers (the oracle's own dialect)", () => {
       },
     },
     {
-      name: "a label renaming into a name a higher entry declares is one resource: the higher entry stands in its slot, merged under deep",
+      name: "a label renaming into a name a higher entry declares is one resource: under deep the higher entry's fields merge into the rename, which keeps the name it renames from",
       layering: "deep",
       layers: stack(
         { labels: [{ name: "bug", new_name: "defect", color: "111111" }, { name: "docs" }] },
@@ -1495,7 +1471,7 @@ describe("foldMergeLayers (the oracle's own dialect)", () => {
         merged: {
           labels: {
             [UNDECLARED_KEY]: "delete",
-            entries: [{ name: "Defect", new_name: "defect", color: "222222" }, { name: "docs" }],
+            entries: [{ name: "bug", new_name: "defect", color: "222222" }, { name: "docs" }],
           },
         },
         notices: [],

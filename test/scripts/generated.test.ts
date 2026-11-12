@@ -9,8 +9,8 @@ import {
   generatorScripts,
 } from "../../.github/scripts/generated.js";
 import {
-  hasGeneratedRegion,
   markerSyntaxFor,
+  regionNames,
   SYNTAX_BY_EXTENSION,
 } from "../../.github/scripts/lib/generated-regions.js";
 import { ROOT } from "../root.js";
@@ -45,7 +45,7 @@ describe("the generated-output table", () => {
     const texts = new Map(tracked.map((path) => [path, readFileSync(join(ROOT, path), "utf8")]));
     const carrying = tracked.filter(
       (path) =>
-        regionFile(path) && hasGeneratedRegion(texts.get(path) ?? "", markerSyntaxFor(path)),
+        regionFile(path) && regionNames(texts.get(path) ?? "", markerSyntaxFor(path)).length > 0,
     );
     const wholeFiles = tracked.filter((path) => carriesWholeFileHeader(texts.get(path) ?? ""));
     expect(
@@ -83,18 +83,13 @@ describe("the generated-output table", () => {
   test("the scan reads the shared marker grammar: an inline HTML marker counts, a marker-shaped scalar does not", () => {
     // A page whose only marker sits mid-line (inputs.md's outputs-list is the tree's inline case) would slip a line-anchored scan.
     expect(
-      hasGeneratedRegion(
-        "- `result`: <!-- BEGIN GENERATED: a (h) -->x<!-- END GENERATED: a -->",
-        "html",
-      ),
-    ).toBe(true);
-    expect(hasGeneratedRegion("the words BEGIN GENERATED: a outside a comment\n", "html")).toBe(
-      false,
-    );
-    expect(
-      hasGeneratedRegion("inputs:\n  # BEGIN GENERATED: a\n  # END GENERATED: a\n", "yaml"),
-    ).toBe(true);
-    expect(hasGeneratedRegion('d: "one\n  # BEGIN GENERATED: a\n  two"\n', "yaml")).toBe(false);
+      regionNames("- `result`: <!-- BEGIN GENERATED: a (h) -->x<!-- END GENERATED: a -->", "html"),
+    ).toEqual(["a"]);
+    expect(regionNames("the words BEGIN GENERATED: a outside a comment\n", "html")).toEqual([]);
+    expect(regionNames("inputs:\n  # BEGIN GENERATED: a\n  # END GENERATED: a\n", "yaml")).toEqual([
+      "a",
+    ]);
+    expect(regionNames('d: "one\n  # BEGIN GENERATED: a\n  two"\n', "yaml")).toEqual([]);
   });
 });
 
@@ -113,19 +108,21 @@ describe("the build:check runner", () => {
     return { status: run.exitCode, printed: run.stdout.toString() + run.stderr.toString() };
   }
 
+  /** HEAD's tree in `dir` with its own index, sharing the object store and node_modules; the runner, the generators,
+   * and the script table they run through are copied from the working tree, so the code under test is the code
+   * being edited. */
+  function cloneHead(dir: string): void {
+    git(ROOT, "clone", "--quiet", "--shared", ROOT, dir);
+    symlinkSync(join(ROOT, "node_modules"), join(dir, "node_modules"));
+    cpSync(join(ROOT, "package.json"), join(dir, "package.json"));
+    cpSync(join(ROOT, ".github", "scripts"), join(dir, ".github", "scripts"), { recursive: true });
+  }
+
   test(
     "a clean clone passes; a staged stale byte in a page, in action.yml, and in a whole file fails naming each",
     () =>
       withTempDir("build-check-", (dir) => {
-        // HEAD's tree with its own index, sharing the object store and node_modules; the runner, the generators,
-        // and the script table they run through are copied from the working tree, so the code under test is the
-        // code being edited.
-        git(ROOT, "clone", "--quiet", "--shared", ROOT, dir);
-        symlinkSync(join(ROOT, "node_modules"), join(dir, "node_modules"));
-        cpSync(join(ROOT, "package.json"), join(dir, "package.json"));
-        cpSync(join(ROOT, ".github", "scripts"), join(dir, ".github", "scripts"), {
-          recursive: true,
-        });
+        cloneHead(dir);
         const untouched = [
           ".",
           ":(exclude)node_modules",
@@ -181,6 +178,37 @@ describe("the build:check runner", () => {
           "docs/reference/sections.md",
           "src/generated/upstream-gaps.ts",
         ]);
+      }),
+    120_000,
+  );
+
+  test(
+    "a marker no generator registers fails naming its page and region, in either marker syntax, before any generator runs",
+    () =>
+      withTempDir("build-check-", (dir) => {
+        // A generator re-renders only the regions in its own registry, so a region dropped from one keeps its
+        // markers and its last body. Staged, the two plants below leave the drift check nothing to diff.
+        // inputs.md is the page two generators share: neither one's region may read as unregistered to the other.
+        cloneHead(dir);
+        const page = join(dir, "docs/reference/inputs.md");
+        const retired =
+          "<!-- BEGIN GENERATED: retired-grant-table -->\n| grant |\n<!-- END GENERATED: retired-grant-table -->";
+        writeFileSync(page, `${readFileSync(page, "utf8")}\n${retired}\n`);
+        const manifest = join(dir, "action.yml");
+        const retiredKey = "# BEGIN GENERATED: retired-inputs\n# END GENERATED: retired-inputs";
+        writeFileSync(manifest, `${readFileSync(manifest, "utf8")}${retiredKey}\n`);
+        git(dir, "add", "docs/reference/inputs.md", "action.yml");
+
+        const fix =
+          "that no generator registers; register it with a generator, or remove its GENERATED markers";
+        expect(runner(dir)).toEqual({
+          status: 1,
+          printed: [
+            `build:check: docs/reference/inputs.md marks a generated region "retired-grant-table" ${fix}`,
+            `build:check: action.yml marks a generated region "retired-inputs" ${fix}`,
+            "",
+          ].join("\n"),
+        });
       }),
     120_000,
   );

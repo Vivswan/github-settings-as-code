@@ -16,6 +16,7 @@ import type { Json, MockResponse } from "./support.js";
 const CORE_FAULT_KEYS = {
   "core.discoveryList": "GET /user/repos (multi-repo discovery listing)",
   "core.contentsGet": "GET /repos/{owner}/{repo}/contents/{path} (settings-file fetch)",
+  "core.reportLabelRead": `${ISSUE_REPORT_ENDPOINTS.readLabel.route} (report marker-label read)`,
   "core.reportLabelCreate": `${ISSUE_REPORT_ENDPOINTS.createLabel.route} (report marker-label ensure-create)`,
   "core.issuesList": `${ISSUE_REPORT_ENDPOINTS.list.route} (report issue lookup)`,
   "core.issueCreate": `${ISSUE_REPORT_ENDPOINTS.create.route} (report issue create)`,

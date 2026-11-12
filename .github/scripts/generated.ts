@@ -1,35 +1,46 @@
 /**
  * The one table of committed generated output, derived from the generators' own registries, and the drift check
- * behind `bun run build:check`: every generator script runs, then every registered path must be tracked and unchanged.
+ * behind `bun run build:check`: every marker in a registered page must name a registered region, every generator
+ * script runs, then every registered path must be tracked and unchanged.
  *
  * The table is in dependency order, each artifact before its readers, or a new gap file would leave a run stale:
  *   the descriptor-derived files -> imported through src/ by everything below
  *   the gaps index               -> imported through src/ by the docs and action.yml generators
  */
 
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { FILES } from "./gen-action-docs.js";
 import { PAGES } from "./gen-docs.js";
 import { INDEX_PATH } from "./gen-gaps-index.js";
-import { INPUTS_PAGE_PATH } from "./gen-inputs-table.js";
+import { INPUTS_PAGES } from "./gen-inputs-table.js";
 import { OUTPUTS as OPENAPI_OUTPUTS } from "./gen-openapi.js";
 import { runMain } from "./lib/entry.js";
+import { markerSyntaxFor, regionNames } from "./lib/generated-regions.js";
+import type { GeneratedFiles } from "./lib/region-driver.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 
-export interface GeneratedOutput {
+/** What a row of either kind carries. */
+interface OutputRow {
   /** The committed output, repo-relative. */
   readonly path: string;
 
   /** The package.json script that writes it; `bun run <generator>` regenerates it in place. */
   readonly generator: string;
-
-  /** Marker-delimited regions inside an authored file (lib/generated-regions.ts), or the whole file. */
-  readonly kind: "regions" | "file";
 }
 
-function regions(generator: string, paths: readonly string[]): GeneratedOutput[] {
-  return paths.map((path) => ({ path, generator, kind: "regions" }));
+/** The whole file, or marker-delimited regions inside an authored file (lib/generated-regions.ts) under the names `generator` registers there. */
+export type GeneratedOutput = OutputRow &
+  ({ readonly kind: "file" } | { readonly kind: "regions"; readonly regions: readonly string[] });
+
+function regions(generator: string, files: GeneratedFiles): GeneratedOutput[] {
+  return Object.entries(files).map(([path, file]) => ({
+    path,
+    generator,
+    kind: "regions",
+    regions: file.regions.map((region) => region.name),
+  }));
 }
 
 /** In the module doc's dependency order; a page two generators write into (docs/reference/inputs.md) has one row per generator. */
@@ -38,9 +49,9 @@ export const GENERATED_OUTPUTS: readonly GeneratedOutput[] = [
     ({ path }): GeneratedOutput => ({ path, generator: "build:openapi", kind: "file" }),
   ),
   { path: INDEX_PATH, generator: "build:gaps-index", kind: "file" },
-  ...regions("build:docs", Object.keys(PAGES)),
-  ...regions("build:action-docs", Object.keys(FILES)),
-  { path: INPUTS_PAGE_PATH, generator: "build:inputs-table", kind: "regions" },
+  ...regions("build:docs", PAGES),
+  ...regions("build:action-docs", FILES),
+  ...regions("build:inputs-table", INPUTS_PAGES),
 ];
 
 /** The distinct paths, in table order. */
@@ -59,6 +70,22 @@ export function generatorEntryPoint(script: string): string | null {
   return /^bun (\S+\.ts)$/.exec(script)?.[1] ?? null;
 }
 
+/** One line per BEGIN marker in a registered page that names no region a generator registers there: nothing
+ * regenerates such a region, so its body would go stale unseen. */
+function unregisteredRegions(): string[] {
+  const pages = GENERATED_OUTPUTS.filter((output) => output.kind === "regions");
+  return [...Map.groupBy(pages, (output) => output.path)].flatMap(([path, rows]) => {
+    const registered = new Set(rows.flatMap((row) => row.regions));
+    const marked = regionNames(readFileSync(join(ROOT, path), "utf8"), markerSyntaxFor(path));
+    return marked
+      .filter((name) => !registered.has(name))
+      .map(
+        (name) =>
+          `${path} marks a generated region "${name}" that no generator registers; register it with a generator, or remove its GENERATED markers`,
+      );
+  });
+}
+
 /** Runs `argv` at the repository root on the terminal's stdio; the exit code is the verdict. */
 function run(argv: string[]): number {
   return Bun.spawnSync(argv, { cwd: ROOT, stdout: "inherit", stderr: "inherit" }).exitCode;
@@ -66,6 +93,11 @@ function run(argv: string[]): number {
 
 if (import.meta.main) {
   await runMain("generated", () => {
+    const unregistered = unregisteredRegions();
+    if (unregistered.length > 0) {
+      console.error(`build:check: ${unregistered.join("\nbuild:check: ")}`);
+      return 1;
+    }
     for (const generator of generatorScripts()) {
       if (run([process.execPath, "run", generator]) !== 0) {
         console.error(`build:check: bun run ${generator} failed`);
