@@ -40,10 +40,22 @@ type PagesWirePayload = Omit<PagesSite, "source"> & { source?: PagesSourceWire }
 
 /**
  * GitHub documents every field but build_type and source as update-only, so enabling a site is
- * create-then-update. A Pick over the wire payload, so a renamed config field breaks this split at
- * compile time instead of silently rerouting through the wrong endpoint.
+ * create-then-update, and its create requires one of the two, so the type holds no empty body and
+ * createBody() is the only mint. Picks over the wire payload, so a renamed config field breaks this
+ * split at compile time instead of silently rerouting through the wrong endpoint.
  */
-type PagesCreateBody = Pick<PagesWirePayload, "build_type" | "source">;
+type PagesCreateBody =
+  | (Required<Pick<PagesWirePayload, "build_type">> & Pick<PagesWirePayload, "source">)
+  | (Required<Pick<PagesWirePayload, "source">> & Pick<PagesWirePayload, "build_type">);
+
+/** The create body a declaration fills; undefined when it declares neither field GitHub enables a site from. */
+function createBody(payload: PagesWirePayload): PagesCreateBody | undefined {
+  const { build_type: buildType, source } = payload;
+  if (buildType !== undefined) {
+    return source === undefined ? { build_type: buildType } : { build_type: buildType, source };
+  }
+  return source === undefined ? undefined : { source };
+}
 
 // A mapping only: PagesConfig accepts null as the declared "Pages off", so a null 200 would otherwise read back as a declaration that DISABLES the site.
 const LiveSite = z.looseObject({});
@@ -56,15 +68,18 @@ const PUBLIC_VISIBILITY_NOTE =
 
 type PagesPlan = SectionPlan<PlannedOp<typeof ENDPOINTS>>;
 
+// A 404 is ambiguous: no Pages site, or a fine-grained token without the Pages permission. A plan that
+// creates stays loud either way (the POST would fail); a plan with no write must say so itself.
+const CONCEALED_SITE =
+  "A fine-grained token missing the Pages permission gets the same answer; if this repo does have a Pages site, grant the token Pages read and write";
+
 /** `pages: null` disables a live site; with no site the note says what else the 404 may mean. */
 function disablePlan(missing: boolean): PagesPlan {
   if (missing) {
-    // A 404 is ambiguous: no Pages site, or a fine-grained token without the Pages permission.
-    // The non-null path stays loud either way (the POST would fail); this no-op path must say so.
     return {
       ops: [],
       notes: [
-        "pages: declared null and GitHub reports no Pages site, so there is nothing to disable. A fine-grained token missing the Pages permission gets the same answer; if this repo does have a Pages site, grant the token Pages read and write",
+        `pages: declared null and GitHub reports no Pages site, so there is nothing to disable. ${CONCEALED_SITE}`,
       ],
       drift: [],
     };
@@ -116,16 +131,25 @@ function updatePlan(payload: PagesWirePayload, live: Record<string, unknown>): P
   return plan;
 }
 
-/** Enabling a site is the create POST, which takes build_type and source alone, then the update PUT for whatever else is declared. */
+/**
+ * Enabling a site is the create POST, which takes build_type and source alone, then the update PUT for
+ * whatever else is declared. With neither declared there is no create GitHub accepts, and the update
+ * answers 404 without a site, so the plan is drift no operation fixes.
+ */
 function enablePlan(payload: PagesWirePayload): PagesPlan {
+  const create = createBody(payload);
+  if (create === undefined) {
+    return {
+      ops: [],
+      notes: [`pages: GitHub reports no Pages site. ${CONCEALED_SITE}`],
+      drift: [
+        "pages: declared in the settings file but GitHub Pages is not enabled on the repo, and GitHub enables a site only from build_type or source, " +
+          "so apply changes nothing - declare build_type or source to enable the site, or remove the pages section",
+      ],
+    };
+  }
+
   const plan: PagesPlan = { ops: [], notes: [], drift: [] };
-  const create: PagesCreateBody = {};
-  if (payload.build_type !== undefined) {
-    create.build_type = payload.build_type;
-  }
-  if (payload.source !== undefined) {
-    create.source = payload.source;
-  }
   plan.ops.push({
     role: "create",
     payload: create,

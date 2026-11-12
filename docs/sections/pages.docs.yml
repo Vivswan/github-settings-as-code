@@ -15,6 +15,10 @@ coverage:
         rest; existing sites get straight PUT passthrough; pages: null issues DELETE, mirroring
         branches' protection: null.
       - >-
+        The create requires build_type or source, so a declaration with neither, against a repository
+        without a site, sends no write: check reports drift naming the fix (declare build_type or
+        source), and apply reports the same line as a notice and changes nothing.
+      - >-
         In a mode: render fold, pages: null is written as the section's value even over a lower
         layer's pages declaration, so the rendered file turns the site off (the layering guide owns
         that rule); a multi-repo defaults-file never merges into a target's file.
@@ -53,7 +57,9 @@ coverage:
         drift with no note.
 schema:
   SettingsFile.pages: GitHub Pages configuration; null disables Pages on the repository.
-  PagesConfig: "GitHub Pages site configuration; use `pages: null` to disable the site."
+  PagesConfig: >-
+    GitHub Pages site configuration; use `pages: null` to disable the site. A repository without a
+    site gets one only from a declared build_type or source.
   PagesConfig.build_type: '"legacy" (branch) or "workflow" (GitHub Actions).'
   PagesConfig.source: The update PUT requires both branch and path when source is sent.
   PagesConfig.source.branch: The branch Pages publishes from.
