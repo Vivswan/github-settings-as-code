@@ -45,6 +45,13 @@ export function stubFetch(responses: Array<() => Response>): {
   return state;
 }
 
+/** A stubbed JSON answer as a factory, the shape stubFetch and a route table take, so every request reads a fresh body. */
+export const json = (body: unknown) => (): Response =>
+  new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } });
+
+/** A trace line with its timing folded, so a whole line compares. */
+export const timeless = (line: string): string => line.replace(/\d+ms/, "Nms");
+
 /** A fresh trace facet per test, with an isolated mask registry so one test's masks never redact another's traces. */
 export function traceIo(): { io: TraceIo & Pick<Io, "mask">; lines: string[] } {
   const lines: string[] = [];

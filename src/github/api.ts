@@ -1,8 +1,8 @@
 /**
- * The GitHubClient port and its one implementation, GitHubApi, on @octokit/core with the request-log, retry,
- * throttling, and paginate-rest plugins; what a failed request becomes is api-error.ts's, and what a trace line may
- * show is trace-redaction.ts's. A payload's JSON body is its own serialization (redactSecretPayloadSafe), never an
- * endpoint typing that could drop an unknown field.
+ * The GitHubClient port, its view for a redacted target (redactedClient), and its one implementation, GitHubApi, on
+ * @octokit/core with the request-log, retry, throttling, and paginate-rest plugins; what a failed request becomes is
+ * api-error.ts's, and what a trace line may show is trace-redaction.ts's. A payload's JSON body is its own
+ * serialization (redactSecretPayloadSafe), never an endpoint typing that could drop an unknown field.
  */
 
 import { Octokit } from "@octokit/core";
@@ -35,12 +35,7 @@ import {
   throttleGroups,
 } from "./scheduler.js";
 import { redactSecretPayloadSafe } from "./secret-scan.js";
-import {
-  redactingOctokitLog,
-  repoSlugOf,
-  type TraceIo,
-  TraceRedaction,
-} from "./trace-redaction.js";
+import { redactingOctokitLog, type TraceIo, TraceRedaction } from "./trace-redaction.js";
 
 /** The single source for the header default here, the action.yml `api-version` default, and the inputs fallback; the action-yml contract test asserts the three stay equal. */
 export const DEFAULT_API_VERSION = "2022-11-28";
@@ -56,6 +51,8 @@ export interface GraphqlOp {
 }
 
 /**
+ * What a caller knows about a request that the client cannot read off it.
+ *
  * `carriesSecret` marks a request whose payload or variables hold a resolved secret. The engine sets it from the act of
  * resolving (engine/execute.ts) and withholds the request's error on its own side of this port whatever the client
  * answers (sections/contract/requests.ts), so a caller-supplied client cannot leak an echoed value into an outcome or
@@ -63,6 +60,9 @@ export interface GraphqlOp {
  */
 export interface RequestMark {
   carriesSecret?: boolean;
+
+  /** The request serves a redacted target, so its route and payload stay out of the trace; redactedClient() sets it. */
+  redactTrace?: boolean;
 }
 
 /**
@@ -76,7 +76,7 @@ export type ClientAnswer<D> = { data: D } | { error: ApiError } | { failed: stri
 /** The page size every list walk asks GitHub for, GitHub's documented maximum, unless the endpoint caps lower. */
 export const PAGE_SIZE = 100;
 
-export interface ListOptions {
+export interface ListOptions extends Pick<RequestMark, "redactTrace"> {
   /** Items per page; PAGE_SIZE when omitted. An endpoint with a documented cap below it passes the cap. */
   perPage?: number | undefined;
 
@@ -85,15 +85,11 @@ export interface ListOptions {
 }
 
 export interface GitHubClient {
-  /**
-   * `redactTrace` holds the request's `/repos/<owner>/<repo>` slug redacted for the request's duration, for the
-   * visibility probe, which must not leak the slug before it knows whether the repository is private.
-   */
   tryRequest(
     method: string,
     path: string,
     payload?: unknown,
-    options?: RequestMark & { accept?: string; raw?: boolean; redactTrace?: boolean },
+    options?: RequestMark & { accept?: string; raw?: boolean },
   ): Promise<ClientAnswer<unknown>>;
 
   /**
@@ -116,7 +112,34 @@ export interface GitHubClient {
   ): Promise<ClientAnswer<Record<string, unknown>>>;
 }
 
-/** The primary and secondary limits are handled identically but for the log `label`, so one factory keeps them from drifting. */
+/** One view per client, so what a section memoizes per client (the owner gate's probe) spans every redacted target of a run. */
+const redactedViews = new WeakMap<GitHubClient, GitHubClient>();
+
+/**
+ * The view of `api` a redacted target's requests go through: each carries `redactTrace`, so none prints its route or
+ * payload, whatever section sends it and whether or not the route names the repository.
+ */
+export function redactedClient(api: GitHubClient): GitHubClient {
+  const known = redactedViews.get(api);
+  if (known !== undefined) {
+    return known;
+  }
+
+  const view: GitHubClient = {
+    tryRequest: (method, path, payload, options) =>
+      api.tryRequest(method, path, payload, { ...options, redactTrace: true }),
+    tryList: (path, options) => api.tryList(path, { ...options, redactTrace: true }),
+    tryGraphql: (op, variables, slug, options) =>
+      api.tryGraphql(op, variables, slug, { ...options, redactTrace: true }),
+  };
+  redactedViews.set(api, view);
+  return view;
+}
+
+/**
+ * The primary and secondary limits are handled identically but for the log `label`, so one factory keeps them from
+ * drifting. The line is written where the answer is decided, so it never announces a retry the answer refuses.
+ */
 function throttleCallback(
   label: string,
   trace: TraceRedaction,
@@ -127,10 +150,21 @@ function throttleCallback(
   retryCount: number,
 ) => boolean {
   return (retryAfter, options, _octokit, retryCount) => {
-    trace.debug(
-      `${label} on ${options.method} ${trace.path(options.url).path}; retry ${retryCount + 1}/${MAX_RETRIES} after ${retryAfter}s`,
-    );
-    return retryAfter <= MAX_RETRY_WAIT_S && retryCount < MAX_RETRIES;
+    const limited = `${label} on ${options.method} ${trace.path(options.url).path}`;
+    if (retryCount >= MAX_RETRIES) {
+      trace.debug(`${limited}; giving up: the ${MAX_RETRIES} retries are spent`);
+      return false;
+    }
+
+    if (retryAfter > MAX_RETRY_WAIT_S) {
+      trace.debug(
+        `${limited}; giving up: the wait of ${retryAfter}s is over the ${MAX_RETRY_WAIT_S}s cap`,
+      );
+      return false;
+    }
+
+    trace.debug(`${limited}; retry ${retryCount + 1}/${MAX_RETRIES} after ${retryAfter}s`);
+    return true;
   };
 }
 
@@ -276,25 +310,31 @@ export class GitHubApi implements GitHubClient {
     });
   }
 
-  async tryRequest(
+  /** The port's three methods share one rule: a request marked `redactTrace` seals the trace until it settles. */
+  tryRequest(
     method: string,
     path: string,
     payload?: unknown,
-    options?: RequestMark & { accept?: string; raw?: boolean; redactTrace?: boolean },
+    options?: RequestMark & { accept?: string; raw?: boolean },
   ): Promise<ClientAnswer<unknown>> {
-    if (!options?.redactTrace) {
-      return this.request(method, path, payload, options);
-    }
-    const slug = repoSlugOf(path);
-    if (slug === undefined) {
-      throw new Error(`BUG: redactTrace needs a /repos/<owner>/<repo> path, got ${path}`);
-    }
-    const release = this.trace.hold(slug);
-    try {
-      return await this.request(method, path, payload, options);
-    } finally {
-      release();
-    }
+    return this.trace.during(options?.redactTrace === true, () =>
+      this.request(method, path, payload, options),
+    );
+  }
+
+  tryList(path: string, options?: ListOptions): Promise<ClientAnswer<unknown[]>> {
+    return this.trace.during(options?.redactTrace === true, () => this.list(path, options));
+  }
+
+  tryGraphql(
+    op: GraphqlOp,
+    variables: Readonly<Record<string, unknown>>,
+    slug: string,
+    options?: RequestMark,
+  ): Promise<ClientAnswer<Record<string, unknown>>> {
+    return this.trace.during(options?.redactTrace === true, () =>
+      this.graphql(op, variables, slug, options),
+    );
   }
 
   /**
@@ -305,7 +345,7 @@ export class GitHubApi implements GitHubClient {
    * is noted before the plugin reads it as an empty list (GitHub's answer for an empty repository) and surfaces as the
    * error it is.
    */
-  async tryList(path: string, options?: ListOptions): Promise<ClientAnswer<unknown[]>> {
+  private async list(path: string, options?: ListOptions): Promise<ClientAnswer<unknown[]>> {
     const pages: unknown[] = [];
     let conflict: OctokitHttpError | undefined;
     let current = path;
@@ -495,7 +535,7 @@ export class GitHubApi implements GitHubClient {
    * any errors[] entry, even beside partial data   -> { error }, so a section never acts on a half-answered query
    * `extensions.warnings` (legacy node-ID notices)  -> the debug trace only
    */
-  async tryGraphql(
+  private async graphql(
     op: GraphqlOp,
     variables: Readonly<Record<string, unknown>>,
     slug: string,

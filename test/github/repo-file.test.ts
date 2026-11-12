@@ -63,14 +63,14 @@ describe("getRepoFile", () => {
   test.each([
     [
       "404",
-      "is an inconclusive proof naming the grant and the empty-branch case, never a missing file",
+      "is an inconclusive proof naming the grant, never a missing file",
       notFound,
       1,
       unproven(404),
     ],
     [
       "403",
-      "is an inconclusive proof naming the grant and the empty-branch case, never a missing file",
+      "is an inconclusive proof naming the grant, never a missing file",
       forbidden,
       1,
       unproven(403),
@@ -100,6 +100,19 @@ describe("getRepoFile", () => {
     const result = await getRepoFile(api(), "o/r", FILE);
     expect(state.paths).toEqual([CONTENTS, REPO, ...Array<string>(refReads).fill(REF)]);
     expect(result).toEqual(expected);
+  });
+
+  test("an empty repository is an inconclusive proof naming the uninitialized branch, never a failure to re-run", async () => {
+    // What GitHub answers for a repository with no commit: the contents read 404s with its own message and the ref
+    // read 409s. Read as a failure, the 409 told the operator to re-run a request no re-run can change.
+    const state = stubFetch([
+      () => json(404, { message: "This repository is empty." }),
+      repo(),
+      () => json(409, { message: "Git Repository is empty." }),
+    ]);
+    const result = await getRepoFile(api(), "o/r", FILE);
+    expect(state.paths).toEqual([CONTENTS, REPO, REF]);
+    expect(result).toEqual(unproven(409));
   });
 
   test("a contents 404 on an invisible repo surfaces the repo-level error before any ref read", async () => {

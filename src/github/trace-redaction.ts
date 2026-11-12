@@ -1,28 +1,27 @@
 /**
- * Slug redaction of the client's trace lines: a /repos/<owner>/<repo> slug collapses its line while the Io port masks
- * it or an in-flight request holds it (GitHubApi's redactTrace, for the visibility probe), and octokit's plugin log
- * runs through the same scan (redactingOctokitLog). TraceIo is the slice of Io the client (api.ts) takes for this.
+ * What the client's trace lines may show of a redacted target; TraceIo is the slice of Io the client (api.ts) takes
+ * for it. Two rules, either one enough:
+ *
+ *   a request marked as serving a redacted target  -> the trace is sealed until it settles (during)
+ *   a slug masked through the Io port              -> every line naming it collapses, whoever sent the request
+ *
+ * Octokit's plugin log runs through the same rules (redactingOctokitLog).
  */
 
 import type { Io } from "../io.js";
-import { SLUG_SEGMENT, type SlugKey, slugKey } from "./slug.js";
+import { SLUG_SEGMENT, slugKey } from "./slug.js";
 
 export type TraceIo = Pick<Io, "debug" | "masked">;
 
 // The segment charset stops at the segment boundary so an octokit line's trailing " - 204 with id ..." is never folded into the name, and the `i` flag keeps a mixed-case path from slipping the redaction.
 const REPO_SLUG = new RegExp(`/repos/(${SLUG_SEGMENT}/${SLUG_SEGMENT})`, "i");
 
-export function repoSlugOf(path: string): string | undefined {
-  return path.match(REPO_SLUG)?.[1];
-}
+const REDACTED = "<redacted>";
 
-/**
- * A slug is redacted while it is masked through the Io port or held by an in-flight request (the visibility probe). A
- * traced payload is private content no mask covers, so it is dropped.
- */
+/** A traced payload is private content no mask covers, so a redacted path drops it. */
 export class TraceRedaction {
-  // One token per hold, so concurrent holds on the same slug release independently and a double release is inert.
-  private readonly holds = new Set<{ readonly slug: SlugKey }>();
+  /** How many requests in flight serve a redacted target. */
+  private sealed = 0;
 
   constructor(private readonly io: TraceIo) {}
 
@@ -30,12 +29,22 @@ export class TraceRedaction {
     this.io.debug(line);
   }
 
-  hold(slug: string): () => void {
-    const token = { slug: slugKey(slug) };
-    this.holds.add(token);
-    return () => {
-      this.holds.delete(token);
-    };
+  /**
+   * Runs `request`; when it serves a redacted target, no line written until it settles shows a path or a payload.
+   * The seal is the whole trace's, not the request's: a plugin logs through the client, so its line for this
+   * request cannot be told from its line for another one in flight beside it.
+   */
+  async during<T>(servesRedactedTarget: boolean, request: () => Promise<T>): Promise<T> {
+    if (!servesRedactedTarget) {
+      return request();
+    }
+
+    this.sealed += 1;
+    try {
+      return await request();
+    } finally {
+      this.sealed -= 1;
+    }
   }
 
   isRedacted(slug: string): boolean {
@@ -53,9 +62,9 @@ export class TraceRedaction {
    * anything but a constant leaks what redaction hides.
    */
   path(path: string): { path: string; redacted: boolean } {
-    const slug = repoSlugOf(path);
-    if (slug && this.isRedacted(slug)) {
-      return { path: "<redacted>", redacted: true };
+    const slug = path.match(REPO_SLUG)?.[1];
+    if (this.sealed > 0 || (slug !== undefined && this.isRedacted(slug))) {
+      return { path: REDACTED, redacted: true };
     }
     return { path, redacted: false };
   }
@@ -65,19 +74,20 @@ export class TraceRedaction {
    * needle as a case-insensitive substring collapses the whole line.
    */
   message(message: string): string {
+    if (this.sealed > 0) {
+      return REDACTED;
+    }
+
     const lower = message.toLowerCase();
     for (const needle of this.needles()) {
       if (lower.includes(needle)) {
-        return "<redacted>";
+        return REDACTED;
       }
     }
     return message;
   }
 
   private *needles(): Iterable<string> {
-    for (const token of this.holds) {
-      yield token.slug;
-    }
     for (const value of this.io.masked()) {
       // An empty mask would match every line.
       if (value !== "") {
