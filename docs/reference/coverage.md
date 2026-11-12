@@ -154,7 +154,7 @@ The side-by-side comparison with the Probot Settings app lives in the migration 
 
 - Covers branch, tag, and push targets; all rule types, conditions, and bypass_actors.
 - GET/POST/PUT/DELETE /repos/{owner}/{repo}/rulesets: upsert-by-name, full-payload PUT, passthrough except ref-name prefixing (staging -> refs/heads/staging, ~DEFAULT_BRANCH passes through) and the actor fill GitHub applies (bypass_mode always, an OrganizationAdmin's actor_id 1).
-- What the file alone shows wrong is refused at parse, before any request: the enforcement level, a bypass actor's type, mode, and id rules, a "~" ref-name value other than ~ALL or ~DEFAULT_BRANCH, and the parameters of the rule types the vendored OpenAPI spec knows (types, enums in GitHub's casing, integer bounds, required fields).
+- What the file alone shows wrong is refused at parse, before any request: the enforcement level, a bypass actor's type, mode, and id rules, a bypass actor listed twice in one ruleset, a "~" ref-name value other than ~ALL or ~DEFAULT_BRANCH, and the parameters of the rule types the vendored OpenAPI spec knows (types, enums in GitHub's casing, integer bounds, required fields).
 - A rule type the spec does not know passes through verbatim, as does a new field on a known rule or a bypass actor, so what GitHub ships tomorrow works today.
 - The list carries summaries, so each matched ruleset is read whole before the comparison.
 - A live value the entry omits is drift, and apply refuses the PUT (the [replace-write rule](semantics.md)).
