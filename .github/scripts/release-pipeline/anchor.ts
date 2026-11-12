@@ -46,6 +46,7 @@ type ReleaseConfig = Record<string, unknown> & { "last-release-sha"?: string };
 
 /** A release commit: release-please's own on a release PR branch, its squash merge on main. */
 interface Release {
+  /** Its full sha, as `git log` prints %H. */
   sha: string;
 
   /** The X.Y.Z its subject names. */
