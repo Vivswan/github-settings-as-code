@@ -77,5 +77,6 @@ export const autolinksSection = listSection({
       ),
   },
   replaces: false,
+  reported: { id: true, updated_at: true },
   prose: { undeclaredAction: "DELETE it" },
 });

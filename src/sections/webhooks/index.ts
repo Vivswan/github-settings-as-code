@@ -122,6 +122,17 @@ export const webhooksSection = listSection({
     }
     return null;
   },
+  reported: {
+    type: true,
+    id: true,
+    updated_at: true,
+    created_at: true,
+    url: true,
+    test_url: true,
+    ping_url: true,
+    deliveries_url: true,
+    last_response: true,
+  },
   // Undeclared hooks are kept by default: integrations own their hooks, and deleting one silently
   // would break a service nobody named in this file.
   prose: { undeclaredAction: "DELETE it" },

@@ -17,6 +17,10 @@ interface ReportedKeys {
   readonly outcome: string;
 }
 
+/** The `outcome` for a holder GitHub updates in place: no write takes the key, so the update a differing value triggers can never set it. */
+export const UPDATE_NEVER_CONVERGES =
+  "so a declared value that differs from the live one drifts on every check and its update re-runs on every apply without converging";
+
 /** The reported keys `declared` holds, and the one note naming them; no note when it holds none. */
 export function reportedKeyNote(
   label: string,

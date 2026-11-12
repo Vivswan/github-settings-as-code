@@ -11,6 +11,11 @@ coverage:
       - >-
         Undeclared labels are DELETED loudly by default; the wrapped `_undeclared: keep` form keeps
         them, each surfaced as a note.
+      - >-
+        A declared key the GET reports and neither the POST nor the PATCH takes (id, node_id, url,
+        default) draws a note in check and in apply, whatever its value and with or without a live
+        label: a value that differs from the live one drifts on every check, and its update re-runs on
+        every apply.
       - Snapshot reads the live labels back as entries under the delete default.
 schema:
   SettingsFile.labels: >-
