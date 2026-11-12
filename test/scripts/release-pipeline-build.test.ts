@@ -45,6 +45,7 @@ import {
   plantCommitIn,
   positionOf,
   pushGreenCommit,
+  pushMarker,
   remoteRef,
   rivalPackage,
   seedFixture,
@@ -609,6 +610,7 @@ describe("packageCommit", () => {
     write(later, "package.json", manifestJson("2.1.1"));
     const laterMerge = commitAll(later, "chore(main): release 2.1.1 (#44)");
     git(later, "push", "--quiet", "origin", "HEAD:refs/heads/main");
+    pushMarker(later, "2.1.1", laterMerge);
     writeBuild(later, "packaged-bundle-bytes-2\n");
     const laterPackaged = packageCommit({ cwd: later, sourceSha: laterMerge }).commit;
     const greens: { dir: string; sha: string }[] = [];

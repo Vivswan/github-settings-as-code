@@ -3,14 +3,15 @@
   "bump-minor-pre-major": true,
   "bump-patch-for-minor-pre-major": true,
   "commit-search-depth": 5000,
-  "include-component-in-tag": false,
-  "last-release-sha": "6dbc9a96a69818e569f8372acac82bb152a7c389",
+  "include-component-in-tag": true,
   "packages": {
     ".": {
       "release-type": "simple",
+      "component": "source",
+      "pull-request-title-pattern": "chore${scope}: release ${version}",
       "initial-version": "1.0.0",
       "draft": true,
-      "force-tag-creation": false,
+      "force-tag-creation": true,
       "extra-files": [
         "README.md",
         "docs/start/getting-started.md",

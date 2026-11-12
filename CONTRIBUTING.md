@@ -62,5 +62,12 @@ bun run fuzz --seed <iterationSeed> --iterations 1    # replay one failing itera
 
 - Releases run downstream of the `all-green` gate: ci.yml calls the fleet's release workflow, so a release or a release-PR refresh only happens from a green `main`.
 - release-please does the version math, the changelog, the version pins, and the release PR; merging that PR cuts the release.
+- Merge the release PR only after release-please has rebuilt it for the newest `fix` or `feat` on `main`: a commit that lands after the PR's notes were built ships in that release and appears in no changelog.
+- release-please tags each release merge on `main` as `source-vX.Y.Z` and finds its previous release by that tag. It is a marker, not a pin: `main` carries no built action. The `source-tags` ruleset freezes it.
 - Every ref a `uses:` pin can name (`vX.Y.Z`, the moving major, `latest`) points at a packaged commit: the child of one `main` commit, carrying its tree plus the built bundle, schema, and library; every green push mints one under a `build/<position>.<sha7>` tag, the ten newest kept. The tags up to v2.0.0 point at `main` commits from when `main` committed the bundle.
-- Three repo-owned hooks share the ref work: `post-green.yml` packages every green push under its `build/` tag, prunes the window, and moves `latest`; `update-release.yml` mints `vX.Y.Z` and moves the major, packages the merge commit when no build tag does, and reconciles `latest` and the build-tag window as post-green does; `update-release-pr.yml` anchors release-please's boundary (`last-release-sha`) and publishes the `next` pre-release to npm. The git topology lives in `.github/scripts/release-pipeline/tags.ts` and its test.
+
+Three repo-owned hooks share the ref work; the git topology lives in `.github/scripts/release-pipeline/tags.ts` and its test.
+
+- `post-green.yml` packages every green push under its `build/` tag, prunes the window, and moves `latest`.
+- `update-release.yml` checks the release's `source-vX.Y.Z` marker, mints `vX.Y.Z`, and moves the major. It packages the merge commit when no build tag does, reconciles `latest` and the build-tag window as post-green does, and last renames the draft release to `vX.Y.Z`.
+- `update-release-pr.yml` publishes the `next` pre-release to npm.

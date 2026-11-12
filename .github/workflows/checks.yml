@@ -31,40 +31,6 @@ jobs:
       - name: Test
         run: bun run test
 
-  # The freshness tripwire behind the boundary anchor (update-release-pr.yml): version tags live off main, so a lost
-  # anchor would have every release PR refresh computed from a stale boundary, and gating here parks the release job
-  # before release-please can build a garbage release PR. Each half is its own job, gated on its event: a skipped job
-  # leaves the checks caller, and so all-green, green.
-  #   on main          -> boundary-check: last-release-sha is the newest release merge or its parent
-  #   on a release PR  -> anchor-check: the PR carries the anchored NEXT boundary, which the main-side rule would reject
-  boundary-check:
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # The newest release merge can be arbitrarily far behind HEAD.
-          fetch-depth: 0
-      - uses: ./.github/actions/setup
-        with:
-          install: "false"
-      - name: Confirm last-release-sha matches the newest release merge
-        run: bun .github/scripts/release-pipeline.ts boundary-check
-
-  # An unanchored release PR must be unmergeable here, not park the pipeline after its merge.
-  anchor-check:
-    if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/setup
-        with:
-          install: "false"
-      - name: Require the release PR to carry this cycle's anchor
-        run: bun .github/scripts/release-pipeline.ts anchor-check
-
   # The packed tarball is imported from a fresh consumer project under Node and under tsc with skipLibCheck off, so a
   # declaration leaking a devDependency type fails here, not on a consumer's machine.
   # The consumer runs on the engines floor package.json advertises and on current node; tsdown needs a newer node

@@ -159,7 +159,7 @@ function consumedGrants(step: Step): Array<[scope: string, why: string]> {
   const grants: Array<[string, string]> = [];
   if (
     /\bgit\s+push\b|\bgh\s+release\s+(?:view|upload|edit|create)\b/.test(run) ||
-    /release-pipeline\.ts (?:package|package-commit|retag-major|anchor|resolve-source|verify-assets)\b/.test(
+    /release-pipeline\.ts (?:package|package-commit|retag-major|rename-draft|resolve-source|verify-assets)\b/.test(
       run,
     )
   ) {
@@ -219,13 +219,6 @@ describe("the hooks' grants", () => {
   });
 
   test.each<[string, string, string, Record<string, string>, RegExp]>([
-    [
-      "an anchor job narrowed to read while its subcommand pushes",
-      "update-release-pr.yml",
-      "anchor",
-      { contents: "read" },
-      /update-release-pr\.yml#anchor: .* needs contents: write/,
-    ],
     [
       "a publish job without the OIDC grant its npm publish consumes",
       "update-release-pr.yml",
@@ -577,10 +570,10 @@ describe("the probed hooks' wiring", () => {
     // a prefix bash reads as a command rather than an assignment are each detected and not read, so a hook step in any
     // of those shapes fails here instead of passing unjudged.
     for (const run of [
-      "bun .github/scripts/release-pipeline.ts\nanchor",
-      "bun --silent .github/scripts/release-pipeline.ts anchor",
-      "bun run .github/scripts/release-pipeline.ts anchor",
-      "bun \\\n  .github/scripts/release-pipeline.ts anchor",
+      "bun .github/scripts/release-pipeline.ts\npackage",
+      "bun --silent .github/scripts/release-pipeline.ts package",
+      "bun run .github/scripts/release-pipeline.ts package",
+      "bun \\\n  .github/scripts/release-pipeline.ts package",
       '1PAT_SET="true" bun .github/scripts/post-green-steps.ts probe',
     ]) {
       expect([RUNS_SCRIPT.test(run), scriptStep({ run })], run).toEqual([true, undefined]);
@@ -1026,7 +1019,7 @@ describe("the push probe", () => {
         "release-pipeline",
         ROOT,
         join(dir, "runner-temp"),
-        { TAG: "v2.1.0", PATH: `${bin}:${process.env.PATH ?? ""}` },
+        { MARKER: "source-v2.1.0", PATH: `${bin}:${process.env.PATH ?? ""}` },
         subcommand,
       );
       expect(

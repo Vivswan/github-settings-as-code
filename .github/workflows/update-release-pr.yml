@@ -1,18 +1,13 @@
 # The release-PR hook of the release pipeline: repo-owned (a generated-once starter, never overwritten by sync),
 # called by the managed ci.yml whenever release-please creates or refreshes the release PR, independently of any
 # release cut. Inside a called workflow github.sha is the caller's: the push to main that release-please judged, the
-# head the refresh was built on. Two independent jobs share that sha and nothing else:
-#
-#   anchor        -> the boundary anchor (anchorReleasePr in .github/scripts/release-pipeline/anchor.ts) inside the PR branch
-#   publish-next  -> the library pre-release to npm under the `next` dist-tag
+# head the refresh was built on. Its one job, publish-next, publishes that commit's library pre-release to npm under
+# the `next` dist-tag.
 #
 # The publish lives here because release-please's refresh IS the releasable signal: release-please-config.json leaves
 # always-update off, so the PR is refreshed only when the release notes change, i.e. when a commit of a type its
 # changelog shows lands (feat, fix, perf, revert, or a breaking marker). A push of hidden types alone (test, docs, chore,
 # build, ci, refactor) refreshes nothing and publishes nothing; no check of this repository's own decides a publish.
-#
-# The anchor is pushed with the default github.token, which starts no workflows, so the PR's checks do not re-run
-# on the anchored head; anchor-check's failure message says to close and reopen the PR.
 
 name: Update Release PR
 
@@ -29,19 +24,6 @@ on:
         type: string
 
 jobs:
-  anchor:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/setup
-        with:
-          install: "false"
-      - name: Anchor the boundary inside the release PR branch
-        run: bun .github/scripts/release-pipeline.ts anchor
-
   # The npm-publish lane exists because the registry has no compare-and-set: the pre-publish guard's read still holds
   # when its publish lands, whichever publisher (this job, update-release.yml's) took the lane before it.
   #   no ACTIONS_ID_TOKEN_REQUEST_URL -> the caller granted none (a fork, a ceiling change); step one skips the rest
@@ -49,7 +31,7 @@ jobs:
   #   queue: max                      -> a lane keeps ONE pending job by default; a dropped job fails the call
   #   guard reads the record          -> the lane serializes but does not order; GitHub promises no queue order
   #   confirm holds the lane          -> a job ends once the registry shows its publish, so the next holder's guard sees it
-  # No permissions key: a job asking above the caller's ceiling fails the whole call, anchor included, so the OIDC
+  # No permissions key: a job asking above the caller's ceiling fails the whole call, so the OIDC
   # grant arrives by inheritance from the id-token: write the managed ci.yml gives this call, and a ceiling without
   # it reaches step one's warn-and-skip instead of a validation failure.
   publish-next:
