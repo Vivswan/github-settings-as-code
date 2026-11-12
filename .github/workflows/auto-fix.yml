@@ -58,8 +58,8 @@ on:
       - ".github/scripts/endpoint-docs.yml"
       - "test/e2e/openapi/validate.ts"
       - "test/e2e/openapi/paths.ts"
-      # The formatter's config, listed by hand since no test can see a subprocess's reads: every generator but the gaps
-      # index pipes what it writes through biome, so a formatter option moves generated output.
+      # The formatter's config: every generator but the gaps index pipes its output through biome. Listed by hand: the
+      # trigger test (test/scripts/auto-fix-steps.test.ts) follows what a generator imports and loads, not what a subprocess opens.
       - "biome.json"
       - "biome.local.jsonc"
 
