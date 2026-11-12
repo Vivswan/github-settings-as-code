@@ -15,7 +15,7 @@ const ROOT = join(import.meta.dir, "..", "..");
 const GAPS_DIR = "src/upstream-gaps";
 export const INDEX_PATH = "src/generated/upstream-gaps.ts";
 
-export const NON_GAP_FILE_NAMES: ReadonlySet<string> = new Set(["gap.ts"]);
+const NON_GAP_FILE_NAMES: ReadonlySet<string> = new Set(["gap.ts"]);
 
 /** A stray notes.d.ts or a test must not regenerate into a phantom import. */
 export function isGapFileName(name: string): boolean {
@@ -28,12 +28,12 @@ export function isGapFileName(name: string): boolean {
 }
 
 /** "merge-queue" -> "mergeQueue": the generated import alias for a gap file. */
-export function camelCaseGapName(base: string): string {
+function camelCaseGapName(base: string): string {
   return base.replace(/-([a-z0-9])/g, (_, ch: string) => ch.toUpperCase());
 }
 
 /** The record entry for a gap file: shorthand when the alias is the base name, a quoted key otherwise. */
-export function gapEntry(base: string): string {
+function gapEntry(base: string): string {
   const alias = camelCaseGapName(base);
   return alias === base ? `${alias},` : `"${base}": ${alias},`;
 }
@@ -120,7 +120,7 @@ export function regenerateIndex(): number {
   return bases.length;
 }
 
-export function indexSummary(count: number): string {
+function indexSummary(count: number): string {
   return `wrote ${INDEX_PATH} (${countNoun(count, "gap file", "gap files")})`;
 }
 

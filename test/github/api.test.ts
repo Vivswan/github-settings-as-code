@@ -435,7 +435,7 @@ describe("error classification", () => {
   );
 });
 
-describe("debug-trace hardening for redacted slugs", () => {
+describe("debug-trace hardening for masked values and marked requests", () => {
   // Every test reads the debug lines its OWN trace facet received, so a concurrent test's output cannot pollute the observation.
 
   test.each([

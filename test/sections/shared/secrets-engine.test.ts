@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { err, ok } from "neverthrow";
 import type { EndpointDecl } from "../../../src/sections/contract/endpoints.js";
-import type { SectionContext, SectionMeta } from "../../../src/sections/contract/module.js";
+import type { SectionMeta } from "../../../src/sections/contract/module.js";
 import type { ExecTools, SectionPlan } from "../../../src/sections/contract/plan.js";
 import { duplicateNameIssues } from "../../../src/sections/shared/secrets-and-variables/named-scope.js";
 import {
@@ -19,7 +19,6 @@ import {
   mockSodiumReady,
   unsealSecretValue,
 } from "../../e2e/mock/secrets.js";
-import { MockApi } from "../../mock-api.js";
 import { unwrap } from "../section-run.js";
 
 const section: SectionMeta = {
@@ -252,19 +251,5 @@ describe("planSecrets and the execution-time resolver", () => {
     );
     expect(plan).toEqual({ ops: [], notes: [], drift: [] });
     expect(reads).toEqual(["list"]);
-  });
-});
-
-describe("the section context arms", () => {
-  // Reference VALIDATION lives in the engine (src/engine/secrets.ts + secret-refs.ts) and runs before any section; the context ARMS are
-  // compiler-enforced.
-  test("a check-mode context carrying a resolver does not compile", () => {
-    void ({
-      api: new MockApi({}),
-      repo: { owner: "o", name: "r", slug: "o/r" },
-      check: true,
-      resolveSecret: (reference: string): string => reference,
-      // @ts-expect-error the check arm pins resolveSecret to never
-    } satisfies SectionContext);
   });
 });

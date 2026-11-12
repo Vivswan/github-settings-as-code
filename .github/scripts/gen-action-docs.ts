@@ -343,7 +343,7 @@ const SECRET_ROW_PROSE: PolicyRowProse = {
 };
 
 /** The Defaults-per-section prose by section key; a knobbed section without a row stops the build naming it. */
-export const POLICY_ROW_PROSE: Record<UndeclaredPolicySection, PolicyRowProse> = {
+const POLICY_ROW_PROSE: Record<UndeclaredPolicySection, PolicyRowProse> = {
   labels: {
     caveat: "Probot parity",
     override: "manage a core set without deleting ad-hoc labels",

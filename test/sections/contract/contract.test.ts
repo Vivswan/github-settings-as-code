@@ -1215,7 +1215,7 @@ describe("declaredTolerance", () => {
 });
 
 describe("a marked request's failure is rebuilt on the engine's side of the client port", () => {
-  const ctx = { repo: { owner: "o", name: "r", slug: "o/r" }, check: false as const };
+  const ctx = { repo: { owner: "o", name: "r", slug: "o/r" } };
   const endpoint: EndpointDecl = {
     route: "PATCH /repos/{owner}/{repo}/code-quality/setup",
     statuses: { 200: "updated", 409: "a run is in progress" },
@@ -1252,14 +1252,14 @@ describe("a marked request's failure is rebuilt on the engine's side of the clie
     },
   };
   const rest = (api: GitHubClient, carriesSecret: boolean) =>
-    callDeclared({ ...ctx, api, resolveSecret: () => "" }, actionsSection, endpoint, {
+    callDeclared({ ...ctx, api }, actionsSection, endpoint, {
       payload: { token: "hunter2" },
       carriesSecret,
       describe: "arming the setup",
     }).then(unwrap);
   const graphql = (api: GitHubClient, carriesSecret: boolean) =>
     callGraphql(
-      { ...ctx, api, resolveSecret: () => "" },
+      { ...ctx, api },
       actionsSection,
       op,
       { token: "hunter2" },
@@ -1376,16 +1376,11 @@ describe("a marked request's failure is rebuilt on the engine's side of the clie
   test("a tolerated status on a marked request comes back withheld too, keeping the status the tolerance reads", async () => {
     // The tolerance's outcome thunk may render error.message into a note or failure (shared/setup-section.ts does).
     const result = unwrap(
-      await tryCallDeclared(
-        { ...ctx, api: answering(409), resolveSecret: () => "" },
-        actionsSection,
-        endpoint,
-        {
-          payload: { token: "hunter2" },
-          carriesSecret: true,
-          tolerated: declaredTolerance(endpoint),
-        },
-      ),
+      await tryCallDeclared({ ...ctx, api: answering(409) }, actionsSection, endpoint, {
+        payload: { token: "hunter2" },
+        carriesSecret: true,
+        tolerated: declaredTolerance(endpoint),
+      }),
     );
     expect(result).toEqual({
       error: { status: 409, message: SECRET_RESPONSE_WITHHELD, body: SECRET_RESPONSE_WITHHELD },
@@ -1403,7 +1398,7 @@ describe("a marked request's failure is rebuilt on the engine's side of the clie
       statuses: { 200: "the setup" },
     } as const satisfies EndpointDecl;
     const widened = { describe: "arming the setup", payload: { token: "hunter2" } };
-    const readCtx = { ...ctx, api: new MockApi({}), check: true as const };
+    const readCtx = { ...ctx, api: new MockApi({}) };
     void (() => call(readCtx, actionsSection, literal, { describe: widened.describe }));
     // @ts-expect-error the typed helpers admit no payload, literal or widened
     void (() => call(readCtx, actionsSection, literal, widened));
@@ -1428,7 +1423,7 @@ describe("a marked request's failure is rebuilt on the engine's side of the clie
 });
 
 describe("tryCallDeclared", () => {
-  const ctx = { repo: { owner: "o", name: "r", slug: "o/r" }, check: false as const };
+  const ctx = { repo: { owner: "o", name: "r", slug: "o/r" } };
   const endpoint: EndpointDecl = {
     route: "PATCH /repos/{owner}/{repo}/code-quality/setup",
     statuses: { 200: "updated", 409: "a run is in progress" },
@@ -1445,7 +1440,7 @@ describe("tryCallDeclared", () => {
     expect(
       unwrap(
         await tryCallDeclared(
-          { ...ctx, api: answering(409, "Conflict"), resolveSecret: () => "" },
+          { ...ctx, api: answering(409, "Conflict") },
           actionsSection,
           endpoint,
           { tolerated, carriesSecret: false, describe: "arming the setup" },
@@ -1453,12 +1448,11 @@ describe("tryCallDeclared", () => {
       ),
     ).toEqual({ error: { status: 409, message: "Conflict", body: "" } });
     await expect(
-      tryCallDeclared(
-        { ...ctx, api: answering(422, "Unprocessable"), resolveSecret: () => "" },
-        actionsSection,
-        endpoint,
-        { tolerated, carriesSecret: false, describe: "arming the setup" },
-      ).then(unwrap),
+      tryCallDeclared({ ...ctx, api: answering(422, "Unprocessable") }, actionsSection, endpoint, {
+        tolerated,
+        carriesSecret: false,
+        describe: "arming the setup",
+      }).then(unwrap),
     ).rejects.toThrow(
       new Error(
         'actions: arming the setup failed - PATCH /repos/o/r/code-quality/setup: 422 Unprocessable. The API rejected the request; fix the "actions" values in the settings file to satisfy the message above',
@@ -1481,32 +1475,28 @@ describe("tryCallDeclared", () => {
       "actions: GET /repos/o/r/pages: 403 API rate limit exceeded. The API rate limit was hit; re-run the workflow after the limit resets, or use a token with a higher rate limit",
     );
     await expect(
-      tryCallDeclared(
-        { ...ctx, api: limited, resolveSecret: () => "" },
-        actionsSection,
-        declares403,
-        { tolerated: declaredTolerance(declares403), carriesSecret: false },
-      ).then(unwrap),
+      tryCallDeclared({ ...ctx, api: limited }, actionsSection, declares403, {
+        tolerated: declaredTolerance(declares403),
+        carriesSecret: false,
+      }).then(unwrap),
     ).rejects.toThrow(limitHit);
     await expect(
-      probeAbsent({ ...ctx, api: limited, check: true }, actionsSection, declares403).then(unwrap),
+      probeAbsent({ ...ctx, api: limited }, actionsSection, declares403).then(unwrap),
     ).rejects.toThrow(limitHit);
     const plain = new MockApi({
       "GET /repos/o/r/pages": { error: { status: 403, message: "Forbidden", body: "" } },
     });
     expect(
       unwrap(
-        await tryCallDeclared(
-          { ...ctx, api: plain, resolveSecret: () => "" },
-          actionsSection,
-          declares403,
-          { tolerated: declaredTolerance(declares403), carriesSecret: false },
-        ),
+        await tryCallDeclared({ ...ctx, api: plain }, actionsSection, declares403, {
+          tolerated: declaredTolerance(declares403),
+          carriesSecret: false,
+        }),
       ),
     ).toEqual({ error: { status: 403, message: "Forbidden", body: "" } });
-    expect(
-      unwrap(await probeAbsent({ ...ctx, api: plain, check: true }, actionsSection, declares403)),
-    ).toEqual({ missing: true });
+    expect(unwrap(await probeAbsent({ ...ctx, api: plain }, actionsSection, declares403))).toEqual({
+      missing: true,
+    });
   });
 
   test("probeAbsent shares the tolerance boundary: an undeclared status is refused before the request", async () => {
@@ -1516,7 +1506,7 @@ describe("tryCallDeclared", () => {
       statuses: { 200: "the site", 404: "no site" },
     } as const satisfies EndpointDecl;
     await expect(
-      probeAbsent({ ...ctx, api, check: true }, actionsSection, probe, {
+      probeAbsent({ ...ctx, api }, actionsSection, probe, {
         tolerate: [422 as unknown as 404],
       }).then(unwrap),
     ).rejects.toThrow(

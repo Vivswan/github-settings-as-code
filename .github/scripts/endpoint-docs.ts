@@ -58,7 +58,7 @@ interface Resolved {
 }
 
 /** The descriptor's link in the spelling docs.github.com serves: the locale added, the Pages placeholder rendered. */
-export function renderedDocsUrl(url: string): string {
+function renderedDocsUrl(url: string): string {
   return url
     .replace("https://docs.github.com/rest/", "https://docs.github.com/en/rest/")
     .replace("apiname", "github");
@@ -145,7 +145,7 @@ export function resolveAnchors(
 }
 
 /** The distinct routes and operation names the sections declare, in registry order. */
-export function declaredCalls(): { routes: string[]; operations: string[] } {
+function declaredCalls(): { routes: string[]; operations: string[] } {
   return {
     routes: [...new Set(Object.values(allEndpoints()).map((endpoint) => endpoint.route))],
     operations: [...new Set(Object.values(allGraphqlOps()).map((op) => op.name))],
