@@ -232,7 +232,7 @@ The side-by-side comparison with the Probot Settings app lives in the migration 
 - PUT /repos/{owner}/{repo}/environments/{name} passthrough; check mode flattens GET's protection_rules[] back into the PUT shape.
 - A live wait timer or reviewers list the entry omits is drift, and apply refuses the PUT (the [replace-write rule](semantics.md)).
 - Undeclared environments are left untouched.
-- A key the entry shape does not declare rides the PUT. One the GET reports and the PUT does not take (id, node_id, url, html_url, created_at, updated_at, protection_rules) is named by a note in every run. Any other, unless declared null or as an empty string, is named by a note once the environment exists and its GET does not echo the key.
+- A key the entry shape does not declare rides the PUT. One the GET reports and the PUT does not take (id, node_id, url, html_url, created_at, updated_at, protection_rules) is named by a note in check and in apply. Any other, unless declared null or as an empty string, is named by a note once the environment exists and its GET does not echo the key.
 - In check mode against a missing environment the declared variables, secrets, patterns, and protection rules cannot be listed, so notes say they are unverifiable until it exists; against a live environment whose custom_branch_policies flag is off, the patterns earn the same note while the flag drift comes from the environment diff.
 - Snapshot lists the environments (GET /repos/{owner}/{repo}/environments) and reads each one back as an entry: the PUT-shape settings off its GET body, and every nested list that has live items in its wrapped form under that list's default policy.
 - The snapshot writes variables with their values, branch-policy patterns while the custom_branch_policies flag is on, and the enabled protection rules by App slug; those two lists sit behind the Actions grant: under on-missing-permission: warn a denial leaves the key out with a note and the rest of the environment reads back, under fail it fails the section.
@@ -242,7 +242,7 @@ The side-by-side comparison with the Probot Settings app lives in the migration 
 
 - A declared per-environment `variables` key reconciles that environment's Actions variables AFTER the PUT, through GET/POST /repos/{owner}/{repo}/environments/{name}/variables and PATCH/DELETE .../variables/{name}: create missing, update divergent values, and delete undeclared ones by default (the wrapped `_undeclared: keep` form keeps them as notes).
 - Names match case-insensitively, values are plain text by design.
-- A declared created_at or updated_at, which the GET reports and neither write takes, is named by a note in every run.
+- A declared created_at or updated_at, which the GET reports and neither write takes, is named by a note in check and in apply.
 
 **Environment secrets** (`environments`)
 
@@ -255,7 +255,7 @@ The side-by-side comparison with the Probot Settings app lives in the migration 
 
 - A declared per-environment `deployment_branch_policies` key reconciles that environment's custom branch-policy patterns through GET/POST .../environments/{name}/deployment-branch-policies and DELETE .../deployment-branch-policies/{branch_policy_id}: create missing patterns, delete undeclared ones by default (`_undeclared: keep` softens to notes), and replace a matching pattern whose type differs.
 - Type is immutable upstream, so the change is delete + recreate; the upstream PUT is deliberately unused - its body is the name alone, and the name is the pattern's identity, so it can never help reconciliation.
-- A pattern key outside name and type rides the create call and no run compares it, so it adds no drift. One the GET reports (id, node_id) is named by a note in every run. Any other, unless declared null or as an empty string, is named by a note once the live pattern exists and does not echo the key.
+- A pattern key outside name and type rides the create call and no run compares it, so it adds no drift. One the GET reports (id, node_id) is named by a note in check and in apply. Any other, unless declared null or as an empty string, is named by a note once the live pattern exists and does not echo the key.
 - Declaring the key requires the singular `deployment_branch_policy` sibling with custom_branch_policies: true (rejected upfront otherwise, since the pattern writes would 404 only after the environment PUT landed).
 - These endpoints sit outside the Environments PAT permission: the list read needs Actions read, the writes need Administration write.
 

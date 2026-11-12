@@ -19,9 +19,10 @@ schema:
     The plain array form takes the file's top-level `_undeclared`, else the run's `undeclared` input,
     else the list's own default (the section default for a top-level section, a fixed default for a
     nested list such as environments[].variables); this wrapper can set it explicitly, and with
-    `_undeclared` omitted it behaves exactly like the plain array. The
-    wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are
-    strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the
+    `_undeclared` omitted it behaves exactly like the plain array.
+
+    The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys
+    are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the
     underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.
   UndeclaredPolicyList<*>._undeclared: >-
     What apply does to live resources `entries` does not declare: "delete" removes them, "keep"
@@ -32,25 +33,31 @@ schema:
     The wrapped form of a list section that applies no undeclared policy (environments, branches,
     workflows): the plain array beside `{_layering, entries}`. The wrapper exists for the render
     directive alone, so the rendered document always holds the plain array, and with `_layering`
-    omitted it behaves exactly like the plain array. Its keys are strict: anything besides
-    `_layering` and `entries` (there is no `_undeclared` here, since the section keeps every live
-    resource it does not declare) is rejected upfront as a typo.
+    omitted it behaves exactly like the plain array.
+
+    Its keys are strict: anything besides `_layering` and `entries` (there is no `_undeclared` here,
+    since the section keeps every live resource it does not declare) is rejected upfront as a typo.
   LayeredList<*>.entries: The declared entries, exactly as the plain array form lists them.
   LayeredList<*>._layering: >-
     A render-time directive: how this section combines with the layers BELOW it in a layered merge,
     by the section's key (an environment's name, a branch name or pattern, a workflow path).
+
     "replace" lets this layer's list win wholesale; "shallow" unions the entries by key and swaps a
     same-key entry for this layer's; "deep" unions by key and merges a same-key pair field by field,
     the entry's nested lists (an environment's variables, secrets, branch policies, protection
-    rules, and reviewers, each by its own key) unioning the same way. Omitted, the file's
-    `_layering` applies, else the run's layering. It has no effect on a single document, and the
-    rendered document never carries it.
+    rules, and reviewers, each by its own key) unioning the same way.
+
+    Omitted, the file's `_layering` applies, else the run's layering. It has no effect on a single
+    document, and the rendered document never carries it.
   UndeclaredPolicyList<*>._layering: >-
     A render-time directive: how this section combines with the layers BELOW it in a layered merge,
-    by the section's key (a label's name, a secret's name, a webhook's URL, ...). "replace" lets
-    this layer's list win wholesale; "shallow" unions the entries by key and swaps a same-key entry
-    for this layer's; "deep" unions by key and merges a same-key pair field by field, a nested keyed
-    list (a ruleset's rules, by type) unioning the same way. To clear a list, write "replace" with
-    an empty list: under "shallow" and "deep" an empty list adds nothing. Omitted, the file's
-    `_layering` applies, else the run's layering. It has no effect on a single document, the
-    rendered document never carries it, and a list nested inside a section entry does not take it.
+    by the section's key (a label's name, a secret's name, a webhook's URL, ...).
+
+    "replace" lets this layer's list win wholesale; "shallow" unions the entries by key and swaps a
+    same-key entry for this layer's; "deep" unions by key and merges a same-key pair field by field,
+    a nested keyed list (a ruleset's rules, by type) unioning the same way. To clear a list, write
+    "replace" with an empty list: under "shallow" and "deep" an empty list adds nothing.
+
+    Omitted, the file's `_layering` applies, else the run's layering. It has no effect on a single
+    document, the rendered document never carries it, and a list nested inside a section entry does
+    not take it.

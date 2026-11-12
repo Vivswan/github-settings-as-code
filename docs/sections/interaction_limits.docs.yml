@@ -78,8 +78,9 @@ schema:
   SettingsFile.interaction_limits: >-
     Temporary interaction limits; null clears an active repo-level limit, and an absent key leaves
     whatever is live untouched. Limits self-expire (GitHub's expiry tops out at six_months), so
-    apply re-arms the declared limit on every run and check mode reports drift once it lapses. The
-    pull_request_creation_cap and pull_request_creation_bypass keys manage the persistent pull
+    apply re-arms the declared limit on every run and check mode reports drift once it lapses.
+
+    The pull_request_creation_cap and pull_request_creation_bypass keys manage the persistent pull
     request creation cap and its bypass list instead; `interaction_limits: null` clears the base
     limit only and never touches them.
   InteractionLimitsConfig: >-

@@ -276,20 +276,25 @@ schema:
     PUT silently drops, so it is applied through the POST/DELETE .../protection/required_signatures
     sub-endpoint: when it drifts, and again after any protection PUT (GitHub does not document
     whether the PUT preserves an existing requirement), so declare the toggle on any branch that
-    carries one - a declared value is pinned either way. On a wildcard rule it rides the GraphQL
-    rule mutation like every other key.
+    carries one - a declared value is pinned either way.
+
+    On a wildcard rule it rides the GraphQL rule mutation like every other key.
   BranchProtectionConfig.force_push_bypassers: >-
     Who may force-push to the branch when "allow force pushes" is in its "specify who" mode. Each
     actor is one string: a bare login is a user ("octocat"), "org/team-slug" is a team, and
-    "app/slug" is a GitHub App. A REST-invisible surface: on a literal branch this routed key is
+    "app/slug" is a GitHub App.
+
+    A REST-invisible surface: on a literal branch this routed key is
     stripped from the protection PUT and applied through the updateBranchProtectionRule GraphQL
     mutation when it drifts, and again after any protection PUT; on a wildcard rule it rides the
     create or update mutation with the rest of the rule. The live list is read back through GraphQL.
+
     An empty list clears every allowance; an absent key leaves the live list untouched.
   BranchProtectionConfig.required_deployments: >-
     Require deployments to succeed before merging (the checkbox and its environment list).
     REST-invisible like force_push_bypassers, so the routed key rides the same GraphQL mutation.
     Declaring `null` turns the requirement OFF; an absent key leaves the live state untouched.
+
     GitHub SILENTLY drops environment names that do not exist on the repository, so apply verifies
     the mutation's read-back and fails loudly naming any dropped name; the environments section runs
     before branches, so environments declared in the same settings file exist by the time this key

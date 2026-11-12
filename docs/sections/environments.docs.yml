@@ -27,8 +27,8 @@ coverage:
       - >-
         A key the entry shape does not declare rides the PUT. One the GET reports and the PUT does not
         take (id, node_id, url, html_url, created_at, updated_at, protection_rules) is named by a
-        note in every run. Any other, unless declared null or as an empty string, is named by a note
-        once the environment exists and its GET does not echo the key.
+        note in check and in apply. Any other, unless declared null or as an empty string, is named
+        by a note once the environment exists and its GET does not echo the key.
       - >-
         In check mode against a missing environment the declared variables, secrets, patterns, and
         protection rules cannot be listed, so notes say they are unverifiable until it exists; against
@@ -60,7 +60,7 @@ coverage:
       - Names match case-insensitively, values are plain text by design.
       - >-
         A declared created_at or updated_at, which the GET reports and neither write takes, is named
-        by a note in every run.
+        by a note in check and in apply.
   - area: "[Environment secrets](https://docs.github.com/en/rest/actions/secrets)"
     keys: secrets
     endpoints: [listSecrets, secretsPublicKey, putSecret, removeSecret]
@@ -94,9 +94,9 @@ coverage:
         it can never help reconciliation.
       - >-
         A pattern key outside name and type rides the create call and no run compares it, so it adds
-        no drift. One the GET reports (id, node_id) is named by a note in every run. Any other, unless
-        declared null or as an empty string, is named by a note once the live pattern exists and does
-        not echo the key.
+        no drift. One the GET reports (id, node_id) is named by a note in check and in apply. Any
+        other, unless declared null or as an empty string, is named by a note once the live pattern
+        exists and does not echo the key.
       - >-
         Declaring the key requires the singular `deployment_branch_policy` sibling with
         custom_branch_policies: true (rejected upfront otherwise, since the pattern writes would 404
@@ -207,7 +207,9 @@ schema:
     environment PUT carries no pin field). Pin ORDER is the declaration order of the entries with
     `pinned: true` - together they must LEAD the repository's pinned list in that order, compared by
     rank (GitHub's live position numbers may carry holes after an unpin and are never read
-    literally). `pinned: false` unpins; an entry without the key leaves its pin state untouched.
+    literally).
+
+    `pinned: false` unpins; an entry without the key leaves its pin state untouched.
     Live pins on environments the settings file does not declare are never unpinned; when they sit
     among the declared ranks, apply moves them after the declared pins (surfaced as a note). GitHub
     allows at most 10 pinned environments, so more than 10 `pinned: true` entries are rejected
@@ -233,17 +235,19 @@ schema:
     declared (an absent key leaves the live patterns untouched). Declaring it requires the sibling
     `deployment_branch_policy` to set `custom_branch_policies: true`; without the flag GitHub
     rejects every pattern write. A pattern's `type` is immutable on GitHub, so a declared type that
-    differs from the live one is applied as delete plus recreate. Within a declared key, live
-    patterns the entries do not declare are DELETED by default; the wrapped `{_undeclared: keep,
-    entries}` form keeps them as notes.
+    differs from the live one is applied as delete plus recreate.
+
+    Within a declared key, live patterns the entries do not declare are DELETED by default; the
+    wrapped `{_undeclared: keep, entries}` form keeps them as notes.
   EnvironmentConfig.deployment_protection_rules: >-
     Custom deployment protection rules for this environment, reconciled only when this key is
     declared (an absent key leaves the live rules untouched). Each rule is a GitHub App gate,
     declared by its App slug and resolved to the App's integration id at apply time; GitHub offers
-    no update call, so the model is enable/disable only. Within a declared key, live rules the
-    entries do not declare are KEPT by default - Apps can enable themselves as gates, and silently
-    removing a deployment gate is security-relevant - and the wrapped `{_undeclared: delete,
-    entries}` form opts into disabling them.
+    no update call, so the model is enable/disable only.
+
+    Within a declared key, live rules the entries do not declare are KEPT by default - Apps can
+    enable themselves as gates, and silently removing a deployment gate is security-relevant - and
+    the wrapped `{_undeclared: delete, entries}` form opts into disabling them.
   EnvironmentConfig.variables: >-
     Actions variables for this environment, reconciled only when this key is declared (an absent key
     leaves the live variables untouched). Values are plain text by design - use environment secrets
@@ -255,9 +259,11 @@ schema:
     leaves the live secrets untouched). Each value is a whole-value `$NAME` reference to the action
     step's environment, never a literal, sealed client-side against the environment's public key;
     GitHub cannot return a value, so check mode verifies existence only and apply re-seals every
-    declared value on each run. Within a declared `secrets` key, live secrets the entries do not
-    declare are KEPT by default (their values are unrecoverable); the wrapped `{_undeclared: delete,
-    entries}` form opts into deletion.
+    declared value on each run.
+
+    Within a declared `secrets` key, live secrets the entries do not declare are KEPT by default
+    (their values are unrecoverable); the wrapped `{_undeclared: delete, entries}` form opts into
+    deletion.
   EnvironmentSecretConfig: >-
     One per-environment Actions secret, matched by case-insensitive name (GitHub stores secret names
     uppercase). Keys other than name and value are rejected: the API body is built from the sealed
