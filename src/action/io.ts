@@ -44,17 +44,19 @@ function appendSummary(markdown: string): void {
 }
 
 /**
- * `line` with each line break in the runner's spelling (%0D, %0A), as @actions/core escapes a command's data. The
- * runner ends a line at CR or LF and reads a line starting `::` as a workflow command, so text after a raw break
- * would issue one. `%` stays as written: nothing decodes a log line. test/cli/actions.test.ts holds the CLI's log to this form.
+ * `line` as one log line the runner prints and never reads as a workflow command. test/cli/actions.test.ts holds
+ * the CLI's log under a runner to the same output.
+ *
+ *   the runner reads `::` at the start of a line, after leading whitespace -> CR and LF are written %0D and %0A
+ *   the runner reads `##[` anywhere in a line                               -> it is written %23%23[
  */
-function oneLine(line: string): string {
-  return line.replace(/\r/g, "%0D").replace(/\n/g, "%0A");
+function plainLine(line: string): string {
+  return line.replace(/\r/g, "%0D").replace(/\n/g, "%0A").replace(/##\[/g, "%23%23[");
 }
 
 export const actionsIo: Io = {
   annotate,
-  log: (line) => console.log(oneLine(line)),
+  log: (line) => console.log(plainLine(line)),
   debug: (line) => core.debug(line),
   summary: appendSummary,
   output: setOutput,

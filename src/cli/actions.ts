@@ -36,11 +36,16 @@ export function actionsRunner(
 }
 
 /**
- * `text` on one line, each line break in the runner's spelling (%0D, %0A). The runner ends a line at CR or LF and
- * reads a line starting `::` as a workflow command, so text after a raw break would open a line of its own.
+ * `text` with each line break in the runner's spelling (%0D, %0A). The runner reads `::` as a workflow command at
+ * the start of a line, after leading whitespace, so text after a raw break could open one.
  */
 export function oneLine(text: string): string {
   return text.replace(/\r/g, "%0D").replace(/\n/g, "%0A");
+}
+
+/** `text` with `##[` written %23%23[: the runner also reads the older `##[command]` form, and that one anywhere in a line. */
+export function withoutLegacyCommand(text: string): string {
+  return text.replace(/##\[/g, "%23%23[");
 }
 
 /** One `::name::message` line with the runner's data escaping (%, CR, LF), as @actions/core issues it. */

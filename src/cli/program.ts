@@ -6,6 +6,7 @@
  * without touching the process.
  */
 
+import { closeSync } from "node:fs";
 import { Command, CommanderError, Option } from "commander";
 import { ok, type Result } from "neverthrow";
 import pc from "picocolors";
@@ -45,8 +46,7 @@ import {
   cliIo,
   type MaskedStreams,
   maskedStreams,
-  type SummaryFile,
-  settleSummaryFile,
+  openSummaryFile,
 } from "./io.js";
 
 /** Every subcommand, in help order; the package smoke asserts the installed help names each. */
@@ -110,16 +110,14 @@ export interface ProgramOptions {
   readonly executeInit?: (cfg: InitConfig, io: Io) => Promise<Rendered>;
 }
 
-/** What every subcommand's action shares; `exit` records the code main() returns. */
+/** What every subcommand's action shares; `exit` records the code main() returns, and `openIo` takes the descriptor a mode command holds on its `--summary` file. */
 interface Wiring {
   readonly host: CliHost;
   readonly streams: MaskedStreams;
   readonly bold: (text: string) => string;
   readonly execute: (cfg: RunConfig, io: Io) => Promise<RunEnd>;
   readonly executeInit: (cfg: InitConfig, io: Io) => Promise<Rendered>;
-
-  /** The Io a command writes through; `summaryFile` is the settled `--summary` of a command that writes a summary. */
-  readonly openIo: (globals: Globals, summaryFile?: SummaryFile) => CliIo;
+  readonly openIo: (globals: Globals, summaryFd?: number) => CliIo;
   readonly exit: (code: number) => void;
 }
 
@@ -185,22 +183,23 @@ function addModeCommands(program: Command, wiring: Wiring): void {
 
     command.action(async function (this: Command) {
       const values = this.optsWithGlobals<Globals & Record<string, unknown>>();
-      const summaryFile: Result<SummaryFile | undefined, string> =
-        values.summary === undefined ? ok(undefined) : settleSummaryFile(values.summary);
-      if (summaryFile.isErr()) {
+      const summary: Result<number | undefined, string> =
+        values.summary === undefined ? ok(undefined) : openSummaryFile(values.summary);
+      if (summary.isErr()) {
         // No run started, so this ends as a file-only command's failure does: the error line and the failed envelope.
-        const refused: Rendered = { code: 1, lines: [], json: failedEnvelope(summaryFile.error) };
-        wiring.openIo(values).io.annotate("error", summaryFile.error);
+        const refused: Rendered = { code: 1, lines: [], json: failedEnvelope(summary.error) };
+        wiring.openIo(values).io.annotate("error", summary.error);
         present(wiring.streams, refused, values);
         wiring.exit(refused.code);
         return;
       }
 
-      const { io, flush } = wiring.openIo(values, summaryFile.value);
+      const summaryFd = summary.value;
+      const { io, flush } = wiring.openIo(values, summaryFd);
       const read = argvReader(mode, values);
       // The envelope carries the fatal problem's text beside the outputs; the line itself is already on stderr.
       let fatal: string | undefined;
-      const code = await parseConfig(read, wiring.host.env, CLI_CAPABILITIES).match(
+      const run = parseConfig(read, wiring.host.env, CLI_CAPABILITIES).match(
         async (cfg) => {
           const end = await wiring.execute(cfg, io);
           fatal = end.fatal === undefined ? undefined : describeProblem(end.fatal);
@@ -211,6 +210,8 @@ function addModeCommands(program: Command, wiring: Wiring): void {
           return failRun(io, problem);
         },
       );
+      // The run has written its summary by the time it settles, whichever way it ends.
+      const code = await (summaryFd === undefined ? run : run.finally(() => closeSync(summaryFd)));
       wiring.exit(code);
       flush(fatal);
     });
@@ -305,12 +306,12 @@ export function buildProgram(options: ProgramOptions): {
     bold: paint.bold,
     execute,
     executeInit,
-    openIo: (globals, summaryFile) =>
+    openIo: (globals, summaryFd) =>
       cliIo({
         streams,
         json: globals.json === true,
         verbose: globals.verbose === true,
-        summaryFile,
+        summaryFd,
         colors,
       }),
     exit: (code) => {

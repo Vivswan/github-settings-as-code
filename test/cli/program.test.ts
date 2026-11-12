@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CliHost } from "../../src/cli/commands.js";
 import { main } from "../../src/cli/program.js";
@@ -136,64 +136,67 @@ describe("check and apply", () => {
     },
   );
 
-  test("--summary into a directory that does not exist creates it before the run, so the summary lands and the run ends as it went", () =>
-    withTempDir("gsac-cli-", async (dir) => {
-      // Appended to without its directory, the summary write threw after the PATCH had landed: exit 1 on an applied run.
-      const summary = join(dir, "no-such-dir", "summary.md");
-      const api = new MockApi({
-        "GET /repos/o/r": { data: { has_wiki: true, private: false } },
-      }).allowMutations("PATCH /repos/o/r");
-      const result = await cli(["apply", ...target, "--summary", summary, "--json"], api);
-      expect({ code: result.code, stdout: JSON.parse(result.stdout) }).toEqual({
-        code: 0,
-        stdout: { result: "applied", "skipped-sections": [], "repos-result": {} },
-      });
-      expect(api.mutations().map((call) => `${call.method} ${call.path}`)).toEqual([
-        "PATCH /repos/o/r",
-      ]);
-      expect(readFileSync(summary, "utf8")).toContain(
-        "| repository | :white_check_mark: applied |",
-      );
-    }));
+  // Opened only when the summary was appended, a path that could not be was found out after the run's requests had landed.
+  test.each<[string, (dir: string) => string, string]>([
+    ["under a directory that does not exist", (dir) => join(dir, "no-such-dir", "summary.md"), ""],
+    [
+      "at a file that already holds a block",
+      (dir) => {
+        const file = join(dir, "summary.md");
+        writeFileSync(file, "## earlier\n");
+        return file;
+      },
+      "## earlier\n",
+    ],
+  ])(
+    "--summary %s is opened before the run, and the run's summary is appended to what the file held",
+    (_where, arrange, held) =>
+      withTempDir("gsac-cli-", async (dir) => {
+        const summary = arrange(dir);
+        const api = new MockApi({
+          "GET /repos/o/r": { data: { has_wiki: true, private: false } },
+        }).allowMutations("PATCH /repos/o/r");
+        const result = await cli(["apply", ...target, "--summary", summary, "--json"], api);
+        expect({ code: result.code, stdout: JSON.parse(result.stdout) }).toEqual({
+          code: 0,
+          stdout: { result: "applied", "skipped-sections": [], "repos-result": {} },
+        });
+        expect(api.mutations().map((call) => `${call.method} ${call.path}`)).toEqual([
+          "PATCH /repos/o/r",
+        ]);
+        const written = readFileSync(summary, "utf8");
+        expect(written).toStartWith(`${held}## github-settings-as-code (apply)\n`);
+        expect(written).toContain("| repository | :white_check_mark: applied |");
+      }),
+  );
 
-  test("a --summary path that does not exist stays absent until the summary is written, so a settings file named there by mistake is still refused", () =>
-    withTempDir("gsac-cli-", async (dir) => {
-      // Left behind by the check, the empty file would read as an empty settings document and the run would end applied.
-      const missing = join(dir, "missing.yml");
-      const api = new MockApi({});
-      const result = await cli(
-        [
-          "apply",
-          "--repository",
-          "o/r",
-          "--token",
-          TOKEN,
-          "--settings-file",
-          missing,
-          "--summary",
-          missing,
-        ],
-        api,
-      );
-      expect(api.calls).toEqual([]);
-      expect(result.code).toBe(1);
-      expect(result.stderr).toStartWith(`error: cannot read settings from ${missing}: `);
-      expect(existsSync(missing)).toBe(false);
-    }));
-
-  test("a --summary path nothing can append to is refused before any request, naming --summary", () =>
-    withTempDir("gsac-cli-", async (dir) => {
-      // A directory at the path. Refused at the end of the run instead, the requests would already have landed.
-      const api = new MockApi({});
-      const problem = `cannot write the summary to ${dir}: Error: EISDIR: illegal operation on a directory, open '${dir}'. Check that --summary names a writable path`;
-      const result = await cli(["apply", ...target, "--summary", dir, "--json"], api);
-      expect(api.calls).toEqual([]);
-      expect({ ...result, stdout: JSON.parse(result.stdout) }).toEqual({
-        code: 1,
-        stdout: { result: "failed", problem },
-        stderr: `error: ${problem}\n`,
-      });
-    }));
+  test.each<[string, (dir: string) => string, string]>([
+    ["a directory", (dir) => dir, "EISDIR: illegal operation on a directory"],
+    [
+      "a link into a directory that does not exist",
+      (dir) => {
+        const link = join(dir, "summary.md");
+        symlinkSync(join(dir, "missing", "summary.md"), link);
+        return link;
+      },
+      "ENOENT: no such file or directory",
+    ],
+  ])(
+    "a --summary path that is %s cannot be opened, so it is refused before any request, naming --summary",
+    (_what, arrange, reason) =>
+      withTempDir("gsac-cli-", async (dir) => {
+        const summary = arrange(dir);
+        const api = new MockApi({});
+        const problem = `cannot write the summary to ${summary}: Error: ${reason}, open '${summary}'. Check that --summary names a writable path`;
+        const result = await cli(["apply", ...target, "--summary", summary, "--json"], api);
+        expect(api.calls).toEqual([]);
+        expect({ ...result, stdout: JSON.parse(result.stdout) }).toEqual({
+          code: 1,
+          stdout: { result: "failed", problem },
+          stderr: `error: ${problem}\n`,
+        });
+      }),
+  );
 });
 
 describe("validate and permissions", () => {

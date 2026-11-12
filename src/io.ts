@@ -31,8 +31,9 @@ export interface Io extends MaskPair {
   annotate(level: AnnotationLevel, message: string): void;
 
   /**
-   * One call is one line. A sink that prints escapes a line break in `line`, so text a settings file or GitHub
-   * supplied cannot open a line of its own, which a runner reads as a workflow command when it starts `::`.
+   * One call is one line: a sink that prints escapes a line break in `line`. Where a runner reads the output, `##[`
+   * is rewritten too, so text a settings file or GitHub supplied cannot issue a workflow command, which the runner
+   * reads as `::` at the start of a line or `##[` anywhere in one.
    */
   log(line: string): void;
 
