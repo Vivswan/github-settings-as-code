@@ -1,7 +1,8 @@
 /**
  * The fixture harness behind the release pipeline tests: a bare origin plus clones playing the CI checkouts, a git
  * shim first on PATH that refuses a push outside the fixture area and plays scripted remotes (rivals, refusals,
- * a landing between a read and the write it informs), and the helpers the test files share.
+ * a landing between a read and the write it informs), origin's hooks for what lands inside a push, and the helpers
+ * the test files share.
  */
 
 import { afterAll, beforeAll, expect } from "bun:test";
@@ -656,6 +657,22 @@ export function withPushPlans(
     .split("\n")
     .filter((line) => line !== "")
     .map((line) => line.split(" "));
+}
+
+/**
+ * What origin runs inside every later push, after the push read origin's refs and before origin writes any: the gap
+ * a push plan, which runs before the push starts, cannot reach. `pre-receive` plays a rival landing there, and
+ * `update` declines the ref in $1 by exiting non-zero.
+ *
+ * Origin's own hooksPath, so a developer's global one cannot answer instead.
+ */
+export function originHooks(fx: Fixture, hooks: { "pre-receive"?: string; update?: string }): void {
+  const dir = join(fx.root, "origin-hooks");
+  mkdirSync(dir);
+  for (const [name, script] of Object.entries(hooks)) {
+    writeFileSync(join(dir, name), `#!/bin/sh\n${script}`, { mode: 0o755 });
+  }
+  git(fx.origin, "config", "core.hooksPath", dir);
 }
 
 /** The moving pointer's ref. */
