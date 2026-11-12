@@ -94,16 +94,20 @@ const EVERY_RULE = [
   { type: "shipped_tomorrow", parameters: { anything: ["goes"] } },
 ];
 
-/** One bypass actor per form the spec allows, the OrganizationAdmin id GitHub ignores included. */
+/** One bypass actor per type the spec allows; a ruleset names an actor once, so each is spelled one way here. */
 const EVERY_ACTOR = [
   { actor_type: "Integration", actor_id: 1, bypass_mode: "always" },
   { actor_type: "OrganizationAdmin", actor_id: 1 },
-  { actor_type: "OrganizationAdmin" },
   { actor_type: "RepositoryRole", actor_id: 5, bypass_mode: "pull_request" },
   { actor_type: "Team", actor_id: 2, bypass_mode: "exempt" },
   { actor_type: "DeployKey", actor_id: null },
-  { actor_type: "DeployKey", bypass_mode: "exempt", future_field: true },
   { actor_type: "User", actor_id: 3 },
+];
+
+/** The other spelling of the two actors that take no id: the key left out, and a passthrough key beside it. */
+const ID_LESS_ACTORS = [
+  { actor_type: "OrganizationAdmin" },
+  { actor_type: "DeployKey", bypass_mode: "exempt", future_field: true },
 ];
 
 describe("a ruleset the API would reject never reaches it", () => {
@@ -122,8 +126,9 @@ describe("a ruleset the API would reject never reaches it", () => {
       rules: EVERY_RULE,
       bypass_actors: EVERY_ACTOR,
     };
+    const idLess = { ...ruleset, name: "id-less", bypass_actors: ID_LESS_ACTORS };
     // A rule type GitHub ships tomorrow and a field it adds to a known rule must both survive the parse untouched.
-    expect(verdict(ruleset)).toEqual({ ok: true, parsed: [ruleset] });
+    expect(verdict(ruleset, idLess)).toEqual({ ok: true, parsed: [ruleset, idLess] });
   });
 
   test.each<[what: string, ruleset: Record<string, unknown>, issues: (string | RegExp)[]]>([

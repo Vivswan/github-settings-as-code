@@ -7,13 +7,18 @@
 
 import { err, ok, type Result } from "neverthrow";
 import { z } from "zod";
+import { deltas } from "../../engine/diff.js";
 import { agree } from "../../text.js";
+import type { DeclaredIssue } from "../contract/declared.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import { type SectionFailure, sectionFailure } from "../contract/errors.js";
 import { keyedBy } from "../contract/keyed-list.js";
 import { exactName, type ListWrite } from "../shared/list/decl.js";
 import { listSection } from "../shared/list/section.js";
 import { RulesetConfig } from "./schema.js";
+
+// Rules pair by type, as the layered merge does; an actor is one per (type, id) pair, with no single identity field.
+const MATCH_BY = { rules: "type", bypass_actors: ["actor_type", "actor_id"] } as const;
 
 /**
  * The file may use short names ("staging", "templates/*") where the API wants full refs; native
@@ -86,6 +91,52 @@ function repeatedRuleTypes(
   }
   const types = [...repeated].map((type) => `"${type}"`).join(", ");
   return `${agree(repeated.size, "rule type", "rule types")} ${types}`;
+}
+
+/**
+ * An actor's identity as the comparison pairs it ("Team 5"). It is read off the engine's own pairing of a one-actor
+ * list against an empty live one, so the refusal below and the comparison cannot disagree on what a repeat is.
+ */
+function actorIdentity(actor: unknown): string {
+  const [unpaired] = deltas(
+    { bypass_actors: [actor] },
+    { bypass_actors: [] },
+    { matchBy: MATCH_BY },
+  );
+  const step = unpaired?.path.at(-1);
+  if (typeof step !== "object") {
+    throw new Error(
+      `BUG: the comparison filed the bypass actor ${JSON.stringify(actor)} under no key, though matchBy pairs bypass_actors by one`,
+    );
+  }
+
+  return step.key;
+}
+
+/**
+ * One issue per actor a ruleset names again, at that entry: a repeat has no pairing. The write carries its actors as
+ * stored, so two OrganizationAdmin entries are one actor whatever their ids.
+ */
+function repeatedActorIssues(write: ListWrite<"name">, index: number): DeclaredIssue[] {
+  const actors = Array.isArray(write.bypass_actors) ? write.bypass_actors : [];
+  const firstAt = new Map<string, number>();
+  const issues: DeclaredIssue[] = [];
+
+  for (const [at, actor] of actors.entries()) {
+    const identity = actorIdentity(actor);
+    const first = firstAt.get(identity);
+    if (first === undefined) {
+      firstAt.set(identity, at);
+      continue;
+    }
+
+    issues.push({
+      path: `[${index}].bypass_actors[${at}]`,
+      message: `the ruleset "${write.name}" lists the bypass actor "${identity}" more than once (first at bypass_actors[${first}]), and an actor has one bypass_mode - declare each actor once`,
+    });
+  }
+
+  return issues;
 }
 
 // The list summary and the per-item GET share these fields; a body without source_type reads as repository-owned, the only kind the repository endpoints can write.
@@ -177,23 +228,24 @@ export const rulesetsSection = listSection({
     // parameters and bypass actors as unknown passthrough; the factory proves the body plain at the payload.
     toWrite: (ruleset) => ({ ...normalizeRuleset(ruleset) }) as ListWrite<"name">,
     fromLive: comparableRuleset,
-    // Rules pair by type, as the layered merge does; an actor is one per (type, id) pair, with no single identity field.
-    matchBy: { rules: "type", bypass_actors: ["actor_type", "actor_id"] },
+    matchBy: MATCH_BY,
   },
   replaces: true,
-  // GitHub keeps one rule per type, and the comparison pairs rules by it, so a repeated type is a settings-file mistake.
+  // GitHub keeps one rule per type, and the comparison pairs rules by it and actors by their identity, so a repeat of either is a settings-file mistake.
   conflicts: {
     declared: (writes) =>
       writes.flatMap((write, index) => {
         const repeated = repeatedRuleTypes(write.rules as { readonly type: unknown }[] | undefined);
-        return repeated === undefined
-          ? []
-          : [
-              {
-                path: `[${index}].rules`,
-                message: `the ruleset "${write.name}" lists the ${repeated} more than once, and GitHub keeps one rule per type - declare each type once`,
-              },
-            ];
+        const ruleIssues =
+          repeated === undefined
+            ? []
+            : [
+                {
+                  path: `[${index}].rules`,
+                  message: `the ruleset "${write.name}" lists the ${repeated} more than once, and GitHub keeps one rule per type - declare each type once`,
+                },
+              ];
+        return [...ruleIssues, ...repeatedActorIssues(write, index)];
       }),
   },
   // Only a ruleset the API marks repository-owned is this section's; an inherited one is managed where it is defined.

@@ -500,6 +500,77 @@ describe("rulesets", () => {
     expect(api.mutations()).toEqual([]);
   });
 
+  test.each<
+    [
+      what: string,
+      actors: NonNullable<RulesetConfig["bypass_actors"]>,
+      issues: ReturnType<typeof rulesetsSection.validate>,
+    ]
+  >([
+    [
+      "one Team under two modes",
+      [
+        { actor_type: "Team", actor_id: 5, bypass_mode: "always" },
+        { actor_type: "Team", actor_id: 5, bypass_mode: "pull_request" },
+      ],
+      [
+        {
+          path: "[0].bypass_actors[1]",
+          message:
+            'the ruleset "main" lists the bypass actor "Team 5" more than once (first at bypass_actors[0]), and an actor has one bypass_mode - declare each actor once',
+        },
+      ],
+    ],
+    [
+      "two OrganizationAdmin actors under different ids, which GitHub stores as one",
+      [
+        { actor_type: "OrganizationAdmin", actor_id: 1 },
+        { actor_type: "OrganizationAdmin", actor_id: 2 },
+      ],
+      [
+        {
+          path: "[0].bypass_actors[1]",
+          message:
+            'the ruleset "main" lists the bypass actor "OrganizationAdmin 1" more than once (first at bypass_actors[0]), and an actor has one bypass_mode - declare each actor once',
+        },
+      ],
+    ],
+    [
+      "a DeployKey with a null id and one without the key",
+      [{ actor_type: "DeployKey", actor_id: null }, { actor_type: "DeployKey" }],
+      [
+        {
+          path: "[0].bypass_actors[1]",
+          message:
+            'the ruleset "main" lists the bypass actor "DeployKey" more than once (first at bypass_actors[0]), and an actor has one bypass_mode - declare each actor once',
+        },
+      ],
+    ],
+    [
+      "a Team named three times around a User sharing its id: one issue per repeat, the User none",
+      [
+        { actor_type: "Team", actor_id: 5 },
+        { actor_type: "User", actor_id: 5 },
+        { actor_type: "Team", actor_id: 5, bypass_mode: "exempt" },
+        { actor_type: "Team", actor_id: 5 },
+      ],
+      [2, 3].map((index) => ({
+        path: `[0].bypass_actors[${index}]`,
+        message:
+          'the ruleset "main" lists the bypass actor "Team 5" more than once (first at bypass_actors[0]), and an actor has one bypass_mode - declare each actor once',
+      })),
+    ],
+  ])(
+    "a bypass actor named twice is a validate issue at the repeated entry, where the plan would otherwise throw a BUG pairing the list: %s",
+    (_what, actors, issues) => {
+      expect(
+        rulesetsSection.validate([
+          { name: "main", target: "branch", enforcement: "active", bypass_actors: actors },
+        ]),
+      ).toEqual(issues);
+    },
+  );
+
   test("_undeclared:delete deletes a repository-owned ruleset, a source_type-less one included, and never an inherited one", async () => {
     // source_type is optional in the API type; a body without it is read as repository-owned, the only kind the repository endpoints can write.
     const api = writable({

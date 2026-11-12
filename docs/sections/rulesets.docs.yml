@@ -15,9 +15,10 @@ coverage:
         actor_id 1).
       - >-
         What the file alone shows wrong is refused at parse, before any request: the enforcement
-        level, a bypass actor's type, mode, and id rules, a "~" ref-name value other than ~ALL or
-        ~DEFAULT_BRANCH, and the parameters of the rule types the vendored OpenAPI spec knows (types,
-        enums in GitHub's casing, integer bounds, required fields).
+        level, a bypass actor's type, mode, and id rules, a bypass actor listed twice in one ruleset,
+        a "~" ref-name value other than ~ALL or ~DEFAULT_BRANCH, and the parameters of the rule types
+        the vendored OpenAPI spec knows (types, enums in GitHub's casing, integer bounds, required
+        fields).
       - >-
         A rule type the spec does not know passes through verbatim, as does a new field on a known
         rule or a bypass actor, so what GitHub ships tomorrow works today.
@@ -80,10 +81,10 @@ schema:
     does not know passes through verbatim, so a rule type GitHub ships tomorrow works today.
   RulesetConfig.bypass_actors: >-
     Who may bypass the ruleset; each actor is one (actor_type, actor_id) pair, bypass_mode
-    defaulting to always. An entry without the key leaves a live bypass list as drift and apply
-    refuses the PUT; `[]` clears it on purpose. GitHub returns it only to a token
-    with write access to the ruleset, so without Administration write check mode notes it instead
-    of judging drift.
+    defaulting to always; a repeated pair is refused at parse. An entry without the key leaves a
+    live bypass list as drift and apply refuses the PUT; `[]` clears it on purpose. GitHub returns
+    it only to a token with write access to the ruleset, so without Administration write check
+    mode notes it instead of judging drift.
   BypassActorConfig: >-
     One actor that may bypass the ruleset. Integration, RepositoryRole, Team, and User need their
     numeric actor_id; DeployKey takes none (null); OrganizationAdmin ignores it.
@@ -91,7 +92,8 @@ schema:
     Integration, OrganizationAdmin, RepositoryRole, Team, DeployKey, or User, as GitHub spells them.
   BypassActorConfig.actor_id: >-
     The id GitHub assigns the app, role, team, or user. Required for Integration, RepositoryRole,
-    Team, and User; refused for DeployKey (write null or omit it); ignored for OrganizationAdmin.
+    Team, and User; refused for DeployKey (write null or omit it); ignored for OrganizationAdmin,
+    so every OrganizationAdmin entry names the same actor.
   BypassActorConfig.bypass_mode: >-
     "always" (the default), "pull_request" (bypass only through a pull request; branch rulesets
     only, and never for a DeployKey), or "exempt" (rules are not run for the actor).
