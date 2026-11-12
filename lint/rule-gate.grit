@@ -1,14 +1,24 @@
 // Every refinement under src/ is authored through rule() (src/sections/shared/schema-helpers.ts): zod skips a bare
-// .refine() or .superRefine() once a nested value failed, so a section's own rule would go silent exactly when the
-// document has a second mistake. Reach and the one exemption are the plugin's `overrides` entry in biome.local.jsonc (see
-// never-throw.grit for why):
+// one once a nested value failed, so a section's own rule would go silent exactly when the document has a second
+// mistake.
+//   .refine(fn), .superRefine(fn)            -> flagged
+//   .check() given a function written inline -> flagged
+//   .check() given a name or a helper's call -> not followed
+//
+// Reach and the one exemption are the plugin's `overrides` entry in biome.local.jsonc (see never-throw.grit for why):
 //   src/sections/shared/schema-helpers.ts  -> rule() itself is the one superRefine
 
 or {
   `$_.superRefine($_)`,
   `$_.superRefine<$_>($_)`,
   `$_.refine($_)`,
-  `$_.refine<$_>($_)`
+  `$_.refine<$_>($_)`,
+  `$_.check($checks)` where {
+    $checks <: some or {
+      JsArrowFunctionExpression(),
+      JsFunctionExpression()
+    }
+  }
 } as $call where {
   register_diagnostic(span=$call, message="bare refinement: zod skips it once a nested value failed; wrap it in rule() so it runs beside nested failures")
 }

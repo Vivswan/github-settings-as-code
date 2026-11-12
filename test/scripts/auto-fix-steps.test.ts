@@ -8,7 +8,7 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { parse } from "yaml";
 import {
   FIX_OWNED_PATHS,
@@ -21,6 +21,7 @@ import {
   generatorEntryPoint,
   generatorScripts,
 } from "../../.github/scripts/generated.js";
+import { SCHEMA_DESCRIPTIONS } from "../../src/sections/docs-registry.js";
 import { ROOT } from "../root.js";
 import {
   clone,
@@ -62,17 +63,39 @@ describe("the fix-owned paths and generators track the generated-output table", 
     expect(generatorScripts()).toEqual([...GENERATORS]);
   });
 
+  const generatorFiles = generatorScripts().map((name) =>
+    generatorEntryPoint(packageScripts[name] ?? ""),
+  );
+  const triggersTheFix = (path: string): boolean =>
+    workflow.on.pull_request.paths.some((pattern) => new Bun.Glob(pattern).match(path));
+
   test("a hand edit to a generated output or its generator triggers the fix", () => {
-    const files = generatorScripts().map((name) => generatorEntryPoint(packageScripts[name] ?? ""));
-    for (const file of files) {
+    for (const file of generatorFiles) {
       expect(file).not.toBeNull();
     }
-    for (const path of [...generatedPaths(), ...files.map((file) => file ?? "")]) {
-      expect(
-        workflow.on.pull_request.paths.some((pattern) => new Bun.Glob(pattern).match(path)),
-        `on.paths: ${path}`,
-      ).toBe(true);
+    for (const path of [...generatedPaths(), ...generatorFiles.map((file) => file ?? "")]) {
+      expect(triggersTheFix(path), `on.paths: ${path}`).toBe(true);
     }
+  });
+
+  test("an edit to a module a generator runs or to a docs file the registry loads triggers the fix", async () => {
+    // Without this, a generator input outside src/ changes with no fix run: a docs-only pull request leaves the
+    // generated page stale and fails on the drift test. The bundler names the modules whose code reaches a generator.
+    const bundle = await Bun.build({
+      entrypoints: generatorFiles.map((file) => join(ROOT, file ?? "")),
+      root: ROOT,
+      target: "bun",
+      packages: "external",
+      metafile: true,
+    });
+    const modules = Object.keys(bundle.metafile?.inputs ?? {}).map((path) =>
+      relative(ROOT, resolve(path)),
+    );
+    const docs = [...new Set(SCHEMA_DESCRIPTIONS.map((entry) => entry.source))];
+    // Controls: a census that came back empty or partial would pass with nothing checked.
+    expect(modules).toContain("src/sections/labels/index.ts");
+    expect(docs).toContain("docs/sections/labels.docs.yml");
+    expect([...modules, ...docs].filter((path) => !triggersTheFix(path))).toEqual([]);
   });
 });
 

@@ -56,7 +56,14 @@ export const ISSUE_REPORT_ENDPOINTS = {
     route: "POST /repos/{owner}/{repo}/labels",
     statuses: { 201: "marker label created", 422: "the marker label already exists" },
   },
+  readLabel: {
+    route: "GET /repos/{owner}/{repo}/labels/{name}",
+    statuses: { 200: "the target holds the marker label", 404: "the target holds no marker label" },
+  },
 } as const satisfies Record<string, EndpointDecl>;
+
+/** GitHub's cap on an issue body, from the 422 a longer one earns every time ("body is too long (maximum is 65536 characters)"); its REST reference states none. A string's length in UTF-16 units is never below that count. */
+export const ISSUE_BODY_LIMIT = 65536;
 
 export type IssueReportMode = "always" | "on-failure";
 
@@ -430,6 +437,25 @@ export async function deliverIssueReport(
   } catch {
     // A client that throws breaks the GitHubClient contract; its message embeds the request path (the private slug), so nothing from it may escape.
     return transportWarning(landed);
+  }
+}
+
+/**
+ * False only when the target answers 404 for the marker label. Declared there, the label would be created by the
+ * labels section, and a check would call a repository no report ever touched drifted. Any other answer, a failed read
+ * included, declares it without printing anything, so no label is deleted unread and the delivery that follows
+ * reports a failure that persists.
+ */
+export async function mayHoldMarkerLabel(api: GitHubClient, repo: RepoRef): Promise<boolean> {
+  try {
+    const label = await api.tryRequest(
+      "GET",
+      expand(ISSUE_REPORT_ENDPOINTS.readLabel, { repo }, { name: MARKER_LABEL }),
+    );
+    return !("error" in label && label.error.status === 404);
+  } catch {
+    // A client that throws breaks the GitHubClient contract; its message embeds the request path (the private slug), so nothing from it may escape.
+    return true;
   }
 }
 

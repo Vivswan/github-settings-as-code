@@ -145,35 +145,50 @@ describe("engineOutcome", () => {
 });
 
 describe("withDelivery", () => {
-  test.each<[PrivateReportChannel, Exposure, boolean]>([
-    ["none", PRIVATE, false],
-    ["issue", PRIVATE, true],
-    ["issue", { kind: "redacted", visibility: "internal" }, true],
-    ["issue", { kind: "redacted", visibility: "unknown" }, false],
-    ["issue", SHOWN, false],
-    ["issue-on-failure", PRIVATE, true],
-    ["artifact", PRIVATE, false],
-  ])("under %s a %j target injects the marker: %p", async (channel, exposure, injects) => {
-    // The artifact channel opens only with an upload port; nothing is delivered here.
-    const uploader: ArtifactUploader | undefined =
-      channel === "artifact" ? { upload: async () => ({ uploaded: true as const }) } : undefined;
-    await delivered(
-      cfg(channel, "apply"),
-      {},
-      async (delivery, io) => {
-        const opened = {
-          repo: repo("o/priv"),
-          channel: publicChannel(io, "o/priv", true),
-          exposure,
-        };
-        await delivery.target(opened, async (injectsMarker) => {
-          expect(injectsMarker).toBe(injects);
-          return outcome("clean");
-        });
-      },
-      uploader,
-    );
-  });
+  // Who is asked: only an issue channel reads the marker label, and only for a target it will report on.
+  const markerRead = `GET /repos/o/priv/labels/${MARKER_LABEL}`;
+  // An unrouted GET is the double's 404: the target holds no marker label, so there is none to declare.
+  const LABEL = { held: { [markerRead]: { data: { name: MARKER_LABEL } } }, absent: {} };
+  const INTERNAL: Exposure = { kind: "redacted", visibility: "internal" };
+  const UNKNOWN: Exposure = { kind: "redacted", visibility: "unknown" };
+  test.each<[PrivateReportChannel, Exposure, keyof typeof LABEL, boolean, number]>([
+    ["none", PRIVATE, "held", false, 0],
+    ["issue", PRIVATE, "held", true, 1],
+    ["issue", INTERNAL, "held", true, 1],
+    ["issue", PRIVATE, "absent", false, 1],
+    ["issue", UNKNOWN, "held", false, 0],
+    ["issue", SHOWN, "held", false, 0],
+    ["issue-on-failure", PRIVATE, "held", true, 1],
+    ["issue-on-failure", PRIVATE, "absent", false, 1],
+    ["artifact", PRIVATE, "held", false, 0],
+  ])(
+    "under %s a %j target with the marker label %s injects it: %p, after %i read(s)",
+    async (channel, exposure, label, injects, reads) => {
+      // The artifact channel opens only with an upload port; nothing is delivered here.
+      const uploader: ArtifactUploader | undefined =
+        channel === "artifact" ? { upload: async () => ({ uploaded: true as const }) } : undefined;
+      const asked: string[] = [];
+      await delivered(
+        cfg(channel, "apply"),
+        LABEL[label],
+        async (delivery, io, events) => {
+          const opened = {
+            repo: repo("o/priv"),
+            channel: publicChannel(io, "o/priv", true),
+            exposure,
+          };
+          await delivery.target(opened, async (injectsMarker) => {
+            // The read is over before the target's work starts, so the work plans against its answer.
+            asked.push(...events);
+            expect(injectsMarker).toBe(injects);
+            return outcome("clean");
+          });
+        },
+        uploader,
+      );
+      expect(asked).toEqual(Array(reads).fill(`api ${markerRead}`));
+    },
+  );
 
   test("channel none: a redacted target closes sealed and speaks one closed-value line; a shown target closes open and stays silent", async () => {
     const { api } = await delivered(cfg("none", "apply"), {}, async (delivery, io, events) => {
@@ -218,6 +233,7 @@ describe("withDelivery", () => {
           async () => outcome("drift", [{ key: "labels", status: "drift", detail: ["+ CANARY"] }]),
         );
         expect(events).toEqual([
+          `api GET /repos/o/priv/labels/${MARKER_LABEL}`,
           "api POST /repos/o/priv/labels",
           `api GET /repos/o/priv/issues?state=all&labels=${MARKER_LABEL}&per_page=100&page=1`,
           "api PATCH /repos/o/priv/issues/7",

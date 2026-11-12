@@ -196,7 +196,6 @@ export function genScenario(
 
   const scenario: Scenario = {
     name: `fuzz-${rng.seed}`,
-    tiers: ["mock"],
     settings,
     inputs: {
       mode,

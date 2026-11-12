@@ -15,7 +15,8 @@ import { genSettings, SECRET_LIST_SECTIONS } from "./settings.js";
 /**
  * Only violations validateSettingsDoc GENUINELY rejects belong here; values the loose shapes accept by design would
  * assert failures the contract does not promise, so they stay out.
- *   offendingToken  -> must appear in the rejection error: a section path ("labels[2].name"), an unknown key, or a wording fragment
+ *   offendingToken  -> must appear in the rejection error, and in no rejection that names only other keys: a section
+ *                      path ("labels[2].name"), a section's own issue ("pages: "), or a wording fragment
  *   stays out       -> unknown nested keys under a loose shape, un-modeled enums, arbitrary types on loose keys,
  *                      `pages: null`
  */
@@ -75,6 +76,11 @@ const GITHUB_NAMED_SECTIONS = [
 /** A hyphen, a leading digit, and the reserved prefix in both cases; `github_token` folds to GITHUB_TOKEN once uppercased. */
 const REFUSED_GITHUB_NAMES = ["my-secret", "2_TOKEN", "GITHUB_TOKEN", "github_token"] as const;
 
+/** The start of a section's own issue, `<key>: <message>`; the bare key would also be found in the known-sections list an unknown-key refusal prints. */
+function sectionToken(key: SectionKey): string {
+  return `${key}: `;
+}
+
 /** Entries come back by reference, so a case's mutation lands inside whichever form was drawn; itemToken spells that form's validator path. */
 function validItems(
   rng: Rng,
@@ -94,10 +100,11 @@ export const INVALID_SETTINGS_CASES: ReadonlyArray<{
   {
     name: "unknown-top-level-key",
     build: (rng) => {
+      // The refusal lists every known section after the typo, so a bare "label" would be found in "labels" whichever key was refused.
       const typo = rng.pick(["labelz", "label", "milestone", "repositories", "branch"]);
       return {
         doc: { labels: genSettings(rng.fork("labels"), "labels") as Json, [typo]: [] },
-        offendingToken: typo,
+        offendingToken: `unknown top-level section: ${typo} (known:`,
       };
     },
   },
@@ -105,10 +112,16 @@ export const INVALID_SETTINGS_CASES: ReadonlyArray<{
     name: "unknown-underscore-key",
     build: (rng) => {
       // The underscore is the two directives' and nothing else's: a note or a misspelled directive is rejected, never dropped.
-      const key = rng.pick(["_notes", "_owner", "_layerin", "_undeclared"]);
+      // The advice after an unknown key quotes both directives, so each token carries the wording around its own key.
+      const [key, offendingToken] = rng.pick<[string, string]>([
+        ["_notes", "unknown underscore key: _notes."],
+        ["_owner", "unknown underscore key: _owner."],
+        ["_layerin", "unknown underscore key: _layerin."],
+        [UNDECLARED_KEY, `${UNDECLARED_KEY} must be one of`],
+      ]);
       return {
         doc: { labels: genSettings(rng.fork("labels"), "labels") as Json, [key]: "x" },
-        offendingToken: key,
+        offendingToken,
       };
     },
   },
@@ -116,14 +129,20 @@ export const INVALID_SETTINGS_CASES: ReadonlyArray<{
     name: "array-section-wrong-type",
     build: (rng) => {
       const key = rng.pick(LIST_SECTIONS);
-      return { doc: { [key]: rng.pick([{ not: "an array" }, "oops", 7]) }, offendingToken: key };
+      return {
+        doc: { [key]: rng.pick([{ not: "an array" }, "oops", 7]) },
+        offendingToken: sectionToken(key),
+      };
     },
   },
   {
     name: "record-section-wrong-type",
     build: (rng) => {
       const key = rng.pick(RECORD_SECTIONS);
-      return { doc: { [key]: rng.pick(["oops", 7, [1], null] as const) }, offendingToken: key };
+      return {
+        doc: { [key]: rng.pick(["oops", 7, [1], null] as const) },
+        offendingToken: sectionToken(key),
+      };
     },
   },
   {
@@ -161,7 +180,7 @@ export const INVALID_SETTINGS_CASES: ReadonlyArray<{
     name: "pages-wrong-type",
     build: (rng) => ({
       doc: { pages: rng.pick(["gh-pages", [1]] as const) },
-      offendingToken: "pages",
+      offendingToken: sectionToken("pages"),
     }),
   },
   {
@@ -169,7 +188,7 @@ export const INVALID_SETTINGS_CASES: ReadonlyArray<{
     name: "interaction-limits-wrong-type",
     build: (rng) => ({
       doc: { interaction_limits: rng.pick(["oops", 7, [1]] as const) },
-      offendingToken: "interaction_limits",
+      offendingToken: sectionToken("interaction_limits"),
     }),
   },
   {

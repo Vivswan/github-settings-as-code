@@ -157,16 +157,28 @@ export function packedTarball(packJson: string, destination: string): string {
   return join(destination, filename);
 }
 
+/**
+ * `npm pack` arguments under which stdout is the JSON alone. --ignore-scripts skips the package's `prepare` script
+ * from npm 11 on; npm 10 runs it regardless, in the foreground by default, so --foreground-scripts=false is what
+ * keeps the script's output (lefthook's sync line, in a checkout with the hooks installed) off stdout there.
+ */
+export function packArguments(destination: string): string[] {
+  return [
+    "pack",
+    "--json",
+    "--ignore-scripts",
+    "--foreground-scripts=false",
+    "--pack-destination",
+    destination,
+  ];
+}
+
 async function main(): Promise<void> {
   run("bun", ["run", "build:schema"], REPO_ROOT);
   run("bun", ["run", "build:lib"], REPO_ROOT);
   run("bun", ["run", "lint:package"], REPO_ROOT);
   await withSmokeDirs("gsac-smoke-", ({ pack, consumer }) => {
-    // --ignore-scripts keeps the prepare hook's output out of the JSON stdout.
-    const tarball = packedTarball(
-      capture("npm", ["pack", "--json", "--ignore-scripts", "--pack-destination", pack], REPO_ROOT),
-      pack,
-    );
+    const tarball = packedTarball(capture("npm", packArguments(pack), REPO_ROOT), pack);
     writeFileSync(
       join(consumer, "package.json"),
       `${JSON.stringify({ name: "smoke-consumer", private: true, type: "module" }, null, 2)}\n`,

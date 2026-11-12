@@ -23,6 +23,7 @@ import { dirname, join, relative } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { parseRepoSlug } from "../../../src/discovery/targets.js";
 import { type OutputName, redactRanges } from "../../../src/io.js";
+import { tableRows } from "../../docs/markdown.js";
 import { ROOT } from "../../root.js";
 import {
   ARTIFACTS_DIR,
@@ -32,7 +33,7 @@ import {
   RUNNER_ROOT_FILES,
 } from "../constants.js";
 import { type LoggedRequest, renderRequest } from "../mock/contract.js";
-import { isWriteRequest } from "../mock/dispatch.js";
+import { isWriteRequest, sectionForRequest } from "../mock/dispatch.js";
 import { type MockHandle, type ServerOptions, startMockServer } from "../mock/server.js";
 import { sharedValidator } from "../openapi/validate.js";
 import { collectYmlFiles, type Expect, type Scenario, settingsYamlFor } from "../scenario.js";
@@ -90,6 +91,9 @@ const COMMAND_ENCODING: ReadonlyArray<[raw: string, encoded: string]> = [
 
 /** The index of the command line inside replayBlockLines' block, the one line setReplay swaps. */
 const REPLAY_LINE = 4;
+
+/** The Status cell of a section the run compared and found matching, whatever icon the summary gives it. */
+const CLEAN_STATUS_CELL = /^:[a-z_]+: clean$/;
 
 type ScenarioInputs = NonNullable<Scenario["inputs"]>;
 
@@ -241,6 +245,11 @@ export function parseSummaryOutcomes(summary: string): Record<string, string> {
     }
   }
   return outcomes;
+}
+
+/** The `skipped-sections` output as a list; undefined when the run published no such output. */
+function publishedSkippedSections(outputs: Record<string, string>): string[] | undefined {
+  return outputs[SKIPPED_SECTIONS_OUTPUT]?.split(",").filter(Boolean);
 }
 
 /** A missing or unparseable output yields {} instead of throwing, so the expectation reports the gap as a failure. */
@@ -432,6 +441,46 @@ export function roundTripFailures(
   }
   if (violations.length > 0) {
     failures.push(`${label}: mock violations:\n  ${violations.join("\n  ")}`);
+  }
+  return failures;
+}
+
+/**
+ * Exit 0 can mean a check skipped every section under on-missing-permission: warn and compared nothing. One that does
+ * not report clean passes only on evidence:
+ *   every skipped section  -> the mock's permission gate denied one of its reads, which only the token's mask does
+ *   the run                -> the Status cell of at least one section row reads clean
+ * The skipped list is the run's union, so on a multi-repo run any target's denied read explains it.
+ */
+export function unverifiedCheckFailures(
+  label: string,
+  check: Invocation,
+  requests: LoggedRequest[],
+): string[] {
+  const result = check.outputs.result;
+  if (check.exitCode !== 0 || result === "clean") {
+    return [];
+  }
+
+  const denied = new Set<string | null>(
+    requests
+      .filter((request) => request.deniedBy !== undefined && !isWriteRequest(request))
+      .map((request) => sectionForRequest(request.method, request.pathname, request.body)),
+  );
+  const unexplained = (publishedSkippedSections(check.outputs) ?? []).filter(
+    (key) => !denied.has(key),
+  );
+
+  const failures: string[] = [];
+  if (unexplained.length > 0) {
+    failures.push(
+      `${label}: the check's result is "${result}", and it skipped [${unexplained.join(", ")}] though the token's mask denied no read there`,
+    );
+  }
+  if (!tableRows(check.summary).some(([, status = ""]) => CLEAN_STATUS_CELL.test(status))) {
+    failures.push(
+      `${label}: the check's result is "${result}" and no section reads clean, so it verified nothing`,
+    );
   }
   return failures;
 }
@@ -688,6 +737,29 @@ export function forbiddenPresent(patterns: string[], log: string[]): string[] {
 }
 
 /**
+ * The `mutations` rule. An empty list says the run wrote nothing: read as a subsequence it would match every log, so
+ * only an absent key asserts nothing.
+ */
+function mutationFailures(expected: readonly string[] | undefined, writes: string[]): string[] {
+  if (expected === undefined) {
+    return [];
+  }
+  if (expected.length === 0 && writes.length > 0) {
+    return [
+      `mutations: [] expects no write, but the run sent ${writes.length}: ${writes.join(", ")}`,
+    ];
+  }
+
+  const mutations = expandRepoPatterns(expected);
+  if (isSubsequence(mutations, writes)) {
+    return [];
+  }
+  return [
+    `mutations not found as a subsequence:\n  want: ${mutations.join(", ")}\n  writes: ${writes.join(", ")}`,
+  ];
+}
+
+/**
  * The three request-log rules over the recorded requests. A write's query is never part of its identity, so
  * `mutations` match "METHOD /path"; `never` and `requests_contain` match "METHOD /path?query", so one lookup on a path
  * other lookups share can be forbidden or required.
@@ -696,14 +768,8 @@ export function requestLogFailures(
   exp: Partial<Pick<Expect, "mutations" | "never" | "requests_contain">>,
   requests: LoggedRequest[],
 ): string[] {
-  const failures: string[] = [];
   const writes = requests.filter(isWriteRequest).map((r) => renderRequest(r, false));
-  const mutations = expandRepoPatterns(exp.mutations);
-  if (!isSubsequence(mutations, writes)) {
-    failures.push(
-      `mutations not found as a subsequence:\n  want: ${mutations.join(", ")}\n  writes: ${writes.join(", ")}`,
-    );
-  }
+  const failures = mutationFailures(exp.mutations, writes);
   const fullLog = requests.map((r) => renderRequest(r, true));
   for (const pattern of forbiddenPresent(expandRepoPatterns(exp.never), fullLog)) {
     failures.push(`forbidden request present: ${pattern}`);
@@ -770,11 +836,11 @@ function skippedSectionsFailures(exp: Expect, first: Invocation): string[] {
   if (exp.skipped_sections === undefined) {
     return [];
   }
-  const published = first.outputs[SKIPPED_SECTIONS_OUTPUT];
+  const published = publishedSkippedSections(first.outputs);
   if (published === undefined) {
     return [`the ${SKIPPED_SECTIONS_OUTPUT} output was not published at all`];
   }
-  const live = published.split(",").filter(Boolean).sort();
+  const live = published.sort();
   const want = [...exp.skipped_sections].sort();
   if (JSON.stringify(live) === JSON.stringify(want)) {
     return [];
@@ -877,6 +943,7 @@ async function applyIdempotenceFailures({ scenario, dir, handle, reruns }: Run):
   const idempotence = await assertApplyIdempotent(scenario, handle, {
     invoke: (rerun) => invoke(rerun, dir, handle.url),
     killNote,
+    unverifiedCheckFailures,
   });
   reruns.push(...idempotence.reruns);
   return idempotence.failures;
@@ -905,6 +972,7 @@ async function convergenceFailures({ scenario, dir, handle, reruns }: Run): Prom
       `convergence: rerun exited ${converge.exitCode}, expected 0${killNote(converge)}`,
     );
   }
+  failures.push(...unverifiedCheckFailures("convergence", converge, rerunRequests));
   if (newWrites.length > 0) {
     failures.push(
       `convergence: rerun wrote ${newWrites.length} time(s): ${newWrites.map((r) => renderRequest(r, false)).join(", ")}`,

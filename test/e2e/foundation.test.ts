@@ -136,6 +136,11 @@ describe("scenario schema", () => {
       { name: "x", settings: {}, expect: { exit_code: 0, bogus: true } },
       /expect: Unrecognized key: "bogus"$/m,
     ],
+    [
+      "a tiers list, which no runner ever honored",
+      { name: "x", settings: {}, tiers: ["live"], expect: { exit_code: 0 } },
+      /Unrecognized key: "tiers"$/m,
+    ],
   ])("rejects %s", (_label, raw, refusal) => {
     expect(() => parseScenario(raw, "refused.yml")).toThrow(refusal);
   });
