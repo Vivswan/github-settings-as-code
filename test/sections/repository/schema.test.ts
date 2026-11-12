@@ -19,7 +19,7 @@ function issues(repository: Record<string, unknown>): readonly string[] | null {
 const SQUASH_PAIRS =
   ". Legal pairs: PR_TITLE with PR_BODY or BLANK or COMMIT_MESSAGES; COMMIT_OR_PR_TITLE with COMMIT_MESSAGES";
 
-describe("a repository setting GitHub would 422 or never converge on is refused at parse, naming the key and the fix", () => {
+describe("each repository setting listed here, which GitHub would 422 or never converge on, is refused at parse, naming the key and the fix", () => {
   test.each<[what: string, repository: Record<string, unknown>, expected: string[]]>([
     [
       "a YAML-quoted toggle",

@@ -177,7 +177,7 @@ The nested `variables` list renders bare above because both layers wrote it bare
 
 ## 31. null wins and means empty, and _remove drops an entry
 
-The fold is a cascade: the higher layer's value wins at every depth, and `null` is a value like any other. Our `null` is the EMPTY or OFF state on GitHub, never a marker that deletes a lower key.
+The fold is a cascade: the higher layer's value wins at every depth (a label's `name` aside: [the rename rule](../../operate/layering.md#the-rules)), and `null` is a value like any other. Our `null` is the EMPTY or OFF state on GitHub, never a marker that deletes a lower key.
 
 ```text
 fleet.yml (lower)   labels:

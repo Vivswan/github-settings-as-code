@@ -18,6 +18,9 @@ coverage:
         Values read back in full, which is what makes exact check-mode diffing possible; undeclared
         variables are DELETED by default, kept as notes under the wrapped `_undeclared: keep` form.
       - >-
+        A declared created_at or updated_at, which the GET reports and neither write takes, is named
+        by a note in check and in apply, whatever the live variable holds.
+      - >-
         The list endpoint caps per_page at 30 (not the usual 100), which the page loop honors so a
         large inventory is never truncated.
       - >-
