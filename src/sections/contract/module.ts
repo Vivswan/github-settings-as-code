@@ -28,18 +28,11 @@ import type { KeyedListLayering } from "./keyed-list.js";
 import type { SectionPermission } from "./permissions.js";
 import type { PlanContext, PlannedOp, SectionPlan, SnapshotContext } from "./plan.js";
 
-interface SectionContextBase {
+/** What a request helper (./requests.ts) issues through: the client, and the repository its routes expand against. */
+export interface SectionContext {
   api: GitHubClient;
   repo: RepoRef;
 }
-
-/**
- * The read-only phases (check mode, the preflight probe, every plan-time read) run under `check: true`;
- * apply's resolver has every declared secret resolved up front by the engine (ExecTools in ./plan.ts).
- */
-export type SectionContext =
-  | (SectionContextBase & { check: true; resolveSecret?: never })
-  | (SectionContextBase & { check: false; resolveSecret: (reference: string) => string });
 
 export type EndpointDict = Readonly<Record<string, EndpointDecl>>;
 
@@ -129,7 +122,7 @@ interface SectionModuleBase<
    * values are returned raw, and nothing here reads the environment.
    *
    *   check mode and preflight   -> the engine validates each as a whole-value `$NAME` reference
-   *   apply                      -> the engine resolves and masks them all up front, so ctx.resolveSecret never misses
+   *   apply                      -> the engine resolves and masks them all up front, so exec.resolveSecret never misses
    */
   secretValues?(declared: SectionInput<K>): DeclaredSecretValue[];
 }

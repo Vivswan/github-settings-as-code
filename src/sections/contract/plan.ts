@@ -645,8 +645,7 @@ function boundReads<E extends EndpointDict, G extends GraphqlDict>(
   api: GitHubClient,
   repo: RepoRef,
 ): BoundReads<E, G> {
-  // Reads are the check arm's whole capability, so that is the arm the helpers get.
-  const ctx: SectionContext = { api, repo, check: true };
+  const ctx: SectionContext = { api, repo };
   const port: Record<string, object> = {};
   for (const [role, declaration] of Object.entries(meta.endpoints)) {
     if (endpointMethod(declaration.route) !== "GET") {

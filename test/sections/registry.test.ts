@@ -589,7 +589,6 @@ describe("matchesTemplate", () => {
         tryGraphql: async () => ({ data: {} }),
       },
       repo: { owner: "octo", name: "repo", slug: "octo/repo" },
-      check: true,
     };
     const mismatches: string[] = [];
     for (const endpoint of Object.values(allEndpoints())) {
@@ -619,7 +618,6 @@ describe("expand", () => {
       tryGraphql: async () => ({ data: {} }),
     },
     repo: { owner: "octo", name: "repo", slug: "octo/repo" },
-    check: true,
   });
 
   test.each<
@@ -689,7 +687,6 @@ describe("probeAbsent tolerance derivation", () => {
       tryGraphql: async () => ({ error: { status, message: "nope", body: "" } }),
     },
     repo: { owner: "octo", name: "repo", slug: "octo/repo" },
-    check: true,
   });
 
   test("without an explicit tolerate, an undeclared error status is a failure, never an absence", async () => {

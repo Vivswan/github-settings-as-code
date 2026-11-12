@@ -88,7 +88,7 @@ function project(schema: z.ZodType, live: unknown): unknown {
 
 /**
  * What a replace-write comparison's omission sweep needs to know about a slice: the dotted paths where it stops
- * typing keys (a record, an unknown, or a z.looseObject, a list item spelled `[]`: `rules[].parameters`,
+ * typing keys (a record, an unknown, or a z.looseObject, a list item spelled `[]`: a ruleset's `rules[]` and
  * `bypass_actors[]`), which the sweep skips while the typed list key itself still counts, and the paths that accept
  * `null`, whose clearing spelling is `null`.
  */

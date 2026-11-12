@@ -162,13 +162,13 @@ function published(id: string, node: SchemaNode): string {
 
 // --- Roles ----------------------------------------------------------------------------------------------------
 
-export const ROLES_PATH = "src/generated/spec-roles.ts";
+const ROLES_PATH = "src/generated/spec-roles.ts";
 
 const INVITATION_PATH = "/repos/{owner}/{repo}/invitations/{invitation_id}";
 const INVITATIONS_PATH = "/repos/{owner}/{repo}/invitations";
 const JSON_BODY = ["content", "application/json", "schema"] as const;
 
-export function renderRoles(descriptor: Descriptor): string {
+function renderRoles(descriptor: Descriptor): string {
   const settable = enumAt(descriptor, [
     "paths",
     INVITATION_PATH,
@@ -585,7 +585,7 @@ ${rows.map((row) => `  ${row},`).join("\n")}
 // --- Vocabularies -------------------------------------------------------------------------------------------------
 
 /** Where the vocabularies, bounds, and bodies are written. */
-export const ENUMS_PATH = "src/generated/spec-enums.ts";
+const ENUMS_PATH = "src/generated/spec-enums.ts";
 
 /** The repository route prefix every body() route hangs off. */
 const REPO = "/repos/{owner}/{repo}";
@@ -772,7 +772,7 @@ export function boundsAt(
   return { min, max };
 }
 
-export function renderEnums(descriptor: Descriptor): string {
+function renderEnums(descriptor: Descriptor): string {
   const enums = SPEC_ENUMS.map(
     ({ name, path }) =>
       `export const ${name} = [${stringList(enumAt(descriptor, path))}] as const;`,
