@@ -1,0 +1,39 @@
+# null is the protection PUT's own spelling of off under enforce_admins and
+# allow_force_pushes, so it reads as off on both surfaces. A literal branch
+# already off the way GitHub's GET serves it ({enabled: false}) plans no PUT.
+# A wildcard rule's mutation is sent false: it has no null for off, and a
+# stored null failed the next rules read.
+name: branches-null-off-control-converges
+settings:
+  branches:
+    - name: main
+      protection:
+        enforce_admins: null
+        allow_force_pushes: null
+    - name: "release/*"
+      protection:
+        enforce_admins: null
+live_state:
+  branches: ["main"]
+  branch_protection:
+    main:
+      enforce_admins:
+        enabled: false
+      allow_force_pushes:
+        enabled: false
+  branch_protection_rules:
+    - pattern: "release/*"
+      isAdminEnforced: true
+token_permissions:
+  administration: write
+  contents: read
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    branches: applied
+  mutations:
+    - "GRAPHQL UpdateBranchProtectionRule"
+  never:
+    - "PUT /repos/{repo}/branches"
+  fixpoint: apply_idempotent

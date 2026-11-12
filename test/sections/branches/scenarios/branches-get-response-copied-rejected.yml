@@ -27,6 +27,5 @@ expect:
   zero_requests: true
   stdout_contains:
     - "branches[0].protection.url: protection.url is a link"
-    - "branches[0].protection.enforce_admins.enabled:"
-    - "declare enforce_admins: true instead"
+    - "branches[0].protection.enforce_admins: protection.enforce_admins is GitHub's GET wrapper around the toggle, which the protection PUT takes as a bare boolean; declare enforce_admins: true instead"
     - "branches[0].protection.required_status_checks.enforcement_level:"

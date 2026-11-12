@@ -225,9 +225,8 @@ describe("branches", () => {
     const { status, message, advice } = MISSING_BRANCH;
     // The unrouted protection GET 404s; a Contents-granted probe answers GitHub's missing-branch body.
     const probed = new MockApi({ [PROBE]: { error: { status, message, body: "" } } });
-    await expect(plan(probed, declared)).rejects.toThrow(
-      new Error(`branches: branches[main]: ${advice}`),
-    );
+    // The engine prefixes the section key once, so the section's own line leads with the entry alone.
+    await expect(plan(probed, declared)).rejects.toThrow(new Error(`branches[main]: ${advice}`));
     expect(probed.mutations()).toHaveLength(0);
     // A denied probe is a concealed 404, so the PUT is planned and GitHub answers it with the same body: a
     // hard failure under every on-missing-permission policy, never a denial carrying grant advice.
@@ -789,6 +788,40 @@ describe("branches", () => {
     expect(changes).toEqual(['applied protection to "main"']);
     expect(second).toEqual({ ops: [], notes: [], drift: [] });
   });
+
+  test("null on the two controls whose PUT spelling of off it is reads as off: clean against GitHub's {enabled: false}, and a control that is on diffs as false", async () => {
+    // GitHub's GET serves an off control as {enabled: false}; compared as "empty", a declared null drifted against it on every run.
+    const nullAsOff: Desired = [
+      { name: "main", protection: { enforce_admins: null, allow_force_pushes: null } },
+    ];
+    const off = new MockApi({
+      [PROTECTION]: {
+        data: { enforce_admins: { enabled: false }, allow_force_pushes: { enabled: false } },
+      },
+    });
+    expect(await plan(off, nullAsOff)).toEqual({ ops: [], notes: [], drift: [] });
+    const on = new MockApi({
+      [PROTECTION]: {
+        data: { enforce_admins: { enabled: true }, allow_force_pushes: { enabled: false } },
+      },
+    });
+    expect((await plan(on, nullAsOff)).ops).toEqual([
+      {
+        role: "putProtection",
+        params: MAIN,
+        payload: {
+          enforce_admins: false,
+          allow_force_pushes: false,
+          required_status_checks: null,
+          required_pull_request_reviews: null,
+          restrictions: null,
+        },
+        describe: 'replacing protection for branch "main"',
+        drift: ["branches[main].protection.enforce_admins: false != true"],
+        change: 'applied protection to "main"',
+      },
+    ]);
+  });
 });
 
 /** A required-deployment list naming an environment no live state seeds. */
@@ -1345,6 +1378,39 @@ describe("branches wildcard entries", () => {
     const api = new MockApi({ [PROBE]: { data: { name: "main" } } });
     await plan(api, [{ name: "main", protection: { enforce_admins: true } }]);
     expect(api.calls.filter((c) => c.method === "GRAPHQL")).toHaveLength(0);
+  });
+
+  test("null on enforce_admins or allow_force_pushes turns a wildcard rule's control off: the mutation sends false, and the re-plan over the applied rule is empty", async () => {
+    // The rule's twins are non-null Booleans: a null sent as the off value read back as no boolean at all and failed the next rules read.
+    const api = liveRepo({
+      branch_protection_rules: [
+        { pattern: "release/*", isAdminEnforced: true, allowsForcePushes: true },
+      ],
+    });
+    const { first, second, changes } = await provePlanIdempotent(branchesSection, api, [
+      { name: "release/*", protection: { enforce_admins: null, allow_force_pushes: null } },
+    ]);
+    expect(first.ops.map((op) => op.drift)).toEqual([
+      [
+        "branches[release/*].protection.enforce_admins: false != true",
+        "branches[release/*].protection.allow_force_pushes: false != true",
+      ],
+    ]);
+    expect(api.writes).toEqual([
+      {
+        method: "GRAPHQL",
+        path: "UpdateBranchProtectionRule",
+        payload: {
+          input: {
+            branchProtectionRuleId: expect.any(String),
+            isAdminEnforced: false,
+            allowsForcePushes: false,
+          },
+        },
+      },
+    ]);
+    expect(changes).toEqual(['updated protection rule "release/*"']);
+    expect(second).toEqual({ ops: [], notes: [], drift: [] });
   });
 });
 
