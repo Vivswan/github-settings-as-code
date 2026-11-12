@@ -1129,12 +1129,12 @@ function sameResource(a: readonly string[], b: readonly string[]): boolean {
 }
 
 /**
- * A deep pair names one resource, so its merged entry should answer to every name either entry answered to. The
- * candidates are the merged entry as the higher layer keyed it, then the same entry keyed as the lower layer did: the
- * first that answers to all is written, and the higher layer's when neither does. So a label declared above a lower
- * rename by the rename's target folds into the rename, which keeps the name it starts from.
+ * A deep pair names one resource, so its merged entry should still answer to every name either entry answered to: a
+ * label declared above a lower rename by the rename's target must leave the old name declared, or apply deletes the
+ * live label under it. Where no key field answers to all (a rename continued under a third name), the higher layer's
+ * stands.
  */
-function pairAnsweringToAll(
+function pairKeepingNamesWhenItCan(
   merged: Json,
   below: Json,
   names: readonly string[],
@@ -1178,7 +1178,7 @@ function placeClaimants(union: KeyedUnion, index: number): Json[] {
         prefix: "",
       });
       const names = [...keys, ...(union.higherKeys[h] ?? [])];
-      return [pairAnsweringToAll(merged, below, names, union.keyed)];
+      return [pairKeepingNamesWhenItCan(merged, below, names, union.keyed)];
     }
     if (carriesNestedRemoval(entry, union.keyed)) {
       throw new FoldRefused(union.site.layer);

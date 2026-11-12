@@ -115,7 +115,7 @@ Every list section layers by the key its planner matches entries by, folded the 
 | `deploy_keys`                                                                   | `title`                                                                                                                                                                      | verbatim                        |
 | `secret_scanning_custom_patterns`                                               | `name`                                                                                                                                                                       | verbatim                        |
 
-So a fleet `Bug` and a repository `bug` are one label, a fleet `MY_SECRET` and a repository `my_secret` are one secret, and a fleet `Prod` environment and a repository `prod` are one environment, their variables unioned by name. When the spellings differ, the higher layer's spelling is the one written, under every directive.
+So a fleet `Bug` and a repository `bug` are one label, a fleet `MY_SECRET` and a repository `my_secret` are one secret, and a fleet `Prod` environment and a repository `prod` are one environment, their variables unioned by name. When the spellings differ, the higher layer's spelling is the one written, under every directive, except a higher label's `name` where the rename rule below writes the lower one.
 
 Within one layer two entries may not share a key, at any depth; the fold refuses that layer (see [Refusals](#refusals)).
 
@@ -123,7 +123,7 @@ Under `shallow` a same-key entry is swapped whole, its nested lists with it: onl
 
 Under `deep` a lower entry that two higher entries both claim (a lower label renaming into a name one higher entry declares while another declares its old name) is superseded by both as written: only a one-to-one pair merges field by field, so the rendered document never carries two entries claiming one key.
 
-Under `deep` a higher entry that names a label by the `new_name` a lower layer gives it adds to that rename. The pair is written under the lower entry's `name` where the higher one would leave the label's old name unclaimed, so apply still renames the live label:
+Under `deep` a higher entry may name a label by the `new_name` a lower layer gives it, and the two merge as one pair. The pair takes the higher entry's `name`, like any field, unless that leaves a name the pair claimed unclaimed and the lower entry's `name` leaves none. Then the lower `name` is written, so apply still renames the live label:
 
 ```text
 lower layer      {name: bug, new_name: defect, color: d73a4a}
@@ -135,15 +135,15 @@ shallow renders  {name: defect, description: a defect}
 
 Under `shallow` the swap drops the rename with the lower entry: against a repository that still holds `bug`, apply creates `defect` and, under `_undeclared: delete`, deletes `bug`.
 
-The exception is a higher entry that itself renames from one name to a different one (`{name: defect, new_name: flaw}`): it is written under its own two names, under both directives.
+Names count as the section folds them, so over that lower layer a higher `{name: defect, new_name: Defect}` claims one name and renders `{name: bug, new_name: Defect}` under `deep`. A higher entry that renames the label on to a third name (`{name: defect, new_name: flaw}`) is written under its own two names under both directives, since one entry cannot claim all three.
 
 The rules above decide the content. The written file's order is the canonical one every rendered document has, the same order `mode: snapshot` writes:
 
 - sections in the order the action applies them
 - keys as the schema declares them
-- the entries of every keyed list sorted by their identity
+- the entries of every keyed list sorted by their identity, except the lists kept as written below
 
-Reordering keys, or the entries of a keyed list, in a layer changes nothing in the rendered file. The lists kept as written do change it:
+Reordering keys, or the entries of a sorted list, in a layer changes nothing in the rendered file. Reordering a list kept as written does change it:
 
 - `branches`: GitHub applies overlapping wildcard rules in creation order, so the union keeps the lower order and appends
 - the `pinned: true` environments: their order is the pin rank

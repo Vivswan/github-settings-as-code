@@ -302,11 +302,9 @@ function placementsOf(
 }
 
 /**
- * A one-to-one pair under deep, merged field by field. The key field is the higher entry's, like any field, unless
- * that drops a key the pair claimed and the lower entry's key field keeps them all. A label met from above through
- * the name a lower rename writes (`{name: defect}` over `{name: bug, new_name: defect}`) adds to that rename, which
- * keeps the name it renames from: under the higher name the entry would rename `defect` to itself and no longer own
- * `bug`, which the planner then deletes as undeclared.
+ * A one-to-one pair under deep, merged field by field. Under the higher key field alone, `{name: defect}` over
+ * `{name: bug, new_name: defect}` would rename `defect` to itself and stop claiming `bug`: the planner then deletes a
+ * live `bug` as undeclared and creates `defect`, which takes the label off every issue that carries it.
  */
 function mergedPair(
   union: Union,
