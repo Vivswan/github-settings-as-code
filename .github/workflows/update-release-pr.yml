@@ -12,7 +12,7 @@
 # build, ci, refactor) refreshes nothing and publishes nothing; no check of this repository's own decides a publish.
 #
 # The anchor is pushed with the default github.token, which starts no workflows, so the PR's checks do not re-run
-# on the anchored head; anchor-check's failure message says to close and reopen the PR.
+# on the anchored head by themselves; anchor-check's failure message says how to start them.
 
 name: Update Release PR
 

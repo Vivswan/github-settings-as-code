@@ -1,7 +1,7 @@
 /**
  * release-please's boundary: last-release-sha in release-please-config.json, anchored inside the release PR branch
- * so the squash merge lands it on main, checked fresh on main and present on the release PR. The config is read
- * once here and refused when malformed, never repaired.
+ * so the squash merge lands it on main. The release PR is held to the commit its notes were built from, main to the
+ * cycle its newest release merge closed. The config is read once here and refused when malformed, never repaired.
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
@@ -28,6 +28,12 @@ export const RELEASE_PR_BRANCH_PREFIX = "release-please--";
 
 /** release-please's branch for main's release PR. */
 const RELEASE_PR_BRANCH = `${RELEASE_PR_BRANCH_PREFIX}branches--main`;
+
+/** Main as a full-history checkout of the release PR's head holds it. */
+const MAIN = "origin/main";
+
+/** The repair of a release PR branch whose base cannot be read: release-please builds a new one once this one is gone. */
+const REBUILD = `Delete the branch, and the next green push to main has release-please rebuild the release PR and the hook anchor it:\n  git push origin --delete ${RELEASE_PR_BRANCH}`;
 
 /** release-please's config with the one key this pipeline reads and writes; the rest is release-please's. */
 type ReleaseConfig = Record<string, unknown> & { "last-release-sha"?: string };
@@ -91,7 +97,7 @@ export interface AnchorOptions {
   /** The checkout the release PR branch is fetched into and the anchor commit made in. */
   cwd: string;
 
-  /** Main's head this run tested; the merge parent the boundary records. */
+  /** The main commit this run judged; the branch is anchored only when release-please built it on this commit. */
   sourceSha: string;
 
   /** How many pushes a release-please refresh may overtake before the run gives up; 3 by default. */
@@ -103,9 +109,51 @@ export interface AnchorResult {
   reason: string;
 }
 
-/** The anchor commit on the checked-out branch: last-release-sha set to `sourceSha`, committed under the bot identity. */
-function commitAnchor(cwd: string, config: ReleaseConfig, sourceSha: string): void {
-  config["last-release-sha"] = sourceSha;
+/** The newest release commit `git log` lists for `revs` (HEAD when none), or "" for none. The grep only narrows (it
+ * matches any message line with the prefix); RELEASE_SUBJECT decides, so "chore(main): release pipeline documentation"
+ * can neither become the boundary nor hide the real newest release commit. */
+function newestRelease(cwd: string, ...revs: string[]): string {
+  const listed = git(cwd, "log", "--grep", "^chore(main): release ", "--format=%H%x09%s", ...revs);
+  for (const line of listed.split("\n")) {
+    const [sha, subject] = line.split("\t");
+    if (sha !== undefined && subject !== undefined && RELEASE_SUBJECT.test(subject)) {
+      return sha;
+    }
+  }
+  return "";
+}
+
+/** The commit a release PR branch is built on: the first parent of the newest release commit on the branch's
+ * first-parent chain above `main`. The bound matters: a walk into main's own history would read main's last release
+ * merge on a branch that holds no release commit. */
+function releaseBase(cwd: string, main: string, branch: string): string {
+  const release = newestRelease(cwd, "--first-parent", `${main}..${branch}`);
+  if (release === "") {
+    throw new Error(
+      `the release PR branch holds no release commit ("chore(main): release X.Y.Z") on its first-parent chain above ${main}, ` +
+        "so the commit its notes were built from cannot be read: main was merged in with the branch as the second parent, " +
+        `or release-please did not build this branch.\n${REBUILD}`,
+    );
+  }
+  return git(cwd, "rev-parse", `${release}^`);
+}
+
+/** The anchor is also a command an operator pastes into their own clone, where the forced checkout would discard work. */
+function refuseUncommittedChanges(cwd: string): void {
+  const dirty = git(cwd, "status", "--porcelain", "--untracked-files=no")
+    .split("\n")
+    .filter(Boolean);
+  if (dirty.length > 0) {
+    throw new Error(
+      `this checkout has uncommitted changes to tracked files (${dirty.join("; ")}), and anchoring checks the release PR branch out over them; ` +
+        "commit them, or run it from a clean checkout.",
+    );
+  }
+}
+
+/** The anchor commit on the checked-out branch: last-release-sha set to `base`, committed under the bot identity. */
+function commitAnchor(cwd: string, config: ReleaseConfig, base: string): void {
+  config["last-release-sha"] = base;
   writeFileSync(join(cwd, CONFIG_FILE), `${JSON.stringify(config, null, 2)}\n`);
   git(cwd, "add", CONFIG_FILE);
   gitWithEnv(
@@ -115,41 +163,39 @@ function commitAnchor(cwd: string, config: ReleaseConfig, sourceSha: string): vo
     "-m",
     "chore: anchor release-please to this release cycle's base",
     "-m",
-    "last-release-sha records the merge parent so the squash merge itself lands the next cycle's boundary on main: version tags live on packaged commits that are not on main, so release-please cannot find the boundary by tag.",
+    "last-release-sha records the main commit this release's notes were built from, so the squash merge itself lands the next cycle's boundary on main: " +
+      "release-please lists the commits after it, and cannot find the boundary by tag, because version tags live on packaged commits that are not on main.",
   );
 }
 
-/** One attempt: the release PR branch fetched and checked out detached, anchored, and pushed. Undefined when a
- * release-please refresh overtook the push, so the caller re-reads the branch; a push refused with the branch
- * unmoved is thrown. */
+/** One attempt: the release PR branch fetched and, when it is built on `sourceSha`, checked out detached, anchored,
+ * and pushed. Undefined when a release-please refresh overtook the push, so the caller re-reads the branch; a push
+ * refused with the branch unmoved is thrown. */
 function anchorAttempt(cwd: string, sourceSha: string): AnchorResult | undefined {
   const branchRef = `refs/heads/${RELEASE_PR_BRANCH}`;
   const observed = git(cwd, "ls-remote", "origin", branchRef).split("\t")[0] ?? "";
   if (observed === "") {
     return { changed: false, reason: "no release PR branch to anchor" };
   }
-  // Detached, never a local branch: a retry after an overtaken push re-fetches, and git refuses to fetch into a checked-out ref.
   git(cwd, "fetch", "--quiet", "--force", "origin", branchRef);
-  git(cwd, "checkout", "--quiet", "--force", "--detach", "FETCH_HEAD");
-  // A branch still built from an older main must not be stamped with this head. A shallow history that cannot
-  // prove ancestry no-ops the same way; the refresh that follows anchors.
-  if (!isAncestor(cwd, sourceSha, "FETCH_HEAD")) {
+
+  const base = releaseBase(cwd, sourceSha, "FETCH_HEAD");
+  if (base !== sourceSha) {
     return {
       changed: false,
-      reason: "the release PR branch is not built on this head; its own refresh anchors",
+      reason: `the release PR branch is built on ${base}, not on ${sourceSha}; the anchor is the commit the branch is built on, so nothing is stamped`,
     };
   }
+
+  refuseUncommittedChanges(cwd);
+  // Detached, never a local branch: a retry after an overtaken push re-fetches, and git refuses to fetch into a checked-out ref.
+  git(cwd, "checkout", "--quiet", "--force", "--detach", "FETCH_HEAD");
   const config = readReleaseConfig(cwd);
   if (config["last-release-sha"] === sourceSha) {
     return { changed: false, reason: "already anchored" };
   }
+
   commitAnchor(cwd, config, sourceSha);
-  // A newer push's run may already have refreshed and anchored the branch before the fetch above: this run's commit
-  // then descends from that anchor, pushes cleanly, and regresses the boundary to the older head.
-  const headNow = git(cwd, "ls-remote", "origin", "refs/heads/main").split("\t")[0];
-  if (headNow !== sourceSha) {
-    return { changed: false, reason: `main moved to ${headNow ?? "?"}; the newer run anchors` };
-  }
   const refused = push(cwd, "origin", `HEAD:${branchRef}`);
   if (refused === null) {
     return { changed: true, reason: `${RELEASE_PR_BRANCH}: anchored at ${sourceSha}` };
@@ -160,17 +206,16 @@ function anchorAttempt(cwd: string, sourceSha: string): AnchorResult | undefined
   return undefined;
 }
 
-/** The boundary rides INSIDE the release PR as last-release-sha = main's current head, the future merge commit's
- * PARENT (known now, unlike the merge sha), so the squash merge lands it on main with no push to main and no admin credential.
- *   the parent, not the merge  -> the changelog walk then also includes the merge itself, a chore commit it hides anyway
- *   a stale parent             -> ruled out by the managed release-freshness gate: a PR must contain main's tip to merge */
+/** The boundary rides INSIDE the release PR as last-release-sha = the main commit release-please built the branch
+ * on, so the squash merge lands it on main with no push to main and no admin credential. release-please lists the
+ * commits after it, so the next cycle starts where this release's notes end, whatever lands on main before the merge.
+ *
+ * Stamped only when that commit is `sourceSha`: release-please reads main's history for the notes, then main's head
+ * for the branch, and the platform proposes only while main stands at the run's commit.
+ *   built on the run's commit  -> nothing landed between the two reads, so the notes end at it
+ *   built on another commit    -> no stamp: this run cannot tell where the notes end */
 export function anchorReleasePr(options: AnchorOptions): AnchorResult {
   const { cwd, sourceSha, attempts = 3 } = options;
-  // If main moved, the newer push's run refreshes the branch and anchors the newer head.
-  const head = git(cwd, "ls-remote", "origin", "refs/heads/main").split("\t")[0];
-  if (head !== sourceSha) {
-    return { changed: false, reason: `main moved to ${head ?? "?"}; the newer run anchors` };
-  }
   for (let attempt = 1; attempt <= attempts; attempt++) {
     const result = anchorAttempt(cwd, sourceSha);
     if (result !== undefined) {
@@ -184,20 +229,6 @@ export function anchorReleasePr(options: AnchorOptions): AnchorResult {
   throw new Error(
     `could not anchor ${RELEASE_PR_BRANCH} after ${attempts} attempts; something keeps rewriting the branch - rerun this job once the branch settles.`,
   );
-}
-
-/** The newest release merge reachable from HEAD, or "" for none. The grep only narrows (it matches any message line
- * with the prefix); RELEASE_SUBJECT decides, so "chore(main): release pipeline documentation" can neither become the
- * boundary nor hide the real newest merge. */
-function newestReleaseMerge(cwd: string): string {
-  const listed = git(cwd, "log", "--grep", "^chore(main): release ", "--format=%H%x09%s");
-  for (const line of listed.split("\n")) {
-    const [sha, subject] = line.split("\t");
-    if (sha !== undefined && subject !== undefined && RELEASE_SUBJECT.test(subject)) {
-      return sha;
-    }
-  }
-  return "";
 }
 
 /** The verdict with no release merge on the history: the pre-first-release state when nothing is recorded, else a
@@ -214,9 +245,21 @@ function noMergeVerdict(cwd: string, recorded: string | undefined): { boundary: 
   );
 }
 
-/** On main, last-release-sha must be the newest release merge or its parent; anything else means an anchor was lost
- * or a release merge slipped past the pipeline, and every release PR refresh would compute from a stale boundary.
- * A boundary NEWER than every recognized merge is a missed merge or a hand edit; either way it is never rolled back. */
+/** Whether `sha` is a commit of the cycle a release merge closed: on main at or before `parent`, the merge's parent,
+ * and after the release merge before it. The first release merge on a history has none before it, so its cycle
+ * reaches back to the root. */
+function inCycle(cwd: string, sha: string, parent: string): boolean {
+  if (!isAncestor(cwd, sha, parent)) {
+    return false;
+  }
+  const previous = newestRelease(cwd, parent);
+  return previous === "" || (sha !== previous && isAncestor(cwd, previous, sha));
+}
+
+/** On main, last-release-sha must be the newest release merge or a commit of the cycle that merge closed. Which
+ * commit of the cycle is the release PR's anchor-check to judge: a squash merge no longer shows it.
+ *   outside the cycle                  -> an anchor was lost or a release merge slipped past the pipeline: refused
+ *   NEWER than every recognized merge  -> a missed merge or a hand edit: refused, and never rolled back */
 export function boundaryCheck(cwd: string): { boundary: string } {
   assertFullHistory(
     cwd,
@@ -224,13 +267,13 @@ export function boundaryCheck(cwd: string): { boundary: string } {
     "a release merge or the recorded boundary can sit beyond its depth, and no verdict on a truncated history holds.",
   );
   const recorded = readReleaseConfig(cwd)["last-release-sha"];
-  const latest = newestReleaseMerge(cwd);
+  const latest = newestRelease(cwd);
   if (latest === "") {
     return noMergeVerdict(cwd, recorded);
   }
   const parent = tryGit(cwd, "rev-parse", `${latest}^`);
   if (recorded !== undefined) {
-    if (recorded === latest || (parent !== null && recorded === parent)) {
+    if (recorded === latest || (parent !== null && inCycle(cwd, recorded, parent))) {
       return { boundary: recorded };
     }
     if (isAncestor(cwd, latest, recorded) && isAncestor(cwd, recorded, "HEAD")) {
@@ -243,27 +286,37 @@ export function boundaryCheck(cwd: string): { boundary: string } {
     }
   }
   throw new Error(
-    `last-release-sha in ${CONFIG_FILE} is ${JSON.stringify(recorded)}, but the newest release ` +
-      `merge on main is ${latest} (parent ${parent}); release PR refreshes would be computed ` +
-      `from a stale boundary. Fix by PR: set last-release-sha to ${parent ?? latest}.`,
+    `last-release-sha in ${CONFIG_FILE} is ${JSON.stringify(recorded)}, which is not in the cycle the newest release merge on main closed ` +
+      `(${latest}, parent ${parent}): an anchor was lost or the value was edited, and release PR refreshes would be computed from a stale boundary. ` +
+      `Fix by PR: set last-release-sha to ${parent ?? latest}.`,
   );
 }
 
-/** Run on the release PR's own checkout. The managed release-freshness gate proves the PR contains main's tip, not
- * that the anchor commit survived a release-please force-push, so requiring last-release-sha to equal origin's
- * CURRENT main tip makes an unanchored release PR unmergeable instead of parking the pipeline after its merge. */
+/** Run on the release PR's head with its history. last-release-sha must be the main commit release-please built the
+ * branch on, whatever landed on main since and however often main was merged into the branch, so an unanchored or
+ * wrongly anchored release PR is unmergeable instead of parking the pipeline after its merge. */
 export function anchorCheck(cwd: string): { boundary: string } {
+  assertFullHistory(
+    cwd,
+    "anchor-check",
+    "the commit release-please built the branch on is read from the branch's own history.",
+  );
   const recorded = readReleaseConfig(cwd)["last-release-sha"];
-  const tip = git(cwd, "ls-remote", "origin", "refs/heads/main").split("\t")[0] ?? "";
-  if (recorded !== tip) {
+  const base = releaseBase(cwd, MAIN, "HEAD");
+  if (!isAncestor(cwd, base, MAIN)) {
     throw new Error(
-      `last-release-sha in ${CONFIG_FILE} is ${JSON.stringify(recorded)}, but main's tip is ` +
-        `${tip}; the anchor is missing or stale, so merging would land a wrong boundary. ` +
-        `The release pipeline's update-release-pr hook re-applies it on every release-PR refresh ` +
-        `- wait for (or dispatch) the next green main run, then close/reopen the PR so its ` +
-        `checks run on the anchored head (the anchor is pushed with the default token, which ` +
-        `triggers no new checks).`,
+      `release-please's commit on this release PR sits on ${base}, which is not on main: the branch was rebased or a commit was ` +
+        `stacked under it, so the commit its notes were built from cannot be read.\n${REBUILD}`,
     );
   }
-  return { boundary: recorded };
+  if (recorded !== base) {
+    throw new Error(
+      `last-release-sha in ${CONFIG_FILE} is ${JSON.stringify(recorded)}, but release-please built this release PR on ${base}, ` +
+        "the commit its notes were built from; the anchor is missing or names another commit, so merging would land a wrong boundary.\n" +
+        "Repair it with the command below, from a clean checkout: it leaves HEAD detached on the release PR branch, and its push re-runs the checks. " +
+        'When it answers "already anchored", the branch was anchored after this run began: close and reopen the PR to run the checks on its head.\n' +
+        `  GITHUB_SHA=${base} bun .github/scripts/release-pipeline.ts anchor`,
+    );
+  }
+  return { boundary: base };
 }

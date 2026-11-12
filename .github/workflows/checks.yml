@@ -35,8 +35,8 @@ jobs:
   # anchor would have every release PR refresh computed from a stale boundary, and gating here parks the release job
   # before release-please can build a garbage release PR. Each half is its own job, gated on its event: a skipped job
   # leaves the checks caller, and so all-green, green.
-  #   on main          -> boundary-check: last-release-sha is the newest release merge or its parent
-  #   on a release PR  -> anchor-check: the PR carries the anchored NEXT boundary, which the main-side rule would reject
+  #   on main          -> boundary-check: last-release-sha is the newest release merge, or a commit of the cycle it closed
+  #   on a release PR  -> anchor-check: last-release-sha is the main commit release-please built the PR's branch on
   boundary-check:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -49,20 +49,26 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           install: "false"
-      - name: Confirm last-release-sha matches the newest release merge
+      - name: Confirm last-release-sha sits in the cycle the newest release merge closed
         run: bun .github/scripts/release-pipeline.ts boundary-check
 
-  # An unanchored release PR must be unmergeable here, not park the pipeline after its merge.
+  # An unanchored release PR must be unmergeable here, not park the pipeline after its merge. The checkout is the
+  # PR's head, so this job runs the BRANCH's copy of the script, not main's.
   anchor-check:
     if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The commit the branch is built on is read from the branch's own chain, which the default checkout (the
+          # merge ref, at depth 1) does not hold.
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
       - uses: ./.github/actions/setup
         with:
           install: "false"
-      - name: Require the release PR to carry this cycle's anchor
+      - name: Require the release PR to be anchored at the commit its notes were built from
         run: bun .github/scripts/release-pipeline.ts anchor-check
 
   # The packed tarball is imported from a fresh consumer project under Node and under tsc with skipLibCheck off, so a

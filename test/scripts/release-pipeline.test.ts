@@ -50,6 +50,7 @@ import {
   rivalPackage,
   seedFixture,
   shallowClone,
+  subcommand,
   withPushPlans,
   write,
   writeBuild,
@@ -703,10 +704,111 @@ function releasePrConfig(fx: Fixture, name: string): { boundary: string; manifes
   };
 }
 
+/** release-please's branch for main's release PR. */
+const RELEASE_BRANCH = "release-please--branches--main";
+
+/** The boundary the seed fixture's config records: no commit. */
+const PLACEHOLDER = "0".repeat(40);
+
+/** What every refusal of an unreadable release PR branch ends with: the repair, its command on a line of its own. */
+const REBUILD =
+  "Delete the branch, and the next green push to main has release-please rebuild the release PR and the hook anchor it:\n" +
+  "  git push origin --delete release-please--branches--main";
+
+/** The fixture's release-please config recording `boundary`, or no boundary. */
+function configRecording(boundary?: string): string {
+  const recorded = boundary === undefined ? {} : { "last-release-sha": boundary };
+  const packages = { ".": { "release-type": "simple", draft: true } };
+  return `${JSON.stringify({ ...recorded, packages }, null, 2)}\n`;
+}
+
+/** A commit of `subject` on origin's main, as a merged PR lands one. */
+function landOnMain(fx: Fixture, name: string, subject: string): string {
+  const dir = clone(fx.root, fx.origin, name);
+  write(dir, `docs/${name}.md`, `${subject}\n`);
+  const sha = commitAll(dir, subject);
+  git(dir, "push", "--quiet", "origin", "HEAD:refs/heads/main");
+  return sha;
+}
+
+/** GitHub's "Update branch": origin's main merged into the release PR branch as the second parent. */
+function updateReleasePrBranch(fx: Fixture, name: string): void {
+  const dir = clone(fx.root, fx.origin, name);
+  git(dir, "checkout", "--quiet", RELEASE_BRANCH);
+  const subject = `Merge branch 'main' into ${RELEASE_BRANCH}`;
+  git(dir, "merge", "--quiet", "--no-ff", "-m", subject, "origin/main");
+  git(dir, "push", "--quiet", "origin", `HEAD:refs/heads/${RELEASE_BRANCH}`);
+}
+
+/** A commit on the release PR branch that sets last-release-sha to `boundary`: an anchor made by hand. */
+function anchorByHand(fx: Fixture, name: string, boundary: string): void {
+  const dir = clone(fx.root, fx.origin, name);
+  git(dir, "checkout", "--quiet", RELEASE_BRANCH);
+  write(dir, "release-please-config.json", configRecording(boundary));
+  commitAll(dir, "chore: anchor by hand");
+  git(dir, "push", "--quiet", "origin", `HEAD:refs/heads/${RELEASE_BRANCH}`);
+}
+
+/** The release PR's head with its full history, detached: the checkout the anchor-check job makes. */
+function releasePrHead(fx: Fixture, name: string): string {
+  const dir = clone(fx.root, fx.origin, name);
+  git(dir, "checkout", "--quiet", "--detach", `origin/${RELEASE_BRANCH}`);
+  return dir;
+}
+
+/** The release PR squash-merged onto origin's main, as GitHub lands it; a checkout of main at the merge. */
+function squashMergeReleasePr(fx: Fixture, name: string, version: string): string {
+  const dir = clone(fx.root, fx.origin, name);
+  git(dir, "merge", "--quiet", "--squash", `origin/${RELEASE_BRANCH}`);
+  git(dir, "commit", "--quiet", "-m", `chore(main): release ${version} (#60)`);
+  git(dir, "push", "--quiet", "origin", "HEAD:refs/heads/main");
+  return dir;
+}
+
+interface AnchoredPr {
+  /** A changelog-visible commit of the open cycle, older than `base`. */
+  early: string;
+
+  /** The main commit release-please built the branch on. */
+  base: string;
+}
+
+/** A release PR as a green run leaves one: two changelog-visible commits past the 2.1.0 merge, release-please's
+ * branch built on the second, and the hook's anchor on it. */
+function anchoredReleasePr(fx: Fixture): AnchoredPr {
+  const early = pushGreenCommit(fx, "early", "bundle-early\n").sha;
+  const base = pushGreenCommit(fx, "notes-base", "bundle-base\n").sha;
+  createReleasePrBranch(fx, base, "2.2.0");
+  const hook = clone(fx.root, fx.origin, "hook");
+  expect(anchorReleasePr({ cwd: hook, sourceSha: base }).changed).toBe(true);
+  return { early, base };
+}
+
+/** anchor-check's refusal of a release PR that records `recorded` on a branch built on `base`. */
+function notAnchored(recorded: string, base: string): Error {
+  return new Error(
+    `last-release-sha in release-please-config.json is ${JSON.stringify(recorded)}, but release-please built this release PR on ${base}, ` +
+      "the commit its notes were built from; the anchor is missing or names another commit, so merging would land a wrong boundary.\n" +
+      "Repair it with the command below, from a clean checkout: it leaves HEAD detached on the release PR branch, and its push re-runs the checks. " +
+      'When it answers "already anchored", the branch was anchored after this run began: close and reopen the PR to run the checks on its head.\n' +
+      `  GITHUB_SHA=${base} bun .github/scripts/release-pipeline.ts anchor`,
+  );
+}
+
+/** The refusal of a release PR branch with no release commit on its first-parent chain above `main`. */
+function noReleaseCommit(main: string): Error {
+  return new Error(
+    `the release PR branch holds no release commit ("chore(main): release X.Y.Z") on its first-parent chain above ${main}, ` +
+      "so the commit its notes were built from cannot be read: main was merged in with the branch as the second parent, " +
+      `or release-please did not build this branch.\n${REBUILD}`,
+  );
+}
+
 describe("anchorReleasePr", () => {
   test("the boundary lands inside the release PR branch and merges onto main", () => {
     const fx = seedFixture();
-    const mainHead = fx.mergeSha;
+    // The platform's release job proposes on every green push but a release merge's own, so no release PR is built on the merge itself.
+    const mainHead = pushGreenCommit(fx, "notes-base", "bundle-base\n").sha;
     createReleasePrBranch(fx, mainHead, "2.2.0");
     const worker = clone(fx.root, fx.origin, "anchor-worker");
     const result = anchorReleasePr({ cwd: worker, sourceSha: mainHead });
@@ -739,28 +841,88 @@ describe("anchorReleasePr", () => {
     expect(result).toMatchObject({ changed: false, reason: "no release PR branch to anchor" });
   });
 
-  test("a moved main makes the anchor defer to the newer run", () => {
+  test("a hidden-type commit landing on main between the refresh and the hook job leaves the hook anchoring the commit the branch is built on", () => {
     const fx = seedFixture();
     createReleasePrBranch(fx, fx.mergeSha, "2.2.0");
-    const mover = clone(fx.root, fx.origin, "anchor-mover");
-    write(mover, "src/marker.ts", "export const marker = 9;\n");
-    commitAll(mover, "fix: land after the anchor run started");
-    git(mover, "push", "--quiet", "origin", "HEAD:refs/heads/main");
-    const worker = clone(fx.root, fx.origin, "anchor-late");
-    const result = anchorReleasePr({ cwd: worker, sourceSha: fx.mergeSha });
-    expect(result.changed).toBe(false);
-    expect(result.reason).toContain("the newer run anchors");
+    // Depth 1 at the run's commit, as the hook job checks out, before main moves on.
+    const worker = shallowClone(fx, "anchor-late");
+    landOnMain(fx, "hidden", "docs: land after the refresh, before the hook job");
+    expect(anchorReleasePr({ cwd: worker, sourceSha: fx.mergeSha })).toEqual({
+      changed: true,
+      reason: `release-please--branches--main: anchored at ${fx.mergeSha}`,
+    });
+    expect(releasePrConfig(fx, "anchor-late-check").boundary).toBe(fx.mergeSha);
   });
 
-  test("a branch built on an older head is left for its own refresh to anchor", () => {
+  test.each<[string, (fx: Fixture) => { run: string; builtOn: string }]>([
+    [
+      "an older commit than this run's",
+      (fx) => {
+        createReleasePrBranch(fx, fx.seedSha, "2.2.0");
+        return { run: fx.mergeSha, builtOn: fx.seedSha };
+      },
+    ],
+    [
+      "a newer commit than this run's, by a newer run's refresh",
+      (fx) => {
+        createReleasePrBranch(fx, fx.mergeSha, "2.2.0");
+        const newer = pushGreenCommit(fx, "newer", "bundle-newer\n").sha;
+        createReleasePrBranch(fx, newer, "2.2.0");
+        return { run: fx.mergeSha, builtOn: newer };
+      },
+    ],
+    [
+      "an older commit, with this run's commit merged in by Update branch",
+      (fx) => {
+        createReleasePrBranch(fx, fx.mergeSha, "2.2.0");
+        const tip = landOnMain(fx, "hidden", "docs: land after the refresh");
+        updateReleasePrBranch(fx, "update-branch");
+        return { run: tip, builtOn: fx.mergeSha };
+      },
+    ],
+  ])("a release PR branch built on %s is left unstamped", (_name, build) => {
     const fx = seedFixture();
-    // The branch was refreshed from the SEED while main moved on to the 2.1.0 merge; anchoring mergeSha would record a boundary its content was not
-    // computed from.
-    createReleasePrBranch(fx, fx.seedSha, "2.2.0");
-    const worker = clone(fx.root, fx.origin, "anchor-stale-branch");
-    const result = anchorReleasePr({ cwd: worker, sourceSha: fx.mergeSha });
-    expect(result.changed).toBe(false);
-    expect(result.reason).toContain("not built on this head");
+    const { run, builtOn } = build(fx);
+    const before = git(fx.origin, "rev-parse", `refs/heads/${RELEASE_BRANCH}`);
+    const worker = clone(fx.root, fx.origin, "anchor-other-base");
+    expect(anchorReleasePr({ cwd: worker, sourceSha: run })).toEqual({
+      changed: false,
+      reason: `the release PR branch is built on ${builtOn}, not on ${run}; the anchor is the commit the branch is built on, so nothing is stamped`,
+    });
+    expect(git(fx.origin, "rev-parse", `refs/heads/${RELEASE_BRANCH}`)).toBe(before);
+  });
+
+  test("a branch with no release commit above the run's commit is refused naming the shape", () => {
+    const fx = seedFixture();
+    const dir = clone(fx.root, fx.origin, "not-release-please");
+    write(dir, "src/marker.ts", "export const marker = 5;\n");
+    commitAll(dir, "chore: not a release commit");
+    git(dir, "push", "--quiet", "origin", `HEAD:refs/heads/${RELEASE_BRANCH}`);
+    const worker = clone(fx.root, fx.origin, "anchor-no-release");
+    expect(() => anchorReleasePr({ cwd: worker, sourceSha: fx.mergeSha })).toThrow(
+      noReleaseCommit(fx.mergeSha),
+    );
+  });
+
+  test("a checkout with uncommitted changes to tracked files is refused before the branch is checked out over them", () => {
+    const fx = seedFixture();
+    createReleasePrBranch(fx, fx.mergeSha, "2.2.0");
+    const work = "export const marker = 'uncommitted work';\n";
+    const dirty = clone(fx.root, fx.origin, "operator-dirty");
+    write(dirty, "src/marker.ts", work);
+    expect(() => anchorReleasePr({ cwd: dirty, sourceSha: fx.mergeSha })).toThrow(
+      new Error(
+        "this checkout has uncommitted changes to tracked files (M src/marker.ts), and anchoring checks the release PR branch out over them; " +
+          "commit them, or run it from a clean checkout.",
+      ),
+    );
+    expect(readFileSync(join(dirty, "src/marker.ts"), "utf8")).toBe(work);
+    expect(git(dirty, "symbolic-ref", "--short", "HEAD")).toBe("main");
+    // The control: the same command from a clean checkout anchors, and leaves HEAD detached as its repair text says.
+    const clean = clone(fx.root, fx.origin, "operator-clean");
+    expect(anchorReleasePr({ cwd: clean, sourceSha: fx.mergeSha }).changed).toBe(true);
+    expect(git(clean, "rev-parse", "--abbrev-ref", "HEAD")).toBe("HEAD");
+    expect(releasePrConfig(fx, "operator-check").boundary).toBe(fx.mergeSha);
   });
 
   test("a release-please refresh between anchors re-anchors from the same checkout", () => {
@@ -878,6 +1040,67 @@ describe("boundaryCheck", () => {
     );
     commitAll(dir, "chore: align the fixture boundary");
     expect(boundaryCheck(dir).boundary).toBe(fx.mergeSha);
+  });
+
+  test("a release PR merged with hidden-type commits between its anchor and the merge lands a boundary inside the cycle the merge closed", () => {
+    const fx = seedFixture();
+    const { base } = anchoredReleasePr(fx);
+    landOnMain(fx, "hidden-1", "docs: land after the release PR was anchored");
+    landOnMain(fx, "hidden-2", "chore: land after it too");
+    updateReleasePrBranch(fx, "update-branch");
+    expect(boundaryCheck(squashMergeReleasePr(fx, "main-after", "2.2.0")).boundary).toBe(base);
+  });
+
+  test.each<[string, (fx: Fixture) => string]>([
+    ["the previous release merge's parent", (fx) => fx.seedSha],
+    ["the previous release merge itself", (fx) => fx.mergeSha],
+  ])(
+    "a lost anchor leaves the previous cycle's boundary, %s, on main and is refused; the value the refusal names passes",
+    (_name, previousBoundary) => {
+      const fx = seedFixture();
+      const previous = previousBoundary(fx);
+      const align = clone(fx.root, fx.origin, "align");
+      write(align, "release-please-config.json", configRecording(previous));
+      commitAll(align, "chore: record the boundary the 2.1.0 release landed");
+      git(align, "push", "--quiet", "origin", "HEAD:refs/heads/main");
+      // The release PR is never anchored, so its merge carries main's own value.
+      const base = pushGreenCommit(fx, "notes-base", "bundle-base\n").sha;
+      createReleasePrBranch(fx, base, "2.2.0");
+      const main = squashMergeReleasePr(fx, "main-after", "2.2.0");
+      const merge = git(main, "rev-parse", "HEAD");
+      expect(() => boundaryCheck(main)).toThrow(
+        new Error(
+          `last-release-sha in release-please-config.json is ${JSON.stringify(previous)}, which is not in the cycle the newest release merge on main closed ` +
+            `(${merge}, parent ${base}): an anchor was lost or the value was edited, and release PR refreshes would be computed from a stale boundary. ` +
+            `Fix by PR: set last-release-sha to ${base}.`,
+        ),
+      );
+      write(main, "release-please-config.json", configRecording(base));
+      commitAll(main, "fix(release): restore the boundary");
+      expect(boundaryCheck(main).boundary).toBe(base);
+    },
+  );
+
+  test("the first release merge on a history closes a cycle that reaches back to the root, and an absent boundary beside it is still refused", () => {
+    const fx = seedFixture();
+    const dir = clone(fx.root, fx.origin, "boundary-first");
+    git(dir, "checkout", "--quiet", fx.seedSha);
+    write(dir, "src/marker.ts", "export const marker = 2;\n");
+    const base = commitAll(dir, "feat: the commit the first release's notes were built from");
+    write(dir, "docs/hidden.md", "landed before the merge\n");
+    const hidden = commitAll(dir, "docs: land before the first release merge");
+    write(dir, "release-please-config.json", configRecording(base));
+    const merge = commitAll(dir, "chore(main): release 2.1.0 (#42)");
+    expect(boundaryCheck(dir).boundary).toBe(base);
+    write(dir, "release-please-config.json", configRecording());
+    commitAll(dir, "chore: drop the boundary");
+    expect(() => boundaryCheck(dir)).toThrow(
+      new Error(
+        "last-release-sha in release-please-config.json is undefined, which is not in the cycle the newest release merge on main closed " +
+          `(${merge}, parent ${hidden}): an anchor was lost or the value was edited, and release PR refreshes would be computed from a stale boundary. ` +
+          `Fix by PR: set last-release-sha to ${hidden}.`,
+      ),
+    );
   });
 
   test("a stale boundary fails loudly with the repair value", () => {
@@ -1021,14 +1244,6 @@ describe("boundaryCheck", () => {
 });
 
 describe("anchorCheck", () => {
-  test("a release PR whose anchor is missing is unmergeable", () => {
-    const fx = seedFixture();
-    createReleasePrBranch(fx, fx.mergeSha, "2.2.0");
-    const pr = clone(fx.root, fx.origin, "anchor-check-missing");
-    git(pr, "checkout", "--quiet", "release-please--branches--main");
-    expect(() => anchorCheck(pr)).toThrow(/anchor is missing or stale/);
-  });
-
   test("an anchored release PR passes", () => {
     const fx = seedFixture();
     createReleasePrBranch(fx, fx.mergeSha, "2.2.0");
@@ -1037,6 +1252,141 @@ describe("anchorCheck", () => {
     const pr = clone(fx.root, fx.origin, "anchor-check-ok");
     git(pr, "checkout", "--quiet", "release-please--branches--main");
     expect(anchorCheck(pr).boundary).toBe(fx.mergeSha);
+  });
+
+  test("an anchored release PR stays anchored when a hidden-type commit lands on main, and when main is merged into its branch", () => {
+    const fx = seedFixture();
+    const { base } = anchoredReleasePr(fx);
+    landOnMain(fx, "hidden", "docs: land after the release PR was anchored");
+    expect(anchorCheck(releasePrHead(fx, "pr-behind")).boundary).toBe(base);
+    updateReleasePrBranch(fx, "update-branch");
+    expect(anchorCheck(releasePrHead(fx, "pr-updated")).boundary).toBe(base);
+  });
+
+  test.each<[string, (fx: Fixture, pr: AnchoredPr) => Error]>([
+    [
+      "a refresh dropped the anchor, so the file holds main's own boundary",
+      (fx, { base }) => {
+        createReleasePrBranch(fx, base, "2.3.0");
+        return notAnchored(PLACEHOLDER, base);
+      },
+    ],
+    [
+      "the anchor was edited to main's tip after main was merged in",
+      (fx, { base }) => {
+        const tip = landOnMain(fx, "hidden", "docs: land after the release PR was anchored");
+        updateReleasePrBranch(fx, "update-branch");
+        anchorByHand(fx, "by-hand", tip);
+        return notAnchored(tip, base);
+      },
+    ],
+    [
+      "the anchor was edited to an older commit of the cycle",
+      (fx, { early, base }) => {
+        anchorByHand(fx, "by-hand", early);
+        return notAnchored(early, base);
+      },
+    ],
+    [
+      "the anchor was edited to a sha that is on no history",
+      (fx, { base }) => {
+        anchorByHand(fx, "by-hand", "1".repeat(40));
+        return notAnchored("1".repeat(40), base);
+      },
+    ],
+    [
+      "the branch was rebased by hand onto main's tip, which reads as a rebuild there",
+      (fx, { base }) => {
+        const tip = landOnMain(fx, "hidden", "docs: land after the release PR was anchored");
+        const dir = clone(fx.root, fx.origin, "rebase");
+        git(dir, "checkout", "--quiet", RELEASE_BRANCH);
+        git(dir, "rebase", "--quiet", "origin/main");
+        git(dir, "push", "--quiet", "--force", "origin", `HEAD:refs/heads/${RELEASE_BRANCH}`);
+        return notAnchored(base, tip);
+      },
+    ],
+    [
+      "main was merged in with the branch as the second parent",
+      (fx) => {
+        landOnMain(fx, "hidden", "docs: land after the release PR was anchored");
+        const dir = clone(fx.root, fx.origin, "wrong-way");
+        const subject = "Merge the release branch into main's tip";
+        git(dir, "merge", "--quiet", "--no-ff", "-m", subject, `origin/${RELEASE_BRANCH}`);
+        git(dir, "push", "--quiet", "origin", `HEAD:refs/heads/${RELEASE_BRANCH}`);
+        return noReleaseCommit("origin/main");
+      },
+    ],
+    [
+      "release-please's commit sits on a commit that never reached main, anchored there",
+      (fx) => {
+        const dir = clone(fx.root, fx.origin, "off-main");
+        write(dir, "src/marker.ts", "export const marker = 8;\n");
+        const offMain = commitAll(dir, "feat: never merged");
+        git(dir, "push", "--quiet", "origin", "HEAD:refs/heads/side");
+        createReleasePrBranch(fx, offMain, "2.3.0");
+        anchorByHand(fx, "by-hand", offMain);
+        return new Error(
+          `release-please's commit on this release PR sits on ${offMain}, which is not on main: the branch was rebased or a commit was ` +
+            `stacked under it, so the commit its notes were built from cannot be read.\n${REBUILD}`,
+        );
+      },
+    ],
+  ])("a release PR is unmergeable once %s", (_name, mutate) => {
+    const fx = seedFixture();
+    const pr = anchoredReleasePr(fx);
+    // The control: the same release PR passes before the change.
+    expect(anchorCheck(releasePrHead(fx, "pr-control")).boundary).toBe(pr.base);
+    const refusal = mutate(fx, pr);
+    expect(() => anchorCheck(releasePrHead(fx, "pr-judged"))).toThrow(refusal);
+  });
+
+  test('the command the refusal names, run from a clean checkout after main moved, anchors the release PR, and answers "already anchored" once it is', async () => {
+    const fx = seedFixture();
+    const base = pushGreenCommit(fx, "notes-base", "bundle-base\n").sha;
+    // A refresh whose hook never ran, then a hidden-type commit: no later run of the pipeline anchors this PR.
+    createReleasePrBranch(fx, base, "2.2.0");
+    landOnMain(fx, "hidden", "docs: land after the refresh");
+    expect(() => anchorCheck(releasePrHead(fx, "pr-unanchored"))).toThrow(
+      notAnchored(PLACEHOLDER, base),
+    );
+    const operator = clone(fx.root, fx.origin, "operator");
+    const repair = await subcommand(operator, { GITHUB_SHA: base }, "anchor");
+    expect({ status: repair.status, said: repair.stderr.trim().split("\n").at(-1) }).toEqual({
+      status: 0,
+      said: `release-please--branches--main: anchored at ${base}`,
+    });
+    expect(anchorCheck(releasePrHead(fx, "pr-repaired")).boundary).toBe(base);
+    // The same command against the anchored branch pushes nothing and gives the answer the refusal quotes.
+    const anchored = git(fx.origin, "rev-parse", `refs/heads/${RELEASE_BRANCH}`);
+    const again = await subcommand(operator, { GITHUB_SHA: base }, "anchor");
+    expect({
+      status: again.status,
+      said: again.stderr.trim(),
+      head: git(fx.origin, "rev-parse", `refs/heads/${RELEASE_BRANCH}`),
+    }).toEqual({ status: 0, said: "already anchored", head: anchored });
+  });
+
+  test("a shallow checkout is refused before any verdict", () => {
+    const fx = seedFixture();
+    anchoredReleasePr(fx);
+    // Depth 1, as the job's checkout was before it asked for the history: the branch's own chain is not in it.
+    const dir = join(fx.root, "pr-shallow");
+    const branch = ["--branch", RELEASE_BRANCH];
+    execFileSync("git", [
+      "clone",
+      "--quiet",
+      "--depth",
+      "1",
+      ...branch,
+      `file://${fx.origin}`,
+      dir,
+    ]);
+    expect(() => anchorCheck(dir)).toThrow(
+      new Error(
+        "anchor-check needs the full history (fetch-depth: 0) and this checkout is shallow: the commit release-please built the " +
+          "branch on is read from the branch's own history.",
+      ),
+    );
   });
 });
 
