@@ -169,7 +169,7 @@ export function runInit(
           reasons: [
             ["cannot be read back", unsupported],
             ["skipped", skipped],
-            ["nothing exists on the repository", keysWith(report, "snapshot")],
+            ["nothing to declare", keysWith(report, "snapshot")],
           ],
         });
       }

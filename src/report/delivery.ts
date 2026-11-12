@@ -51,8 +51,8 @@ export function isIssueChannel(channel: PrivateReportChannel): channel is IssueC
 }
 
 /**
- * A section row as every mode closes it: the key and status are closed values, the detail lines are live, and an
- * apply or check row carries the HTTP code of its failure or skip.
+ * A section row as every mode closes it: the key and status are closed values, the detail lines are live, and a
+ * row carries the HTTP code of the denial behind its failure or skip.
  */
 export interface ClosedOutcome {
   key: SectionKey;
