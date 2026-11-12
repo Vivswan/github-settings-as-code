@@ -286,7 +286,8 @@ describe("replace-style writes", () => {
       { kind: "omitted", path: ["enforcement"], live: "active", nullable: false },
     ]);
     // GitHub fills defaults inside a passthrough path, so the sweep skips it, an omitted passthrough key included,
-    // while the typed list key holding passthrough items still counts.
+    // while the typed list key holding passthrough items still counts. The paths are this test's own: a ruleset's
+    // sweep stops one level up, at `rules[]` (replaceSweep in snapshot-helpers.ts).
     const passthrough = ["rules[].parameters", "bypass_actors[]"];
     expect(deltas(desired, live, { matchBy, replace: { passthrough, nullable: [] } })).toEqual([
       {
