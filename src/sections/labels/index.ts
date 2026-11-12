@@ -11,7 +11,9 @@ import type { ListComparable, ListWrite } from "../shared/list/decl.js";
 import { listSection } from "../shared/list/section.js";
 import { LabelConfig } from "./schema.js";
 
+/** The brand's phantom key: declared only, so nameKey() is the one way to mint a NameKey. */
 declare const labelNameKey: unique symbol;
+
 /** Case-insensitive matching is the section's whole contract; the brand marks a name as already folded. */
 export type NameKey = string & { readonly [labelNameKey]: true };
 

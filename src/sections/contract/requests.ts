@@ -1,8 +1,11 @@
 /**
  * The request helpers every section read and write goes through, each taking a declared endpoint or operation. An
  * API error the declaration does not tolerate becomes a SectionFailure through failureFor (./errors.ts), which is
- * what classifies a denial for the permission policy. The page and cursor loops live here too, and a
- * secret-carrying request's failure is rebuilt with its free text withheld.
+ * what classifies a denial for the permission policy. A secret-carrying request's failure is rebuilt with its free
+ * text withheld.
+ *
+ * The GraphQL cursor loop lives here (listGraphqlConnection). The REST page loop is the client's, behind tryList
+ * (src/github/api.ts): listPages only reads the list out of each page it returns.
  */
 
 import { err, ok, type Result } from "neverthrow";
