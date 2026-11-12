@@ -86,7 +86,7 @@ GitHub never returns a secret's value, so the file cannot hold one. The snapshot
 | A webhook's `config.secret`, one per hook                                                     | `secret: $SECRET_WEBHOOK_601`                                                                       | `SECRET_WEBHOOK_<id>`, the hook's own id, so the reference survives a reordering                                                                                                                                                                                                     |
 | An environment secret named `DEPLOY_TOKEN` in the `production` environment                    | `value: $SECRET_ENVIRONMENT_PRODUCTION_DEPLOY_TOKEN`                                                | `SECRET_ENVIRONMENT_<ENV>_<NAME>`, the environment name uppercased with every other character folded to `_`, so same-named secrets in two environments get two variables; two names the fold collapses (`prod-eu`, `prod_eu`) share one, and a header line names the entries to edit |
 
-Wire them the way the [secrets guide](../reference/secrets-and-vaults.md) describes: an `env:` block on the apply step, fed from GitHub Secrets or a vault action. A reference that is not exported fails an apply that runs its section, naming the variable. A check never reads the environment, so it needs none of them.
+Wire them the way the [secrets guide](../reference/secrets-and-vaults.md) describes: an `env:` block on the apply step, fed from GitHub Secrets or a vault action. A reference that is not exported fails an apply that runs its section, naming the variable. A check resolves no reference, so it needs none of them.
 
 ## Backup, then check
 

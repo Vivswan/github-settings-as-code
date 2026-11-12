@@ -8,7 +8,7 @@ GitHub ships new settings fields faster than any wrapper can track them, so this
 
 This page draws the line: where the passthrough tenet holds, and where a shape is deliberately closed.
 
-The passthrough is the default: every section not named in the closed list below accepts fields it does not recognize and sends them through, outside the [closed nested shapes](#the-closed-nested-shapes) some of them hold. The richest passthrough sections are `rulesets` (new rule types, bypass-actor fields, condition types), `repository`, `branches`, `environments`, `actions`, `pages`, and `code_scanning_default_setup`.
+The passthrough is the default: every section not named in the closed list below accepts fields it does not recognize and sends them through. The [closed nested shapes](#the-closed-nested-shapes) inside some of those sections are the exception. The richest passthrough sections are `rulesets` (new rule types, bypass-actor fields, condition types), `repository`, `branches`, `environments`, `actions`, `pages`, and `code_scanning_default_setup`.
 
 The published JSON Schema follows the same tenet. It is documentation, not a gate, so unknown fields validate on purpose: declaring a field GitHub ships tomorrow must never read as an error.
 
@@ -30,16 +30,16 @@ The first nine are lists, and the key they refuse is an entry's. Their API calls
 
 ## The closed nested shapes
 
-These mappings inside passthrough sections are closed for the same reason. The rest of each section stays passthrough.
+These mappings inside passthrough sections refuse a key they do not recognize.
 
-| Shape                                                   | Why an extra key is refused                                                                                    |
-| ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `actions.cache`                                         | Each key is the entire body of its own endpoint, so another key has nowhere to go                              |
-| `actions.selected_actions`                              | The allowlist PUT documents its complete body, and a misspelled key would be re-sent on every run without note |
-| `repository.security_and_analysis`                      | GitHub answers an unknown sub-key with a 422; each feature mapping and bypass reviewer under it is closed too  |
-| `branches[].protection.required_status_checks.checks[]` | GitHub's protection PUT takes only `context` and `app_id` in a check item                                      |
-| `branches[].protection.required_deployments`            | The rule mutation is built from `environments` alone                                                           |
-| `environments[].secrets[]`                              | The write body is built from the sealed value alone                                                            |
-| `environments[].deployment_protection_rules[]`          | The enable call sends only the App's resolved id                                                               |
+| Shape                                                   | Why an extra key is refused                                                            |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `actions.cache`                                         | Each key is the entire body of its own endpoint, so another key has nowhere to go      |
+| `actions.selected_actions`                              | It is the whole body of the allowlist PUT, and GitHub documents three fields for it    |
+| `repository.security_and_analysis`                      | The schema names every sub-key the PATCH accepts; every mapping under it is closed too |
+| `branches[].protection.required_status_checks.checks[]` | GitHub's protection PUT takes only `context` and `app_id` in a check item              |
+| `branches[].protection.required_deployments`            | The rule mutation is built from `environments` alone                                   |
+| `environments[].secrets[]`                              | The write body is built from the sealed value alone                                    |
+| `environments[].deployment_protection_rules[]`          | The enable call sends only the App's resolved id                                       |
 
 The wrapped form of the list sections is strict the same way: its keys are this action's own vocabulary, never sent to GitHub, so any other wrapper key is rejected upfront as a typo. The [undeclared policy page](undeclared-policy.md) is the one place that lists them.

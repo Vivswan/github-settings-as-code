@@ -219,8 +219,8 @@ Fix: read `target.repo.slug` (or `owner` and `name`) where you read `target.slug
 
 For `@vivswan/github-settings-as-code` consumers. The old form is the pre-release v3 builds', as in section 56.
 
-- **An undeclared key inside a section survives the parse.** The pre-release builds dropped it without a word.
-- **A key the section's schema refuses fails the parse,** naming the key. The pre-release builds dropped that one too, so the document parsed.
+- **A key the action passes through survives the parse.** The pre-release builds dropped a label's undeclared `owner` without a word.
+- **A key the section's schema refuses fails the parse,** naming the key. The pre-release builds dropped `actions.selected_actions_url`, so the document parsed.
 - **The checks beside the schema stay with `validateSettings`:** an unknown top-level section, a closed section's unknown entry key, a duplicate entry, a secret value's form, the keys a wildcard branch entry may carry.
 
 ```text
@@ -235,4 +235,4 @@ v3            SettingsFile.safeParse({ labels: [{ name: "bug", color: "d73a4a", 
               // failure: actions.selected_actions_url: selected_actions_url is a value GitHub reports, not a setting it accepts (...), so a declared value could never be applied; remove it from the settings file
 ```
 
-Fix: remove or move each key the parse names. Code that leaned on the parse to drop an undeclared key drops it itself.
+Fix: remove or move each key the parse names. Code that leaned on the parse to drop a key drops it itself.

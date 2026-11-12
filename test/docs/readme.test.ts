@@ -301,7 +301,7 @@ function strictMappings(schema: z.ZodType, path: string): string[] {
   }
 }
 
-/** The two ways a section refuses an unknown key (its closedSurface, a strict mapping at its root), and every strict mapping below a root. */
+/** The two ways a section refuses an unknown key (its closedSurface, a strict mapping at its root), and every outermost strict mapping below a root. */
 function closedShapes(): { sections: SectionKey[]; nested: string[] } {
   const strict = new Set(
     SECTION_KEYS.flatMap((key) => strictMappings(SettingsFile.shape[key], key)),
@@ -340,7 +340,7 @@ describe("forward-compatibility closed-shapes claims", () => {
     }
   });
 
-  test("the nested-shapes table names exactly the strict mappings below a section's root, so a shape a slice closes never stays off the page", () => {
+  test("the nested-shapes table names exactly the outermost strict mappings below a section's root, so one a slice adds never stays off the page", () => {
     const { nested } = closedShapes();
     expect(nested.length).toBeGreaterThan(0);
     const [, ...rows] = tableRows(

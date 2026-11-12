@@ -6,7 +6,7 @@ order: 210
 
 `mode: check` runs the whole pipeline read-only. Each declared section reads the live state and reports how it differs from the settings file instead of writing anything.
 
-The same declared-keys-only rule as apply holds: a key you do not declare is never compared. The exception is a declared ruleset, environment, or protected branch, whose write replaces the whole object: a live value that write would remove, because the entry omits it, is reported ([Semantics](../reference/semantics.md)).
+The same declared-keys-only rule as apply holds: a key you do not declare is never compared. The exception is a declared ruleset, environment, or protected branch, whose write replaces the whole object: check sweeps the live object for values the entry omits and that write would remove, and reports each one it finds ([Semantics](../reference/semantics.md) says where the sweep stops).
 
 Check mode changes no settings. The one write it can still perform is delivery of a private report when the `private-report` input is enabled, and that delivery touches only its report issue, its marker label, or its encrypted artifact, nothing else; the [private repositories guide](private-repositories.md#delivering-a-private-report) owns what each channel writes and when.
 
@@ -81,7 +81,7 @@ Two phrases in that sentence need unpacking:
 - **Live state, not the base branch.** The comparison is the proposed file against the live repository, not against the base branch, so drift that existed before the PR shows up too. That is still the true apply-on-merge delta, but not every line is caused by the PR.
 - **Something check can verify.** Write-only values (the LFS toggle, the interaction-limit expiry) are re-asserted by every apply without ever drifting a check.
 
-A ruleset has a blind spot. Check reports what the ruleset's write would remove, but not inside a rule, its `parameters` included: a key the entry omits there is not compared. A live `allowed_merge_methods` beside a declared `pull_request` rule without it reads clean, and the next update of that ruleset sends the rule without it, resetting the value.
+A ruleset has a blind spot inside a rule, its `parameters` included: a key the entry omits there is not compared. A live `allowed_merge_methods` beside a declared `pull_request` rule without it reads clean, and the next update of that ruleset sends the rule without it.
 
 A broken file still fails usefully: YAML parse errors and malformed section entries fail the run before any comparison.
 

@@ -45,7 +45,7 @@ How a call reports failure depends on its group:
 
 - A call that reads or parses input, or runs a whole flow (`validateSettings`, `mergeSettings`, `readSettingsFile`, `parseRepoSlug`, `discoverRepos`, `parseRecipient`, `runSingle`, `runMulti`, `runRender`, ...), returns a [neverthrow](https://github.com/supermacro/neverthrow) `Result` (or `ResultAsync`) whose error is a typed `Problem`; `describeProblem` renders one as the message the action would print.
 - The repository verbs, `checkRepository`, `applyRepository`, and `snapshotRepository`, always resolve to a report: its `result` field carries the outcome (`clean`, `drift`, `applied`, `partial`, `failed`, `snapshot`) and its `outcomes` say what each section did.
-- Every result word of every mode is a `RunOutcome`; `RUN_RESULTS` ranks them worst first and `worstOf` folds a run's targets through that ranking. Two never come from a verb: the render's `rendered`, and `skipped`, which `runMulti` gives a `repos` target with no settings file when no `defaults-file` is set.
+- Every result word of every mode is a `RunOutcome`; `RUN_RESULTS` ranks them worst first and `worstOf` folds a run's targets through that ranking. Two never come from a repository verb: the render's `rendered`, and `skipped`, which `runMulti` gives a `repos` target with no settings file when no `defaults-file` is set.
 - Report delivery: `deliverArtifactReport` never throws and returns `{ uploaded: true }` or `{ warning }`. Two calls throw instead: `encryptReport` on a recipient `parseRecipient` would have rejected (validate it first), and `openReportChannel` when asked for the `artifact` channel without an `ArtifactUploader`.
 
 Every verb takes its inputs positionally and one options object of the same knobs, each defaulted as the action's input of the same name:
@@ -115,7 +115,9 @@ console.log(merged.value.yaml, merged.value.notices.length);
 | `UNDECLARED_POLICY_SECTIONS` | const | The list sections whose wrapper takes `_undeclared` beside `_layering`; `environments`, `branches`, and `workflows` layer by key too, through a `{_layering, entries}` wrapper of their own (`LIST_SECTIONS` in the schema module) |
 | `UndeclaredPolicySection`    | type  | One of them                                                                                                                                                                                                                        |
 
-The schema subpath serves the built JSON Schema. Inside a section, `SettingsFile` applies the section's schema as the action does: an undeclared key survives the parse, and a key the schema refuses fails it with the key named. It strips an unknown top-level key and runs none of the checks beside the schema (a closed section's entry keys, duplicates, a secret value's form), so the action's whole judgment is `validateSettings`.
+The schema subpath serves the built JSON Schema.
+
+Inside a section, `SettingsFile` applies the section's schema as the action does: a key the action passes through survives the parse, and a key the schema refuses fails it with the key named. It strips an unknown top-level key and runs none of the checks beside the schema (a closed section's entry keys, duplicates, a secret value's form), so the action's whole judgment is `validateSettings`.
 
 ```ts
 import { SECTION_KEYS, SettingsFile } from "@vivswan/github-settings-as-code";
