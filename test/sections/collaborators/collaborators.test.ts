@@ -82,6 +82,25 @@ describe("collaborators", () => {
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([LIST, INVITATIONS]);
   });
 
+  test.each<[label: string, username: string, live: Array<{ login: string; role_name: string }>]>([
+    // Settled like anyone else, the listed owner would be re-granted at the declared role.
+    ["a user-owned repository's owner, listed as admin", "o", [{ login: "o", role_name: "admin" }]],
+    // No list carries an organization, so its login would read as a missing collaborator and be invited.
+    ["an organization's own login in another case, which no list carries", "O", []],
+  ])(
+    "a declared repository owner plans no write and is noted with the fix: %s",
+    async (_label, username, live) => {
+      const api = new MockApi({ [LIST]: { data: live }, [INVITATIONS]: { data: [] } });
+      expect(await plan(api, [{ username, permission: "push" }])).toEqual({
+        ops: [],
+        notes: [
+          `collaborator "${username}" is the repository owner, whose access is implicit and never managed; the entry is ignored - remove it from the settings file to silence this note`,
+        ],
+        drift: [],
+      });
+    },
+  );
+
   test("a matching role and a matching pending invitation plan nothing; keep turns the undeclared ones into notes", async () => {
     const api = new MockApi({
       [LIST]: {

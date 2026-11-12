@@ -39,6 +39,17 @@ export function samePermission(
   return a.org === b.org && resources.size === others.size && resources.isSubsetOf(others);
 }
 
+/**
+ * Whether a token granted `grant` passes `asked`: whichever alternative of `grant` the user picks is one `asked`
+ * accepts, and `asked` wants no organization permission `grant` lacks. The teams grant covers its own list read
+ * this way, which GitHub gates at the repository half alone.
+ */
+export function coversPermission(grant: SectionPermission, asked: SectionPermission): boolean {
+  const offered = new Set(grant.repo);
+  const accepted = new Set(asked.repo);
+  return (asked.org === undefined || asked.org === grant.org) && offered.isSubsetOf(accepted);
+}
+
 /** Human-facing label for each PAT resource, as shown in the token UI. */
 export const RESOURCE_LABEL: Record<PatResource, string> = {
   administration: "Administration",
