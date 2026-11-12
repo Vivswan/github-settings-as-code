@@ -371,6 +371,7 @@ The side-by-side comparison with the Probot Settings app lives in the migration 
 
 - Covers build_type, source, cname, https_enforced, and any PUT field GitHub adds; pages: null disables the site.
 - POST /repos/{owner}/{repo}/pages (create accepts only build_type/source) then PUT for the rest; existing sites get straight PUT passthrough; pages: null issues DELETE, mirroring branches' protection: null.
+- The create requires build_type or source, so a declaration with neither, against a repository without a site, sends no write: check reports drift naming the fix (declare build_type or source), and apply reports the same line as a notice and changes nothing.
 - In a mode: render fold, pages: null is written as the section's value even over a lower layer's pages declaration, so the rendered file turns the site off (the layering guide owns that rule); a multi-repo defaults-file never merges into a target's file.
 - Snapshot reads the live site back on the declared keys; a repository without Pages is omitted rather than declared null.
 
@@ -446,10 +447,11 @@ The side-by-side comparison with the Probot Settings app lives in the migration 
 - In a mode: render fold, interaction_limits: null is written as the section's value even over a lower layer's declaration, mirroring pages: null, so the rendered file clears the limit.
 - A 409 means an organization- or user-level limit overrides the repository's; writes surface that as a note, not a failure, while check mode still reports a mismatched declaration as drift - the org is the place to change it.
 - Snapshot reads back the repository-level limit (an inherited one is left out with a note, and the expiry duration is not readable), the cap when the feature exists and is enabled, and the bypass list when it has members.
+- A read-only Administration grant reads the limit and is denied the cap and the bypass list, which GitHub gates at write: under on-missing-permission: warn the snapshot leaves each of the two keys out with a note naming the grant and still writes the limit, and under fail the section fails.
 
 **Pull request creation cap** (`interaction_limits`)
 
-- `pull_request_creation_cap` routes to GET/PATCH /repos/{owner}/{repo}/interaction-limits/pulls/creation-cap: persistent desired state with no self-expiry (enabled plus max_open_pull_requests 1-1000, read back verbatim), so check diffs it exactly and apply PATCHes only on divergence - no re-arm.
+- `pull_request_creation_cap` routes to GET/PATCH /repos/{owner}/{repo}/interaction-limits/pulls/creation-cap: persistent desired state with no self-expiry (enabled, max_open_pull_requests 1-1000, and include_drafts, read back verbatim), so check diffs it exactly and apply PATCHes only on divergence - no re-arm.
 - GitHub gates the cap GET at write, so a read-only Administration grant cannot check this key.
 - Where the cap is unavailable the endpoints answer 405, which apply surfaces as a note (like the 409) and check as honest drift.
 
