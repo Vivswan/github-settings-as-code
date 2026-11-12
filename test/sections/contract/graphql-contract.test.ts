@@ -237,7 +237,7 @@ describe("tryCallGraphql tolerance", () => {
       tryCallGraphql(ctx(api), section, tolerantOp, { owner: "o", repo: "r" }).then(unwrap),
     ).rejects.toThrow(
       new Error(
-        "repository: GRAPHQL RepoToggles: 403 slow down. The API rate limit was hit; re-run the workflow after the limit resets, or use a token with a higher rate limit",
+        "repository: GRAPHQL RepoToggles: 403 slow down. The API rate limit was hit; re-run after the limit resets, or use a token with a higher rate limit",
       ),
     );
   });

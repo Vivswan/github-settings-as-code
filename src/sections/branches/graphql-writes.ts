@@ -142,7 +142,7 @@ function verifyDeploymentReadback(
     | undefined;
   if (typeof rule !== "object" || rule === null) {
     return unverified(
-      `branches[${entryName}].protection.required_deployments: the mutation returned no rule to read back, so the applied deployment requirement cannot be verified; re-run the workflow, and retry later if it persists`,
+      `branches[${entryName}].protection.required_deployments: the mutation returned no rule to read back, so the applied deployment requirement cannot be verified; re-run, and retry later if it persists`,
     );
   }
   const echoed = Array.isArray(rule.requiredDeploymentEnvironments)
@@ -151,7 +151,7 @@ function verifyDeploymentReadback(
   if (declared === null) {
     if (rule.requiresDeployments === true) {
       return unverified(
-        `branches[${entryName}].protection.required_deployments: declared null (not required) but the rule still requires deployments to [${echoed.join(", ")}] after the mutation; re-run the workflow, and report this if it persists`,
+        `branches[${entryName}].protection.required_deployments: declared null (not required) but the rule still requires deployments to [${echoed.join(", ")}] after the mutation; re-run, and report this if it persists`,
       );
     }
     return ok(undefined);
@@ -171,7 +171,7 @@ function verifyDeploymentReadback(
       `branches[${entryName}].protection.required_deployments: the settings file requires deployments to ` +
         `[${declared.environments.join(", ")}] but after the mutation the rule ` +
         `${rule.requiresDeployments === true ? `requires [${echoed.join(", ")}]` : "does not require deployments"}; ` +
-        "re-run the workflow, and report this if it persists",
+        "re-run, and report this if it persists",
     );
   }
   return ok(undefined);
@@ -382,7 +382,7 @@ async function resolveActorId(
       return err(
         sectionFailure(
           "live-shape",
-          `branches: force_push_bypassers actor "${raw}": the ${actor.kind === "app" ? "App lookup" : "GraphQL lookup"} succeeded but returned no node id, so the allowance cannot be applied; re-run the workflow, and report this if it persists`,
+          `branches: force_push_bypassers actor "${raw}": the ${actor.kind === "app" ? "App lookup" : "GraphQL lookup"} succeeded but returned no node id, so the allowance cannot be applied; re-run, and report this if it persists`,
         ),
       );
     }
@@ -404,7 +404,7 @@ function lateRuleId(ctx: BranchesContext, pattern: string): Read<unknown> {
           "live-shape",
           `branches[${pattern}]: the branch is protected but no branch protection rule with that ` +
             `pattern is visible through GraphQL, so its GraphQL-only fields cannot be set; check ` +
-            `that the token can read branch protection rules, re-run the workflow, and report this ` +
+            `that the token can read branch protection rules, re-run, and report this ` +
             `if it persists`,
         ),
       );
@@ -491,7 +491,7 @@ async function repositoryNodeId(
         return err(
           sectionFailure(
             "live-shape",
-            "branches: the repository lookup returned no GraphQL node id, so no protection rule can be created; re-run the workflow and retry if it persists",
+            "branches: the repository lookup returned no GraphQL node id, so no protection rule can be created; re-run and retry if it persists",
           ),
         );
       }

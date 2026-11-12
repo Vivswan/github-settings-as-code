@@ -511,7 +511,7 @@ describe("failureFor context enrichment", () => {
       ),
     ).toThrow(
       new Error(
-        "rulesets: GET /repos/o/r/rulesets: 500 Server Error. GitHub returned a server error; re-run the workflow, and retry later if it persists",
+        "rulesets: GET /repos/o/r/rulesets: 500 Server Error. GitHub returned a server error; re-run, and retry later if it persists",
       ),
     );
     expect(() =>
@@ -524,7 +524,7 @@ describe("failureFor context enrichment", () => {
       ),
     ).toThrow(
       new Error(
-        "rulesets: GET /repos/o/r/rulesets: 403 API rate limit exceeded. The API rate limit was hit; re-run the workflow after the limit resets, or use a token with a higher rate limit",
+        "rulesets: GET /repos/o/r/rulesets: 403 API rate limit exceeded. The API rate limit was hit; re-run after the limit resets, or use a token with a higher rate limit",
       ),
     );
   });
@@ -935,7 +935,7 @@ describe("planContext read port", () => {
       err({
         kind: "server-error",
         message:
-          "branches: GET /repos/o/r/branches: 500 Internal Server Error. GitHub returned a server error; re-run the workflow, and retry later if it persists",
+          "branches: GET /repos/o/r/branches: 500 Internal Server Error. GitHub returned a server error; re-run, and retry later if it persists",
       }),
     );
   });
@@ -1322,7 +1322,7 @@ describe("a marked request's failure is rebuilt on the engine's side of the clie
       wire: "REST, the client answers a rate limit signalled only by its message",
       run: () => rest(answering(403, "API rate limit exceeded for hunter2"), true),
       kind: "rate-limit",
-      thrown: `actions: arming the setup failed - PATCH /repos/o/r/code-quality/setup: 403 ${SECRET_RESPONSE_WITHHELD}. The API rate limit was hit; re-run the workflow after the limit resets, or use a token with a higher rate limit`,
+      thrown: `actions: arming the setup failed - PATCH /repos/o/r/code-quality/setup: 403 ${SECRET_RESPONSE_WITHHELD}. The API rate limit was hit; re-run after the limit resets, or use a token with a higher rate limit`,
     },
     {
       wire: "REST, the client answers a plain 403",
@@ -1472,7 +1472,7 @@ describe("tryCallDeclared", () => {
       },
     });
     const limitHit = new Error(
-      "actions: GET /repos/o/r/pages: 403 API rate limit exceeded. The API rate limit was hit; re-run the workflow after the limit resets, or use a token with a higher rate limit",
+      "actions: GET /repos/o/r/pages: 403 API rate limit exceeded. The API rate limit was hit; re-run after the limit resets, or use a token with a higher rate limit",
     );
     await expect(
       tryCallDeclared({ ...ctx, api: limited }, actionsSection, declares403, {

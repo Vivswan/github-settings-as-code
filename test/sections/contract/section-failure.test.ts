@@ -41,7 +41,7 @@ describe("failureFor classifies each kind with the message the throw carried", (
     [
       "rate-limit",
       { status: 403, message: "API rate limit exceeded", body: "", rateLimited: true },
-      "rulesets: POST /repos/o/r/rulesets: 403 API rate limit exceeded. The API rate limit was hit; re-run the workflow after the limit resets, or use a token with a higher rate limit",
+      "rulesets: POST /repos/o/r/rulesets: 403 API rate limit exceeded. The API rate limit was hit; re-run after the limit resets, or use a token with a higher rate limit",
     ],
     [
       "permission-denied",
@@ -51,7 +51,7 @@ describe("failureFor classifies each kind with the message the throw carried", (
     [
       "server-error",
       { status: 502, message: "Bad Gateway", body: "" },
-      "rulesets: POST /repos/o/r/rulesets: 502 Bad Gateway. GitHub returned a server error; re-run the workflow, and retry later if it persists",
+      "rulesets: POST /repos/o/r/rulesets: 502 Bad Gateway. GitHub returned a server error; re-run, and retry later if it persists",
     ],
     [
       "unauthorized",

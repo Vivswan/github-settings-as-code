@@ -222,7 +222,7 @@ function setupPlan(minted: Minted): WidePlan<SetupKey, WideEndpoints> {
       tolerate: {
         statuses: [409],
         outcome: (error) => ({
-          failure: `${key}: PATCH ${expand(endpoints.update, ctx)}: ${error.status} ${error.message}. A ${noun} configuration run is already in progress on the repository; re-run the workflow after it finishes`,
+          failure: `${key}: PATCH ${expand(endpoints.update, ctx)}: ${error.status} ${error.message}. A ${noun} configuration run is already in progress on the repository; re-run after it finishes`,
         }),
       },
       change: (response) =>

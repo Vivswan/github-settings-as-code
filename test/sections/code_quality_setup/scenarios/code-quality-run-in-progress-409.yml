@@ -21,4 +21,4 @@ expect:
   outcomes:
     code_quality_setup: failed
   stdout_contains:
-    - "configuration run is already in progress"
+    - "configuration run is already in progress on the repository; re-run after it finishes"
