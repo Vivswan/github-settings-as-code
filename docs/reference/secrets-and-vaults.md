@@ -86,7 +86,7 @@ Here the vault step exports `WEBHOOK_SECRET` into the job environment, and the s
 
 ## What happens at run time
 
-In apply mode, the action resolves every declared reference up front, after the read-only preflight and before the first write of any section. Resolution failures fail the repository cleanly with zero mutations:
+In apply mode, the action resolves up front every reference declared in a section the run applies, after the read-only preflight and before the first write of any section. A section the `sections` input excludes is not applied, so its references are never resolved. Resolution failures fail the repository cleanly with zero mutations:
 
 - An UNSET variable fails, naming the reference and pointing at the step's `env` block.
 - A SET-BUT-EMPTY variable also fails. An empty vault lookup must not write an empty secret, so a failed lookup cannot pass silently.

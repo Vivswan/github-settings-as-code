@@ -232,7 +232,7 @@ pre-release   SettingsFile.safeParse({ labels: [{ name: "bug", color: "d73a4a", 
 v3            SettingsFile.safeParse({ labels: [{ name: "bug", color: "d73a4a", owner: "platform" }] })
               // success: {"labels":[{"name":"bug","color":"d73a4a","owner":"platform"}]}
               SettingsFile.safeParse({ actions: { enabled: true, selected_actions_url: "https://api.github.com/x" } })
-              // failure: actions.selected_actions_url: selected_actions_url is a value GitHub reports, not a setting it accepts (...); remove it from the settings file
+              // failure: actions.selected_actions_url: selected_actions_url is a value GitHub reports, not a setting it accepts (...), so a declared value could never be applied; remove it from the settings file
 ```
 
 Fix: remove or move each key the parse names. Code that leaned on the parse to drop an undeclared key drops it itself.

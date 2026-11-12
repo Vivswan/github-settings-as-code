@@ -137,7 +137,7 @@ Two limits. A shape's own issues are capped at five per section, with a count of
 
 The success path mints the input a planner accepts: a section's `plan()` takes the section's value carrying a type-level brand that names the section it was validated as. A hand-built entry list does not compile. A nullable section's `null` carries no brand: it holds nothing a file-only check could judge.
 
-A secret reference is judged twice. Its `$NAME` form and its provenance are issues of this phase, which is told who authored the document ([Trust and provenance](#trust-and-provenance)) and reads no environment. Its value waits for apply alone, which resolves every reference after the read-only preflight and before the first write.
+A secret reference is judged twice. Its `$NAME` form and its provenance are issues of this phase, which is told who authored the document ([Trust and provenance](#trust-and-provenance)) and reads no environment. Its value waits for apply alone, which resolves the references of the sections the run applies, after the read-only preflight and before the first write.
 
 Demonstrated by: [test/engine/validate.test.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/test/engine/validate.test.ts), [test/engine/orchestrate.test.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/test/engine/orchestrate.test.ts), [test/sections/interaction_limits/scenarios/interaction-limits-invalid-values-and-unknown-key-rejected.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/test/sections/interaction_limits/scenarios/interaction-limits-invalid-values-and-unknown-key-rejected.yml).
 
