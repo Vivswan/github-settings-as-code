@@ -131,6 +131,8 @@ const DATA_FUNCTIONS: ReadonlySet<string> = new Set(["render", "codePointEscape"
 /** Helpers whose string arguments at these indexes are data (a key name, a rule type, a wrapper kind, a noun); a key that renders inside a message is data too, since a containment pin would hold wherever a test spells it. */
 const DATA_ARGUMENTS: Readonly<Record<string, readonly number[]>> = {
   actorList: [0, 1],
+  control: [0],
+  toggle: [0],
   reviewActorHolder: [0],
   rule: [0],
   sectionFailure: [0],

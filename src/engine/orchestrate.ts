@@ -34,6 +34,7 @@ import {
 import { SECTIONS } from "../sections/registry.js";
 import { agree, countNoun } from "../text.js";
 import type { MustBeNever, UndeclaredPolicy } from "../types.js";
+import { unreadDirectiveNotes } from "./directives.js";
 import { executePlan } from "./execute.js";
 import { UNDECLARED_POLICIES } from "./layers.js";
 import type { RunOutcome } from "./outcome.js";
@@ -109,6 +110,9 @@ export interface ValidateOptions {
 
   /** Who authored the document, "operator" when omitted; the multi-repo flow passes "target" for a target's own settings.yml, so a secret reference in it is refused here, with the rest of the document's problems. */
   readonly secretSource?: SettingsSource | undefined;
+
+  /** A layer's way back from its standalone view to the file as written (`StandaloneView.asWritten`), for the path a warning names; a document judged as written passes none. */
+  readonly asWritten?: ((path: string) => string) | undefined;
 }
 
 /** What one section's run ends in: the drift it found (check) or the changes it made (apply), with its notes. */
@@ -217,6 +221,16 @@ export function validateSettingsDoc(
   if (issues.length > 0) {
     return err({ code: "settings-malformed-sections", source: sourceLabel, issues });
   }
+  // Only a document that runs is warned: in a refused one a closed shape may have named the marker itself.
+  // COMPAT(v4): a single document whose top-level _layering is outside its values still runs, under a warning; delete the warning and refuse the value as _undeclared's is refused above
+  // COMPAT(v4): a _remove on an entry no list keys still runs and passes through as a field, under a warning; delete the warning and refuse each path with the removal sites above
+  unreadDirectiveNotes(sourceLabel, {
+    layering: (settings as Record<string, unknown>)._layering,
+    unkeyed: removals.unkeyed,
+    asWritten: options.asWritten,
+  }).forEach((note) => {
+    io.annotate("warning", note);
+  });
   return shapes.map((parsed) => mintValidatedSettings(parsed, policy ?? options.undeclared));
 }
 

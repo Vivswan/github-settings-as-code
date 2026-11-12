@@ -7,7 +7,7 @@
 /** The echoes by name; the links (url, *_url) match by suffix in isUrlKey. */
 export const GET_ONLY_KEYS: ReadonlySet<string> = new Set(["name", "enabled", "enforcement_level"]);
 
-// The controls the PUT takes as a bare boolean and the GET wraps as {url, enabled}; graphql-vocabulary.ts pins its twin table to this list, so a control added there is added here first.
+// The controls the PUT takes as a bare boolean and the GET wraps as {url, enabled}; graphql-vocabulary.ts pins its twin table to this list and schema.ts its typed controls, so a control is added here first.
 const BOOLEAN_CONTROLS = [
   "enforce_admins",
   "required_linear_history",

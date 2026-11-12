@@ -1,0 +1,54 @@
+# A layer's warning names the entry by its index in the file as written: the
+# keyed removal before it is counted (rulesets[1], where the layer's standalone
+# view holds it at 0) and still drops the lower entry. The marker rides into
+# the rendered document as before, which the fold names once more by that
+# document's own path. The warnings print before the removal's notice.
+name: render-unkeyed-remove-warns
+inputs:
+  mode: render
+settings_layers:
+  - rulesets:
+      - name: old
+        target: branch
+        enforcement: active
+      - name: r
+        target: branch
+        enforcement: active
+settings:
+  rulesets:
+    - name: old
+      _remove: true
+    - name: r
+      bypass_actors:
+        - actor_id: 1
+          actor_type: Team
+          bypass_mode: always
+          _remove: true
+expect:
+  exit_code: 0
+  result: rendered
+  zero_requests: true
+  stdout_contains:
+    - >-
+      settings.yml: rulesets[1].bypass_actors[0]._remove:
+      _remove belongs on an entry of a keyed list, and this list is not keyed,
+      so it removes nothing and passes through as a field of the entry.
+      Remove the key; the next major version refuses it
+    - >-
+      ::warning::the rendered settings document: rulesets.entries[0].bypass_actors[0]._remove:
+      _remove belongs on an entry of a keyed list, and this list is not keyed,
+      so it removes nothing and passes through as a field of the entry.
+      Remove the key; the next major version refuses it
+    - "settings.yml: rulesets[0] carries _remove: true and dropped the entry a lower layer declared under its key"
+  rendered:
+    rulesets:
+      _undeclared: keep
+      entries:
+        - name: r
+          target: branch
+          enforcement: active
+          bypass_actors:
+            - actor_id: 1
+              actor_type: Team
+              bypass_mode: always
+              _remove: true

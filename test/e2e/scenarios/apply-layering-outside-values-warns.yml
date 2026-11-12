@@ -1,0 +1,27 @@
+# A single document's top-level `_layering` outside replace|shallow|deep is read
+# by nothing, since no fold runs: the apply goes on as it always did, now under
+# one warning naming the values and the fix. mode: render refuses the same file
+# as a layer. Raw text, because the published schema refuses the value and the
+# corpus's schema check holds every `settings` mapping to it.
+name: apply-layering-outside-values-warns
+settings_raw: |
+  _layering: banana
+  labels:
+    - name: bug
+      color: d73a4a
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    labels: applied
+  mutations:
+    - "POST /repos/{repo}/labels"
+  stdout_contains:
+    - "::warning::"
+    - >-
+      settings.yml: _layering must be one of "replace", "shallow", "deep"; got a string that is none of them.
+      A single document is not folded, so the directive is not read and the run goes on;
+      mode: render refuses this file as a layer.
+      Write one of the values, or remove the key; the next major version refuses it here too
+    - 'labels: created label "bug"'
+  fixpoint: converges

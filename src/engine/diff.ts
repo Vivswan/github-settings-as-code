@@ -581,11 +581,18 @@ export function phantomKeys(desired: Record<string, unknown>, live: unknown): st
   return phantomPaths(deltas(desired, live));
 }
 
-export function phantomNote(prefix: string, keys: string[], noun: string, rewrite: string): string {
+/** `rewrite` and `tail` finish "so if GitHub ignores it ...": the default tail fits a write the comparison gates, which re-runs; a write nothing gates passes what happens instead. */
+export function phantomNote(
+  prefix: string,
+  keys: string[],
+  noun: string,
+  rewrite: string,
+  tail = "on every apply without converging",
+): string {
   const list = keys.map((k) => `"${k}"`).join(", ");
   const count = keys.length;
   return (
     `${prefix}: declared ${agree(count, "key", "keys")} ${list} ${agree(count, "does", "do")} not exist on the live ${noun}, ` +
-    `so if GitHub ignores ${agree(count, "it", "them")} ${rewrite} on every apply without converging. Fix the key name, or remove it from the settings file`
+    `so if GitHub ignores ${agree(count, "it", "them")} ${rewrite} ${tail}. Fix the key name, or remove it from the settings file`
   );
 }

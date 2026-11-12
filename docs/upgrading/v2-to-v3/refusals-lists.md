@@ -38,7 +38,7 @@ v2   branches:
 
 v3   branches[0].protection.required_status_checks.enforcement_level: ... is GitHub's GET-only echo, which the protection PUT has no word for; remove it (strict and the check list carry the requirement)
      branches[0].protection.url: ... is a link GitHub's GET response carries and the protection PUT has no word for; remove it
-     branches[0].protection.enforce_admins.enabled: ... is GitHub's GET wrapper around the toggle, which the protection PUT takes as a bare boolean; declare enforce_admins: true instead
+     branches[0].protection.enforce_admins: ... is GitHub's GET wrapper around the toggle, which the protection PUT takes as a bare boolean; declare enforce_admins: true instead
      branches[0].protection.restrictions.users[0]: ... carries an actor object copied from GitHub's GET response, which the protection PUT takes as the login string; write "octocat" instead
      (exit 1, zero requests)
 ```

@@ -23,5 +23,7 @@ expect:
     branches: failed
   summary_contains:
     - "branches[release]: the declared branch does not exist on the repo, so its protection cannot be applied; create the branch, or remove it from the settings file"
+  stdout_contains:
+    - "::error::branches[release]: the declared branch does not exist on the repo"
   never:
     - "PUT /repos/{repo}/branches/release/protection"
