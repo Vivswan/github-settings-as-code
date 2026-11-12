@@ -30,7 +30,6 @@ const snapshot = async (api: MockApi) =>
 
 const SECTION_GRANT =
   'grant "Members" (read) under the PAT\'s Organization permissions and "Administration" (read and write) under its Repository permissions';
-/** What plan() and snapshot() both say of a team the list names and the probe answers 404 for. */
 const LISTED_PROBE_404 = (reading: string) =>
   `listed with access to o/r, but the access probe answered 404, ${reading}. ` +
   `A fine-grained token missing the grant gets the same answer; if the team does have access, ${SECTION_GRANT}`;

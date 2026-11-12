@@ -42,15 +42,12 @@ function drive(io: Io): void {
   io.summary("| a |\n|---|");
 }
 
-/**
- * From Microsoft's reference for Char.IsWhiteSpace, not from the code under test: the 25 characters the runner's
- * TrimStart() removes before it looks for `::`.
- *
- *   U+0009..U+000D, U+0085                     -> the control characters the reference names
- *   U+0020, U+00A0, U+1680, U+2000..U+200A,
- *   U+202F, U+205F, U+3000                     -> the SpaceSeparator category
- *   U+2028, U+2029                             -> the LineSeparator and ParagraphSeparator categories
- */
+// Char.IsWhiteSpace, as Microsoft's reference groups it:
+//   U+0009..U+000D, U+0085                                          -> the control characters the reference names
+//   U+0020, U+00A0, U+1680, U+2000..U+200A, U+202F, U+205F, U+3000  -> the SpaceSeparator category
+//   U+2028, U+2029                                                  -> the LineSeparator and ParagraphSeparator categories
+
+/** From Microsoft's reference for Char.IsWhiteSpace, not from the code under test: the 25 characters the runner's TrimStart() removes before it looks for `::`. */
 const DOTNET_WHITE_SPACE: readonly number[] = [
   0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x20, 0x85, 0xa0, 0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004,
   0x2005, 0x2006, 0x2007, 0x2008, 0x2009, 0x200a, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000,

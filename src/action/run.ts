@@ -1,3 +1,8 @@
+/**
+ * The action as one call: the runner's Io, a GitHubApi client, and the artifact uploader handed to the library's
+ * executor, returning the code main.ts exits with. An input problem fails the run before the executor starts.
+ */
+
 import {
   executeRun,
   failRun,

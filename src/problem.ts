@@ -71,22 +71,14 @@ export type CentralFileProblem =
   | { readonly kind: "ownerless"; readonly files: readonly string[] };
 
 /**
- * Every failure the run reports as data. The layer members carry only what
- * their prose needs: the prose fragments are literal unions, the positions are
- * numbers, and a document value enters only as `actual`, which the renderer
- * describes by SHAPE. `keyField` is the module's declared key field, never
- * read from a document; `keyKind` is its kind in prose ("string" when the
- * module says nothing else), `alongside` the other paths of a composite
- * identity (a reviewer's `type` beside its `id`), `keyPaths` the dotted paths
- * a removal names its entry by (the key field's own, or a composite), and
- * `extra` the author's dotted paths riding beside the key and the marker
- * (`color`, `config.secret`), in the entry's order.
- *
- * Three fields carry a convention their names do not: `fallback` is the value
- * an unset input means, null where unset means "no value" (the `undeclared`
- * input); `index` is the colliding layer's position in the settings-file list,
- * from 0; `denied` is true for a denial or an invalid token, where a user PAT
- * is the fix.
+ * Every failure the run reports as data. The layer members carry only what their prose needs: prose fragments as
+ * literal unions, positions as numbers, and a document value only as `actual`, which the renderer describes by SHAPE.
+ *   keyField, keyKind  -> the module's declared key field, never read from a document; its kind in prose ("string" when the module says nothing else)
+ *   alongside          -> the other paths of a composite identity (a reviewer's `type` beside its `id`)
+ *   keyPaths, extra    -> the dotted paths a removal names its entry by (the key field's own, or a composite); the author's dotted paths beside the key and the marker (`color`, `config.secret`), in the entry's order
+ *   fallback           -> the value an unset input means, null where unset means "no value" (the `undeclared` input)
+ *   index              -> the colliding layer's position in the settings-file list, from 0
+ *   denied             -> true for a denial or an invalid token, where a user PAT is the fix
  */
 export type Problem =
   // Action inputs

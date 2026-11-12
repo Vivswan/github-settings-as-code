@@ -1,5 +1,7 @@
-// biome's own formatting of a rendered text: the lint judges committed output like hand-written code, so a
-// generator writes what biome would.
+/**
+ * biome's own formatting of a rendered text: the lint judges committed output like hand-written code, so a
+ * generator writes what biome would.
+ */
 
 import { join } from "node:path";
 

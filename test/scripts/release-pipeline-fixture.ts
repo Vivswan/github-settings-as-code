@@ -50,8 +50,7 @@ let realGit = "";
 /** The caller's GIT_* variables, out of the environment while a file's tests run; undefined until they were. */
 let callerGit: Record<string, string> | undefined;
 
-/** What stands in for them: no global and no system config, so a git the suite runs reads its own repository's
- * config alone. Identity stays in each clone's config, which GIT_AUTHOR_* and GIT_COMMITTER_* would outrank. */
+/** What stands in for them: no global and no system config, so a git the suite runs reads its own repository's config alone. Identity stays in each clone's config, which GIT_AUTHOR_* and GIT_COMMITTER_* would outrank. */
 const SEALED_GIT = { GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull };
 
 /** Every GIT_* variable the environment holds now. */

@@ -1,3 +1,9 @@
+/**
+ * A GraphQL operation as a section declares it, the sibling of ./endpoints.ts: its name, its kind, and the error
+ * types it tolerates as outcomes. The kind is declared because the HTTP method cannot show it (every GraphQL call
+ * is one POST), and tolerance names error types because the status a GraphQL rejection folds to is lossy.
+ */
+
 import type { ReadPhase } from "./endpoints.js";
 import type { SectionPermission } from "./permissions.js";
 

@@ -7,15 +7,14 @@
  */
 
 /**
- * The one shape GitHub's answer to a failed request takes. `rateLimited` is the client's own proof that a 403 is a
- * rate limit, from signals the value cannot carry (retry-after, errors[].type RATE_LIMITED, the secondary-rate
- * phrase; the ambiguous zero-quota header only on a withheld body), recorded because the body it was read from may
- * be withheld; classifyApiError is its one reader, and withheld() copies it through. `graphqlTypes` is what
- * tolerance decisions read instead of the status, a lossy fold (FORBIDDEN and a mixed [FORBIDDEN, UNPROCESSABLE]
- * both land on 403/422); the values are structural enums, never echoes, so the field survives a withheld response.
+ * The one shape GitHub's answer to a failed request takes: an HTTP error, or errors[] inside a GraphQL 200.
  *
- *   every errors[] entry carries a string type  -> the types, deduped and sorted
- *   any entry untyped                           -> omitted, and the response is never tolerable
+ * `rateLimited` is the client's own proof that a 403 is a rate limit, from signals the value cannot carry (retry-after,
+ * errors[].type RATE_LIMITED, the secondary-rate phrase; the ambiguous zero-quota header only on a withheld body),
+ * recorded because the body it was read from may be withheld; classifyApiError is its one reader.
+ *
+ * `graphqlTypes` is what tolerance reads instead of the status, a lossy fold (FORBIDDEN and a mixed [FORBIDDEN,
+ * UNPROCESSABLE] both land on 403/422); the values are structural enums, never echoes, so withheld() keeps them.
  */
 export interface ApiError {
   /** The HTTP status, or the one a GraphQL errors[] folds to. */
@@ -33,7 +32,7 @@ export interface ApiError {
   /** The client's proof that a 403 is a rate limit; the doc above says where it comes from. */
   rateLimited?: true;
 
-  /** GitHub's structured error types, for tolerance decisions; the doc above says when they are present. */
+  /** GitHub's structured error types, for tolerance decisions: deduped and sorted when every errors[] entry carries a string type; omitted when any entry is untyped, so that response is never tolerable. */
   graphqlTypes?: readonly string[];
 }
 

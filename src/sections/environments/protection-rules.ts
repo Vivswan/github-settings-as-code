@@ -1,3 +1,9 @@
+/**
+ * The nested `deployment_protection_rules` key: the GitHub Apps enabled as deployment gates on an environment,
+ * matched by App slug. An undeclared gate is kept by default, and a declared App that is not installed is refused
+ * before any rule is enabled: nothing this section may call can install one.
+ */
+
 import { err, ok, Result, safeTry } from "neverthrow";
 import { z } from "zod";
 import type { UndeclaredPolicy } from "../../types.js";

@@ -1,3 +1,9 @@
+/**
+ * `labels:` section: labels on the shared list engine, matched by name without regard to case. Undeclared labels
+ * are deleted by default (Probot parity), `new_name` renames in place, and both sides of the comparison carry the
+ * color as GitHub stores it (lowercase, no "#"), so a declared "#D73A4A" does not drift.
+ */
+
 import { ok } from "neverthrow";
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
@@ -5,7 +11,9 @@ import type { ListComparable, ListWrite } from "../shared/list/decl.js";
 import { listSection } from "../shared/list/section.js";
 import { LabelConfig } from "./schema.js";
 
+/** The brand's phantom key: declared only, so nameKey() is the one way to mint a NameKey. */
 declare const labelNameKey: unique symbol;
+
 /** Case-insensitive matching is the section's whole contract; the brand marks a name as already folded. */
 export type NameKey = string & { readonly [labelNameKey]: true };
 

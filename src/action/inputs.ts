@@ -1,3 +1,8 @@
+/**
+ * The action's read port over @actions/core: the step's inputs and the process environment go to the library's
+ * parseConfig, which validates them; nothing here does.
+ */
+
 import * as core from "@actions/core";
 import type { Result } from "neverthrow";
 import { type Problem, parseConfig, type RunConfig } from "../index.js";

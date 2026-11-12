@@ -115,6 +115,9 @@ export function toSpecOnlyGapSource(source: string, gapFile: string): string {
     );
   }
   return [
+    // check-file-headers.ts gates the rewritten file too; this header is true of every spec-only gap, whatever its routes.
+    "/** A spec-only gap: its routes are exempt from the e2e validator's unknown-route check until the pinned OpenAPI descriptor documents them; the file is then deleted by hand (./gap.ts). */",
+    "",
     `import { defineSpecOnlyGap } from "./gap.js";`,
     "",
     specOnlyDoc(doc),

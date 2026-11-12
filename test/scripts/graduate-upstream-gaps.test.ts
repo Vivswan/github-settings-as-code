@@ -13,6 +13,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { ARCHITECTURE_PATH, lintArchitecture } from "../../.github/scripts/arch-lint.js";
+import { opensWithHeader } from "../../.github/scripts/check-file-headers.js";
 import { gapFileBases, generateIndex, INDEX_PATH } from "../../.github/scripts/gen-gaps-index.js";
 import {
   isGapFile,
@@ -217,6 +218,8 @@ describe("toSpecOnlyGapSource", () => {
   test("rewrites a spec-pinned gap to the spec-only template", () => {
     expect(toSpecOnlyGapSource(SOURCE, GAP_FILE)).toBe(
       [
+        "/** A spec-only gap: its routes are exempt from the e2e validator's unknown-route check until the pinned OpenAPI descriptor documents them; the file is then deleted by hand (./gap.ts). */",
+        "",
         'import { defineSpecOnlyGap } from "./gap.js";',
         "",
         "/** GitHub shipped the merge queue; @octokit/types ships these routes, but the pinned OpenAPI descriptor does not document them yet. */",
@@ -230,6 +233,10 @@ describe("toSpecOnlyGapSource", () => {
         "",
       ].join("\n"),
     );
+  });
+
+  test("the rewrite opens with a header, or the graduation's own commit would fail the file-header gate", () => {
+    expect(opensWithHeader(toSpecOnlyGapSource(SOURCE, GAP_FILE))).toBe(true);
   });
 
   test("routes that fit the line width render inline, matching the formatter", () => {

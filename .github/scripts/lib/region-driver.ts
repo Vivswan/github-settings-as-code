@@ -1,5 +1,7 @@
-// The registry shape and the regeneration loop every region generator shares, so a generator declares its
-// files and the rules around their regions, and drives nothing by hand.
+/**
+ * The registry shape and the regeneration loop every region generator shares, so a generator declares its
+ * files and the rules around their regions, and drives nothing by hand.
+ */
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

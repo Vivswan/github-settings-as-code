@@ -1,3 +1,12 @@
+/**
+ * The generated regions of the docs pages (bun run build:docs): the whole coverage page, the Sections table, the
+ * pre-filled token-form link in the README and the getting-started page, the outputs list, and the module map.
+ *
+ * Each is read back and re-rendered before it is written, so a marker moved over authored text is refused instead
+ * of regenerated over. Authored prose that would break a table row stops the build, and so does a coverage
+ * paragraph or bullet past the word cap.
+ */
+
 import { join } from "node:path";
 import { err, ok, Result, safeTry } from "neverthrow";
 import { RUN_RESULTS } from "../../src/engine/outcome.js";

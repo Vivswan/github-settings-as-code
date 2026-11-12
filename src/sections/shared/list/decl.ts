@@ -304,12 +304,6 @@ export type ListSectionDecl<
  *   identity field          -> verbatim
  *   other declared fields   -> normalized as GitHub stores them (a color lowercased without "#", a null description as "")
  *   every other live field  -> kept, so declared passthrough keys compare against what the API echoed
- *
- * `conflicts` are the clashes the identities cannot show, each naming the fix; any finding fails the section:
- *
- *   declared  -> sees only the writes and runs inside document validation, before ANY section writes
- *                (a settings-file mistake costs no request); `[i]` indexes the writes as the entries
- *   live      -> runs after the read and before any write (a deploy key's material held by another key)
  */
 interface ListSectionDeclFields<
   K extends ListSectionKey,
@@ -375,9 +369,12 @@ interface ListSectionDeclFields<
   /** File-only checks beyond identity uniqueness (a deploy key's material must parse), one issue per finding at its path (`[2].key`); the engine runs them inside document validation, so toWrite may treat such an entry as a BUG. */
   readonly validate?: (entries: readonly Entry<K>[]) => readonly DeclaredIssue[];
 
-  /** Conflicts the identities cannot show (the rows above); any finding fails the section. */
+  /** The clashes the identities cannot show, each naming the fix; any finding fails the section. */
   readonly conflicts?: {
+    /** Sees only the writes and runs inside document validation, before ANY section writes (a settings-file mistake costs no request); `[i]` indexes the writes as the entries. */
     readonly declared?: (writes: readonly ListWrite<F>[]) => readonly DeclaredIssue[];
+
+    /** Runs after the read and before any write (a deploy key's material held by another key). */
     readonly live?: (
       writes: readonly ListWrite<F>[],
       live: readonly ListComparable<F>[],

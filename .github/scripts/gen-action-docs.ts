@@ -1,3 +1,10 @@
+/**
+ * The generated regions of action.yml (the inputs and outputs, from their declarations under src/) and of three
+ * docs pages: the undeclared-policy count sentence and Defaults table, the permissions grant sentence and gated
+ * reads, and check mode's gated reads (bun run build:action-docs). Each region is read back and re-rendered before
+ * it is written, so a marker moved over authored text is refused instead of regenerated over.
+ */
+
 import { join } from "node:path";
 import { err, ok, Result } from "neverthrow";
 import {

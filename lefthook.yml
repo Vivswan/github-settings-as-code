@@ -1,5 +1,5 @@
-# Git hooks, installed by `bun install` (the prepare script). Deliberately cheap: staged lint plus a whole-project
-# typecheck; builds and tests are CI's job behind the all-green gate.
+# Git hooks, installed by `bun install` (the prepare script). Deliberately cheap: staged lint, a whole-project
+# typecheck, and the file-header check; builds and tests are CI's job behind the all-green gate.
 #
 # A hook fetches and installs nothing, which rules out the convenient routes:
 #   bun x <tool>               -> downloads the package when it is not installed
@@ -20,3 +20,5 @@ pre-commit:
       run: |
         test -x node_modules/.bin/tsc || { echo 'tsc is missing from node_modules/.bin; run bun install first' >&2; exit 1; }
         bun --no-install node_modules/.bin/tsc -p .
+    - name: file headers
+      run: bun --no-install .github/scripts/check-file-headers.ts

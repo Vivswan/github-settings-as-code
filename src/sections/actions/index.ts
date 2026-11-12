@@ -1,3 +1,13 @@
+/**
+ * `actions:` section: the repository's Actions settings, one mapping that GitHub spreads over a GET/PUT pair per
+ * group of keys.
+ *
+ * KEY_DESTINATION routes every schema key to its pair (`cache` to two, one per limit), and a schema key without a
+ * route does not compile; a key outside the schema rides in the base permissions PUT verbatim, with a note. plan()
+ * reads a pair only for a key the file declares or implies (a declared allowlist implies the `selected` policy), and
+ * plans its PUT only on drift.
+ */
+
 import { isDeepStrictEqual } from "node:util";
 import { ok, type Result, safeTry } from "neverthrow";
 import { z } from "zod";
