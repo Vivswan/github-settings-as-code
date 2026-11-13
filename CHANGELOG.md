@@ -1,5 +1,32 @@
 # Changelog
 
+## [3.0.1](https://github.com/Vivswan/github-settings-as-code/compare/source-v3.0.0...source-v3.0.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* **action:** keep settings text from issuing workflow commands, and open --summary before the run ([#591](https://github.com/Vivswan/github-settings-as-code/issues/591)) ([acb5ba4](https://github.com/Vivswan/github-settings-as-code/commit/acb5ba40b2333c666f70e92c6a9b1ebe31180d1d))
+* **branches:** refuse a non-boolean control at parse, and let a null "off" converge ([#599](https://github.com/Vivswan/github-settings-as-code/issues/599)) ([346b640](https://github.com/Vivswan/github-settings-as-code/commit/346b640adb545ad5e2024dc63eca1cb3e43c6bce))
+* **ci:** keep a graduation green, and trigger Auto Fix on every generator input ([#602](https://github.com/Vivswan/github-settings-as-code/issues/602)) ([57a85b3](https://github.com/Vivswan/github-settings-as-code/commit/57a85b3669510a84e0a6047f24ca33a942381412))
+* **deps:** ship undici without its open advisories in the action bundle ([#593](https://github.com/Vivswan/github-settings-as-code/issues/593)) ([fc05599](https://github.com/Vivswan/github-settings-as-code/commit/fc05599feac0015d3ce122fb6cdfca36f565e5bd))
+* **engine:** keep a lower layer's rename when a higher layer adds to the label by its new name ([#597](https://github.com/Vivswan/github-settings-as-code/issues/597)) ([d3b5eca](https://github.com/Vivswan/github-settings-as-code/commit/d3b5ecae489aed767ab9856fe925a35a63cbbf14))
+* **engine:** name a notice's section once, and report what a refused entry left unattempted ([#592](https://github.com/Vivswan/github-settings-as-code/issues/592)) ([ee702cd](https://github.com/Vivswan/github-settings-as-code/commit/ee702cdc7a15625d2727be0da7d1219e8698e4ec))
+* **engine:** warn of a _layering or _remove that nothing reads ([#605](https://github.com/Vivswan/github-settings-as-code/issues/605)) ([bc81ce2](https://github.com/Vivswan/github-settings-as-code/commit/bc81ce2f0b3fa618bc515be3994fa5a3f95c3f02))
+* **environments:** name a key GitHub only reports or does not echo on an entry or a nested entry ([#604](https://github.com/Vivswan/github-settings-as-code/issues/604)) ([a1ede06](https://github.com/Vivswan/github-settings-as-code/commit/a1ede066723a357b0f927af523398990c3a1db3c))
+* **github:** hide every request of a redacted target, and read an empty repository as unproven ([#589](https://github.com/Vivswan/github-settings-as-code/issues/589)) ([924cafe](https://github.com/Vivswan/github-settings-as-code/commit/924cafe88c19a403ae23ffe8c805dba23ace44ce))
+* **lint:** close three gates that passed what they exist to refuse ([#600](https://github.com/Vivswan/github-settings-as-code/issues/600)) ([347410e](https://github.com/Vivswan/github-settings-as-code/commit/347410e8491c3bbf1c07d99d8a041dd7b6bf641e))
+* **release:** find the last release by a marker tag on main ([#620](https://github.com/Vivswan/github-settings-as-code/issues/620)) ([befb746](https://github.com/Vivswan/github-settings-as-code/commit/befb7464cf890e26ff44654ef674d10332221de8))
+* **release:** let two prunes of the same build tags both succeed ([#594](https://github.com/Vivswan/github-settings-as-code/issues/594)) ([4a7d4c6](https://github.com/Vivswan/github-settings-as-code/commit/4a7d4c6698e3387acd19561d659f0ed9b8fdcac2))
+* **release:** search the whole cycle for changelog commits, and restore the lines 3.0.0 lost ([#596](https://github.com/Vivswan/github-settings-as-code/issues/596)) ([6256d8b](https://github.com/Vivswan/github-settings-as-code/commit/6256d8ba115b2605fac2eedc53edcc631da18ca0))
+* **report:** keep a clean check clean under the issue channel, and deliver a long report ([#598](https://github.com/Vivswan/github-settings-as-code/issues/598)) ([9f31e5c](https://github.com/Vivswan/github-settings-as-code/commit/9f31e5c27b75733216bf3af8b763f63b2bb60727))
+* **repository:** name a contradictory private/visibility pair and a null security_and_analysis in a check-time note ([#603](https://github.com/Vivswan/github-settings-as-code/issues/603)) ([94e895d](https://github.com/Vivswan/github-settings-as-code/commit/94e895db852d37f0081428163f9ec183785ed56d))
+* **rulesets:** refuse a repeated bypass actor at parse instead of crashing the plan ([#586](https://github.com/Vivswan/github-settings-as-code/issues/586)) ([faf72da](https://github.com/Vivswan/github-settings-as-code/commit/faf72dab7cd62b6c1142ace157076017c7313aed))
+* say "re-run" in advice that the CLI prints too ([#607](https://github.com/Vivswan/github-settings-as-code/issues/607)) ([48f9266](https://github.com/Vivswan/github-settings-as-code/commit/48f92665ae6a2e01a7ad9d87efc91d891d268bb6))
+* **sections:** name a key GitHub only reports on a list entry ([#612](https://github.com/Vivswan/github-settings-as-code/issues/612)) ([08b057b](https://github.com/Vivswan/github-settings-as-code/commit/08b057b5f858262cc43446a8f1946a25819d8af0))
+* **sections:** never plan the owner, hedge a concealed team 404, and advise the grant the writes need ([#588](https://github.com/Vivswan/github-settings-as-code/issues/588)) ([8dd68e1](https://github.com/Vivswan/github-settings-as-code/commit/8dd68e13e3a1e9ed6a1f1fb8a0a7a695263a509d))
+* **sections:** send no empty Pages create, and keep the readable interaction limit in a snapshot ([#595](https://github.com/Vivswan/github-settings-as-code/issues/595)) ([7338300](https://github.com/Vivswan/github-settings-as-code/commit/7338300573c8ad3bacd8fd0ca200332113344862))
+* **snapshot:** carry a hidden failure's HTTP status, and say "nothing exists" only when it is true ([#609](https://github.com/Vivswan/github-settings-as-code/issues/609)) ([4adb938](https://github.com/Vivswan/github-settings-as-code/commit/4adb9386d1274626da08c34d6a5c581a94e1e1e1))
+
 ## [3.0.0](https://github.com/Vivswan/github-settings-as-code/compare/v2.0.0...v3.0.0) (2026-11-11)
 
 
