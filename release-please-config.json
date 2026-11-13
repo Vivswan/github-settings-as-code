@@ -4,7 +4,7 @@
   "bump-patch-for-minor-pre-major": true,
   "commit-search-depth": 5000,
   "include-component-in-tag": false,
-  "last-release-sha": "6dbc9a96a69818e569f8372acac82bb152a7c389",
+  "last-release-sha": "95ef74f05e23e75b5d7c0acc54054699d255ec2e",
   "packages": {
     ".": {
       "release-type": "simple",
