@@ -835,8 +835,7 @@ describe("the release hook's reads of the draft", () => {
       {
         stdout:
           "::error::no release is named source-v2.1.0.\n" +
-          "If the release v2.1.0 exists, the hook already renamed the draft and this job is done: do not re-run it.\n" +
-          "Of this workflow's jobs, only publish-npm can still be re-run.\n",
+          "If the release v2.1.0 exists, the hook already renamed the draft and this job is done: do not re-run it.\n",
         stderr: "",
         status: 1,
         outputs: [],

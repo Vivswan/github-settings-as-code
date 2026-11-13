@@ -49,7 +49,7 @@ function viewSource(marker: string): SourceView | null {
  * merge commit. The release's identity is read from the draft and never from the run's own sha, so a newer push's
  * run can recover an older merge's pending release.
  *
- *   no release under the name  -> refused: the hook's rename took the name, and nothing proceeds under the new one
+ *   no release under the name  -> refused, the state the hook's rename leaves: nothing proceeds under the new name
  *   a published release        -> refused: release-please published the marker's name itself (`"draft": false`)
  *   a target that is no sha    -> refused before a checkout or a tag could name it (a branch name on a hand-made draft)
  */
@@ -60,8 +60,7 @@ export function resolveSource(marker: string): { sha: string; tag: string } | { 
     return {
       refusal:
         `no release is named ${marker}.\n` +
-        `If the release ${tag} exists, the hook already renamed the draft and this job is done: do not re-run it.\n` +
-        "Of this workflow's jobs, only publish-npm can still be re-run.",
+        `If the release ${tag} exists, the hook already renamed the draft and this job is done: do not re-run it.`,
     };
   }
 
