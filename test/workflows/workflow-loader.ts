@@ -55,7 +55,7 @@ export interface Workflow {
   env?: Record<string, string>;
   jobs: Record<string, Job>;
 }
-export function workflowText(file: string): string {
+function workflowText(file: string): string {
   return readFileSync(join(WORKFLOWS_DIR, file), "utf8");
 }
 

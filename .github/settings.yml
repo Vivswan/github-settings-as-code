@@ -214,6 +214,22 @@ rulesets:
         - actor_id: 5
           actor_type: RepositoryRole
           bypass_mode: always
+    - name: source-tags
+      target: tag
+      enforcement: active
+      conditions:
+        ref_name:
+          include:
+            - source-v*
+          exclude: []
+      rules:
+        - type: deletion
+        - type: non_fast_forward
+        - type: update
+      bypass_actors:
+        - actor_id: 5
+          actor_type: RepositoryRole
+          bypass_mode: always
 environments:
   - name: github-pages
     wait_timer: 0

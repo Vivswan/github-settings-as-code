@@ -105,3 +105,27 @@ rulesets:
       - type: update
       - type: non_fast_forward
     bypass_actors: []
+
+  # The release markers: release-please creates `source-vX.Y.Z` once, on a
+  # release's merge commit on main, and finds its previous release by it.
+  # A marker never moves (update, non_fast_forward) and never goes
+  # (deletion): a moved or missing one makes the next changelog wrong in
+  # silence. No creation rule, so the Actions token creates each one. The
+  # admin role may bypass, to repair a marker the release hook refused.
+  # `v*` does not match `source-v...`, so no ruleset above covers these.
+  - name: source-tags
+    target: tag
+    enforcement: active
+    conditions:
+      ref_name:
+        include:
+          - source-v*
+        exclude: []
+    rules:
+      - type: deletion
+      - type: non_fast_forward
+      - type: update
+    bypass_actors:
+      - actor_id: 5
+        actor_type: RepositoryRole
+        bypass_mode: always

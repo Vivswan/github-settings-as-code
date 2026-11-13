@@ -8,24 +8,18 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import {
-  anchorCheck,
-  anchorReleasePr,
-  boundaryCheck,
-} from "../../.github/scripts/release-pipeline/anchor.js";
-import {
   FROZEN,
   packageCommit,
   packageRelease,
   retagMajor,
+  versionTagOf,
 } from "../../.github/scripts/release-pipeline/tags.js";
 import { ROOT } from "../root.js";
 import { withTempDir } from "../temp-dir.js";
 import {
-  ANCHOR_PUSH,
   BOT_IDENTITY,
   buildTagOf,
   buildTags,
-  CHANGELOG_21,
   checkoutOf,
   clone,
   commitAll,
@@ -46,6 +40,7 @@ import {
   packagedOf,
   parentsOf,
   pushGreenCommit,
+  pushMarker,
   remoteRef,
   rivalPackage,
   seedFixture,
@@ -132,9 +127,10 @@ describe("the fixture repositories", () => {
 
 const TAG = "refs/tags/v2.1.0";
 const V2 = "refs/tags/v2";
+const MARKER = "refs/tags/source-v2.1.0";
 
 describe("packageRelease", () => {
-  test("a fresh release mints the merge commit's package under its build tag, tags it, and creates latest; a rerun verifies it and pushes nothing", () => {
+  test("a fresh release mints the merge commit's package under its build tag, tags it, and creates latest, leaving the marker on the merge commit; a rerun verifies it and pushes nothing", () => {
     const fx = seedFixture();
     let result: ReturnType<typeof packageRelease> | undefined;
     const pushes = withPushPlans(fx, [], () => {
@@ -183,6 +179,7 @@ describe("packageRelease", () => {
     expect(rerunPushes).toEqual([]);
     expect(git(fx.origin, "rev-parse", `${TAG}^{}`)).toBe(packaged);
     expect(buildTags(fx)).toEqual([buildTag]);
+    expect(git(fx.origin, "rev-parse", MARKER)).toBe(fx.mergeSha);
   });
 
   test("a release whose package post-green already minted is tagged there, with no second package", () => {
@@ -398,17 +395,80 @@ describe("packageRelease", () => {
   });
 
   test.each<[tag: string, error: RegExp]>([
+    // A pre-release: no version ref derives from it.
     ["v2.1-rc.0", /not a vX\.Y\.Z release tag/],
-    // The shape release-please mints with include-component-in-tag on; the config keeps it off, and the hook refuses it either way.
-    ["github-settings-as-code-v2.1.0", /not a vX\.Y\.Z release tag/],
+    // The marker itself, unparsed: package takes the version tag resolve-source parsed from it.
+    ["source-v2.1.0", /not a vX\.Y\.Z release tag/],
     // Well-shaped, but not the version this source's manifest released.
     ["v2.2.0", /did not release/],
   ])("the tag %s mints nothing", (tag, error) => {
     const fx = seedFixture();
-    expect(() => packageRelease({ cwd: fx.work, tag, sourceSha: fx.mergeSha })).toThrow(error);
-    expect(remoteRef(fx, `refs/tags/${tag}`)).toBe("");
+    const pushes = withPushPlans(fx, [], () => {
+      expect(() => packageRelease({ cwd: fx.work, tag, sourceSha: fx.mergeSha })).toThrow(error);
+    });
+    expect(pushes).toEqual([]);
+    expect(git(fx.origin, "rev-parse", MARKER)).toBe(fx.mergeSha);
     expect(buildTags(fx)).toEqual([]);
   });
+
+  // release-please ignores a marker it could not create and reports nothing for one on another commit, so the hook
+  // holds the marker to the merge commit before its first push.
+  test.each<
+    [state: string, plant: (fx: Fixture) => string, repair: (fx: Fixture, at: string) => string]
+  >([
+    [
+      "missing on origin",
+      (fx) => {
+        git(fx.work, "push", "--quiet", "origin", `:${MARKER}`);
+        return "";
+      },
+      (fx) =>
+        `${MARKER} is missing on origin; release-please finds this release by that tag on the release merge ${fx.mergeSha}.\n` +
+        "Create it, then rerun this job:\n" +
+        `git push origin ${fx.mergeSha}:${MARKER}`,
+    ],
+    [
+      "on the packaged commit",
+      (fx) => {
+        const packaged = packageCommit({ cwd: fx.work, sourceSha: fx.mergeSha }).commit;
+        git(fx.work, "push", "--quiet", "--force", "origin", `${packaged}:${MARKER}`);
+        return packaged;
+      },
+      (fx, at) =>
+        `${MARKER} points at ${at}, not at the release merge ${fx.mergeSha}; release-please would start the next changelog from the wrong commit.\n` +
+        "Move it as a repository admin (the source-tags ruleset freezes it), then rerun this job:\n" +
+        `git push --force origin ${fx.mergeSha}:${MARKER}`,
+    ],
+    [
+      "on another release's merge",
+      (fx) => {
+        git(fx.work, "push", "--quiet", "--force", "origin", `${fx.seedSha}:${MARKER}`);
+        return fx.seedSha;
+      },
+      (fx, at) =>
+        `${MARKER} points at ${at}, not at the release merge ${fx.mergeSha}; release-please would start the next changelog from the wrong commit.\n` +
+        "Move it as a repository admin (the source-tags ruleset freezes it), then rerun this job:\n" +
+        `git push --force origin ${fx.mergeSha}:${MARKER}`,
+    ],
+  ])(
+    "the marker %s stops the release before any push, naming its repair",
+    (_state, plant, repair) => {
+      const fx = seedFixture();
+      const at = plant(fx);
+      const release = checkoutOf(fx, "release", fx.mergeSha, "packaged-bundle-bytes-1\n");
+      let error: unknown;
+      const pushes = withPushPlans(fx, [], () => {
+        try {
+          packageRelease({ cwd: release, tag: "v2.1.0", sourceSha: fx.mergeSha });
+        } catch (thrown) {
+          error = thrown;
+        }
+      });
+      expect(error).toEqual(new Error(repair(fx, at)));
+      expect(pushes).toEqual([]);
+      expect(remoteRef(fx, TAG)).toBe("");
+    },
+  );
 
   // The build the packaged commit must carry, spoiled two ways; the shared check refuses both entry points before
   // any push. The entry shown for the empty file is git's empty blob at ls-tree's size column.
@@ -475,6 +535,7 @@ function prepareNextRelease(
   write(dir, ".release-please-manifest.json", `${JSON.stringify({ ".": version }, null, 2)}\n`);
   const mergeSha = commitAll(dir, `chore(main): release ${version} (#${prNumber})`);
   git(dir, "push", "--quiet", "origin", "HEAD:refs/heads/main");
+  pushMarker(dir, version, mergeSha);
   writeBuild(dir, bundle);
   return { dir, mergeSha };
 }
@@ -662,384 +723,6 @@ describe("retagMajor", () => {
   );
 });
 
-/** release-please's PR branch: manifest and changelog bumped to `version` on `from`; left unpushed for a competitor plan when `push` is false. */
-function createReleasePrBranch(
-  fx: Fixture,
-  from: string,
-  version: string,
-  push = true,
-): { dir: string; sha: string } {
-  const dir = clone(fx.root, fx.origin, `rp-branch-${version}-${from.slice(0, 7)}`);
-  git(dir, "checkout", "--quiet", "-B", "release-please--branches--main", from);
-  write(dir, ".release-please-manifest.json", `${JSON.stringify({ ".": version }, null, 2)}\n`);
-  write(
-    dir,
-    "CHANGELOG.md",
-    `# Changelog\n\n## [${version}](https://example.invalid/compare) (2026-08-14)\n\n### Bug Fixes\n\n* the fix ([abc1234](https://example.invalid/commit/abc1234))\n${CHANGELOG_21}`,
-  );
-  const sha = commitAll(dir, `chore(main): release ${version}`);
-  if (push) {
-    git(
-      dir,
-      "push",
-      "--quiet",
-      "--force",
-      "origin",
-      "HEAD:refs/heads/release-please--branches--main",
-    );
-  }
-  return { dir, sha };
-}
-
-function releasePrConfig(fx: Fixture, name: string): { boundary: string; manifest: string } {
-  const check = clone(fx.root, fx.origin, name);
-  git(check, "checkout", "--quiet", "release-please--branches--main");
-  const config = JSON.parse(readFileSync(join(check, "release-please-config.json"), "utf8")) as {
-    "last-release-sha": string;
-  };
-  return {
-    boundary: config["last-release-sha"],
-    manifest: readFileSync(join(check, ".release-please-manifest.json"), "utf8"),
-  };
-}
-
-describe("anchorReleasePr", () => {
-  test("the boundary lands inside the release PR branch and merges onto main", () => {
-    const fx = seedFixture();
-    const mainHead = fx.mergeSha;
-    createReleasePrBranch(fx, mainHead, "2.2.0");
-    const worker = clone(fx.root, fx.origin, "anchor-worker");
-    const result = anchorReleasePr({ cwd: worker, sourceSha: mainHead });
-    expect(result.changed).toBe(true);
-    expect(identityOf(worker, "HEAD")).toBe(BOT_IDENTITY);
-    expect(localIdentity(worker)).toBe(FIXTURE_IDENTITY);
-    const check = clone(fx.root, fx.origin, "anchor-check");
-    git(check, "checkout", "--quiet", "release-please--branches--main");
-    const config = JSON.parse(readFileSync(join(check, "release-please-config.json"), "utf8")) as {
-      "last-release-sha": string;
-    };
-    expect(config["last-release-sha"]).toBe(mainHead);
-    expect(readFileSync(join(check, ".release-please-manifest.json"), "utf8")).toContain("2.2.0");
-    const again = anchorReleasePr({
-      cwd: clone(fx.root, fx.origin, "anchor-again"),
-      sourceSha: mainHead,
-    });
-    expect(again.changed).toBe(false);
-    git(check, "checkout", "--quiet", "main");
-    git(check, "merge", "--quiet", "--squash", "release-please--branches--main");
-    git(check, "commit", "--quiet", "-m", "chore(main): release 2.2.0 (#60)");
-    git(check, "push", "--quiet", "origin", "HEAD:refs/heads/main");
-    expect(boundaryCheck(check).boundary).toBe(mainHead);
-  });
-
-  test("no release PR branch is a no-op", () => {
-    const fx = seedFixture();
-    const worker = clone(fx.root, fx.origin, "anchor-nobranch");
-    const result = anchorReleasePr({ cwd: worker, sourceSha: fx.mergeSha });
-    expect(result).toMatchObject({ changed: false, reason: "no release PR branch to anchor" });
-  });
-
-  test("a moved main makes the anchor defer to the newer run", () => {
-    const fx = seedFixture();
-    createReleasePrBranch(fx, fx.mergeSha, "2.2.0");
-    const mover = clone(fx.root, fx.origin, "anchor-mover");
-    write(mover, "src/marker.ts", "export const marker = 9;\n");
-    commitAll(mover, "fix: land after the anchor run started");
-    git(mover, "push", "--quiet", "origin", "HEAD:refs/heads/main");
-    const worker = clone(fx.root, fx.origin, "anchor-late");
-    const result = anchorReleasePr({ cwd: worker, sourceSha: fx.mergeSha });
-    expect(result.changed).toBe(false);
-    expect(result.reason).toContain("the newer run anchors");
-  });
-
-  test("a branch built on an older head is left for its own refresh to anchor", () => {
-    const fx = seedFixture();
-    // The branch was refreshed from the SEED while main moved on to the 2.1.0 merge; anchoring mergeSha would record a boundary its content was not
-    // computed from.
-    createReleasePrBranch(fx, fx.seedSha, "2.2.0");
-    const worker = clone(fx.root, fx.origin, "anchor-stale-branch");
-    const result = anchorReleasePr({ cwd: worker, sourceSha: fx.mergeSha });
-    expect(result.changed).toBe(false);
-    expect(result.reason).toContain("not built on this head");
-  });
-
-  test("a release-please refresh between anchors re-anchors from the same checkout", () => {
-    const fx = seedFixture();
-    createReleasePrBranch(fx, fx.mergeSha, "2.2.0");
-    const worker = clone(fx.root, fx.origin, "anchor-twice");
-    expect(anchorReleasePr({ cwd: worker, sourceSha: fx.mergeSha }).changed).toBe(true);
-    // The refresh force-push wipes the anchor commit; the SAME clone must fetch the rewritten branch (a locally checked-out branch would make git
-    // refuse the fetch).
-    createReleasePrBranch(fx, fx.mergeSha, "2.3.0");
-    expect(anchorReleasePr({ cwd: worker, sourceSha: fx.mergeSha }).changed).toBe(true);
-    expect(releasePrConfig(fx, "anchor-twice-check").boundary).toBe(fx.mergeSha);
-  });
-
-  test("a push overtaken by a refresh mid-anchor is reapplied on the refreshed branch", () => {
-    const fx = seedFixture();
-    createReleasePrBranch(fx, fx.mergeSha, "2.2.0");
-    const refresh = createReleasePrBranch(fx, fx.mergeSha, "2.3.0", false);
-    const worker = clone(fx.root, fx.origin, "anchor-raced");
-    let result: ReturnType<typeof anchorReleasePr> | undefined;
-    const pushes = withPushPlans(
-      fx,
-      [
-        {
-          competitor: {
-            from: refresh.dir,
-            sha: refresh.sha,
-            ref: "refs/heads/release-please--branches--main",
-          },
-        },
-      ],
-      () => {
-        result = anchorReleasePr({ cwd: worker, sourceSha: fx.mergeSha });
-      },
-    );
-    expect(result).toMatchObject({
-      changed: true,
-      reason: `release-please--branches--main: anchored at ${fx.mergeSha}`,
-    });
-    expect(pushes).toEqual([ANCHOR_PUSH, ANCHOR_PUSH]);
-    const anchored = releasePrConfig(fx, "anchor-raced-check");
-    expect(anchored.boundary).toBe(fx.mergeSha);
-    expect(anchored.manifest).toContain("2.3.0");
-    expect(git(fx.origin, "rev-parse", "refs/heads/release-please--branches--main^")).toBe(
-      refresh.sha,
-    );
-  });
-
-  test("a push overtaken on every attempt gives up naming the rewriter", () => {
-    const fx = seedFixture();
-    createReleasePrBranch(fx, fx.mergeSha, "2.2.0");
-    const refreshes = ["2.3.0", "2.4.0", "2.5.0"].map((v) =>
-      createReleasePrBranch(fx, fx.mergeSha, v, false),
-    );
-    const worker = clone(fx.root, fx.origin, "anchor-lost");
-    const pushes = withPushPlans(
-      fx,
-      refreshes.map((r) => ({
-        competitor: { from: r.dir, sha: r.sha, ref: "refs/heads/release-please--branches--main" },
-      })),
-      () => {
-        expect(() => anchorReleasePr({ cwd: worker, sourceSha: fx.mergeSha })).toThrow(
-          "could not anchor release-please--branches--main after 3 attempts; something keeps rewriting the branch - rerun this job once the branch settles.",
-        );
-      },
-    );
-    expect(pushes).toEqual([ANCHOR_PUSH, ANCHOR_PUSH, ANCHOR_PUSH]);
-    expect(git(fx.origin, "rev-parse", "refs/heads/release-please--branches--main")).toBe(
-      refreshes[2]?.sha ?? "",
-    );
-  });
-
-  test.each(PERMANENT)(
-    "%s fails the first anchor push for good, with git's own words",
-    (_name, stderr) => {
-      const fx = seedFixture();
-      const branch = createReleasePrBranch(fx, fx.mergeSha, "2.2.0");
-      const worker = clone(fx.root, fx.origin, "anchor-denied");
-      let error: unknown;
-      const pushes = withPushPlans(fx, [{ fail: { stderr, status: 128 } }], () => {
-        try {
-          anchorReleasePr({ cwd: worker, sourceSha: fx.mergeSha });
-        } catch (thrown) {
-          error = thrown;
-        }
-      });
-      expect(pushes).toEqual([ANCHOR_PUSH]);
-      expect(error).toEqual(
-        new Error(
-          `git push origin HEAD:refs/heads/release-please--branches--main failed: ${stderr.trim()}`,
-        ),
-      );
-      expect(git(fx.origin, "rev-parse", "refs/heads/release-please--branches--main")).toBe(
-        branch.sha,
-      );
-    },
-  );
-});
-
-describe("boundaryCheck", () => {
-  test("a boundary equal to the newest release merge passes", () => {
-    const fx = seedFixture();
-    const dir = clone(fx.root, fx.origin, "boundary-eq");
-    write(
-      dir,
-      "release-please-config.json",
-      `${JSON.stringify(
-        {
-          "last-release-sha": fx.mergeSha,
-          packages: { ".": { "release-type": "simple", draft: true } },
-        },
-        null,
-        2,
-      )}\n`,
-    );
-    commitAll(dir, "chore: align the fixture boundary");
-    expect(boundaryCheck(dir).boundary).toBe(fx.mergeSha);
-  });
-
-  test("a stale boundary fails loudly with the repair value", () => {
-    const fx = seedFixture();
-    // The seed fixture's config records a placeholder, not the 2.1.0 merge.
-    expect(() => boundaryCheck(fx.work)).toThrow(/stale boundary|set last-release-sha/);
-  });
-
-  test("a history without release merges and no recorded boundary is pre-first-release", () => {
-    const fx = seedFixture();
-    const dir = clone(fx.root, fx.origin, "boundary-none");
-    git(dir, "checkout", "--quiet", fx.seedSha);
-    write(
-      dir,
-      "release-please-config.json",
-      `${JSON.stringify({ packages: { ".": { "release-type": "simple", draft: true } } }, null, 2)}\n`,
-    );
-    commitAll(dir, "chore: bootstrap release-please before any release");
-    expect(boundaryCheck(dir).boundary).toContain("no release merge");
-  });
-
-  test("a recorded boundary that is not on this history fails naming that", () => {
-    const fx = seedFixture();
-    const dir = clone(fx.root, fx.origin, "boundary-foreign");
-    // The seed commit records a placeholder boundary and has no release merge behind it.
-    git(dir, "checkout", "--quiet", fx.seedSha);
-    expect(() => boundaryCheck(dir)).toThrow(/not on this history at all/);
-  });
-
-  test("a shallow checkout is refused before any verdict", () => {
-    const fx = seedFixture();
-    // The release merge is within depth 2 but its parent, the recorded boundary, is not: a truncated history would call it stale.
-    write(
-      fx.work,
-      "release-please-config.json",
-      `${JSON.stringify(
-        {
-          "last-release-sha": fx.seedSha,
-          packages: { ".": { "release-type": "simple", draft: true } },
-        },
-        null,
-        2,
-      )}\n`,
-    );
-    commitAll(fx.work, "chore: align the fixture boundary");
-    git(fx.work, "push", "--quiet", "origin", "HEAD:refs/heads/main");
-    const dir = join(fx.root, "boundary-shallow");
-    execFileSync("git", ["clone", "--quiet", "--depth", "2", `file://${fx.origin}`, dir]);
-    expect(() => boundaryCheck(dir)).toThrow(/needs the full history.*shallow/);
-  });
-
-  test("a complete history holding the boundary but no recognizable merge names the matcher", () => {
-    const fx = seedFixture();
-    const dir = clone(fx.root, fx.origin, "boundary-drift");
-    git(dir, "checkout", "--quiet", fx.seedSha);
-    write(
-      dir,
-      "release-please-config.json",
-      `${JSON.stringify(
-        {
-          "last-release-sha": fx.seedSha,
-          packages: { ".": { "release-type": "simple", draft: true } },
-        },
-        null,
-        2,
-      )}\n`,
-    );
-    commitAll(dir, "chore(main): release: 2.1.0 (#42)");
-    expect(() => boundaryCheck(dir)).toThrow(/history holds it.*RELEASE_SUBJECT/);
-  });
-
-  test("a boundary newer than the newest recognized merge is drift, not a rollback", () => {
-    const fx = seedFixture();
-    const dir = clone(fx.root, fx.origin, "boundary-newer");
-    write(dir, "src/marker.ts", "export const marker = 3;\n");
-    const between = commitAll(dir, "feat: land between two releases");
-    // The 2.2.0 release PR merged under a subject RELEASE_SUBJECT does not match, so the 2.1.0 merge stays the newest recognized one while the
-    // boundary sits after it.
-    write(dir, ".release-please-manifest.json", `${JSON.stringify({ ".": "2.2.0" }, null, 2)}\n`);
-    write(
-      dir,
-      "release-please-config.json",
-      `${JSON.stringify(
-        {
-          "last-release-sha": between,
-          packages: { ".": { "release-type": "simple", draft: true } },
-        },
-        null,
-        2,
-      )}\n`,
-    );
-    commitAll(dir, "chore(main): release v2.2.0 (#43)");
-    expect(() => boundaryCheck(dir)).toThrow(/NEWER than.*must not be rolled back/);
-  });
-
-  test("a boundary on an unmerged branch is stale, not newer", () => {
-    const fx = seedFixture();
-    const dir = clone(fx.root, fx.origin, "boundary-off-main");
-    // A descendant of the release merge that never landed on main: the stale message's rollback IS the repair.
-    git(dir, "checkout", "--quiet", "-b", "side");
-    write(dir, "src/marker.ts", "export const marker = 4;\n");
-    const offMain = commitAll(dir, "feat: never merged");
-    git(dir, "checkout", "--quiet", "main");
-    write(
-      dir,
-      "release-please-config.json",
-      `${JSON.stringify(
-        {
-          "last-release-sha": offMain,
-          packages: { ".": { "release-type": "simple", draft: true } },
-        },
-        null,
-        2,
-      )}\n`,
-    );
-    commitAll(dir, "chore: record a boundary from the wrong branch");
-    expect(() => boundaryCheck(dir)).toThrow(/stale boundary.*set last-release-sha/);
-  });
-
-  test("a subject that only shares the release prefix is not a release merge", () => {
-    const fx = seedFixture();
-    const dir = clone(fx.root, fx.origin, "boundary-decoy");
-    write(
-      dir,
-      "release-please-config.json",
-      `${JSON.stringify(
-        {
-          "last-release-sha": fx.mergeSha,
-          packages: { ".": { "release-type": "simple", draft: true } },
-        },
-        null,
-        2,
-      )}\n`,
-    );
-    commitAll(dir, "chore: align the fixture boundary");
-    // Newer than the release merge and sharing its prefix, but not its shape: must neither become the boundary nor park the check.
-    write(dir, "src/marker.ts", "export const marker = 7;\n");
-    commitAll(dir, "chore(main): release pipeline documentation");
-    expect(boundaryCheck(dir).boundary).toBe(fx.mergeSha);
-  });
-});
-
-describe("anchorCheck", () => {
-  test("a release PR whose anchor is missing is unmergeable", () => {
-    const fx = seedFixture();
-    createReleasePrBranch(fx, fx.mergeSha, "2.2.0");
-    const pr = clone(fx.root, fx.origin, "anchor-check-missing");
-    git(pr, "checkout", "--quiet", "release-please--branches--main");
-    expect(() => anchorCheck(pr)).toThrow(/anchor is missing or stale/);
-  });
-
-  test("an anchored release PR passes", () => {
-    const fx = seedFixture();
-    createReleasePrBranch(fx, fx.mergeSha, "2.2.0");
-    const worker = clone(fx.root, fx.origin, "anchor-check-worker");
-    expect(anchorReleasePr({ cwd: worker, sourceSha: fx.mergeSha }).changed).toBe(true);
-    const pr = clone(fx.root, fx.origin, "anchor-check-ok");
-    git(pr, "checkout", "--quiet", "release-please--branches--main");
-    expect(anchorCheck(pr).boundary).toBe(fx.mergeSha);
-  });
-});
-
 describe("the release hook's reads of the draft", () => {
   /** A gh first on PATH that logs its argv and answers with the planned stdout, or the planned stderr and status. */
   type Gh = { stdout?: string; stderr?: string; status?: number };
@@ -1065,7 +748,12 @@ describe("the release hook's reads of the draft", () => {
         "release-pipeline",
         ROOT,
         join(dir, "runner"),
-        { TAG: "v2.1.0", ...env, PATH: `${bin}:${process.env.PATH ?? ""}` },
+        {
+          MARKER: "source-v2.1.0",
+          TAG: "v2.1.0",
+          ...env,
+          PATH: `${bin}:${process.env.PATH ?? ""}`,
+        },
         subcommand,
       );
       const log = join(dir, "calls.log");
@@ -1074,13 +762,17 @@ describe("the release hook's reads of the draft", () => {
     });
   }
   const sha = "b8df084c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a";
-  const VIEW_SOURCE = "release view v2.1.0 --json targetCommitish --jq .targetCommitish";
-  const VIEW_ASSETS = "release view v2.1.0 --json assets";
+  const VIEW_SOURCE = "release view source-v2.1.0 --json isDraft,targetCommitish";
+  const VIEW_ASSETS = "release view source-v2.1.0 --json assets";
+  const RENAME = "release edit source-v2.1.0 --tag v2.1.0 --title v2.1.0 --verify-tag";
+  /** gh's answer to VIEW_SOURCE, as it prints the two fields. */
+  const release = (isDraft: boolean, targetCommitish: string): string =>
+    `${JSON.stringify({ isDraft, targetCommitish })}\n`;
   const assets = (...names: string[]): string =>
     `${JSON.stringify({ assets: names.map((name) => ({ name })) })}\n`;
 
   // The whole step per case: what gh was asked, what the step printed and wrote, and how it ended. The draft is
-  // read by tag alone, and a refusal is the annotation the shell step printed.
+  // read and renamed under the name release-please gave it, and a refusal is the annotation the shell step printed.
   test.each<
     [
       name: string,
@@ -1096,18 +788,26 @@ describe("the release hook's reads of the draft", () => {
     ]
   >([
     [
-      "resolve-source: a draft targeting the merge commit writes it as the step output",
+      "resolve-source: a draft targeting the merge commit writes it and the version tag source-v2.1.0 names as the step outputs",
       "resolve-source",
-      { stdout: `${sha}\n` },
-      { stdout: "", stderr: "", status: 0, outputs: [`sha=${sha}`], calls: [VIEW_SOURCE] },
+      { stdout: release(true, sha) },
+      {
+        stdout: "",
+        stderr: "",
+        status: 0,
+        outputs: [`sha=${sha}`, "tag=v2.1.0"],
+        calls: [VIEW_SOURCE],
+      },
     ],
     [
-      "resolve-source: a draft targeting a branch name is refused before anything checks it out",
+      // release-please publishes the release itself under `"draft": false`, before this hook runs.
+      "resolve-source: a published release is refused where a draft passes, naming the config key that hands the hook a draft",
       "resolve-source",
-      { stdout: "main\n" },
+      { stdout: release(false, sha) },
       {
         stdout:
-          "::error::draft v2.1.0's target commitish is 'main', not a commit SHA; refusing to package an unidentified source.\n",
+          "::error::release source-v2.1.0 is published, not a draft: users already see the marker's name as a release, so nothing is packaged from it.\n" +
+          'Fix release-please-config.json by PR: "draft": true on package ".".\n',
         stderr: "",
         status: 1,
         outputs: [],
@@ -1115,10 +815,44 @@ describe("the release hook's reads of the draft", () => {
       },
     ],
     [
-      "resolve-source: a gh that fails ends the step with its status and stderr, writing no output",
+      "resolve-source: a draft targeting a branch name is refused before anything checks it out",
       "resolve-source",
-      { stderr: "release not found\n", status: 4 },
-      { stdout: "", stderr: "release not found\n", status: 4, outputs: [], calls: [VIEW_SOURCE] },
+      { stdout: release(true, "main") },
+      {
+        stdout:
+          "::error::draft source-v2.1.0's target commitish is 'main', not a commit SHA; refusing to package an unidentified source.\n",
+        stderr: "",
+        status: 1,
+        outputs: [],
+        calls: [VIEW_SOURCE],
+      },
+    ],
+    [
+      // The hook's rename leaves no release under the marker's name, so a job re-run after it lands here.
+      "resolve-source: gh finding no release under the handed name is said in the hook's words, pointing at the renamed release",
+      "resolve-source",
+      { stderr: "release not found\n", status: 1 },
+      {
+        stdout:
+          "::error::no release is named source-v2.1.0.\n" +
+          "If the release v2.1.0 exists, the hook already renamed the draft and this job is done: do not re-run it.\n",
+        stderr: "",
+        status: 1,
+        outputs: [],
+        calls: [VIEW_SOURCE],
+      },
+    ],
+    [
+      "resolve-source: any other gh failure ends the step with gh's status and stderr, writing no output",
+      "resolve-source",
+      { stderr: "HTTP 502: Bad Gateway (https://api.github.com/graphql)\n", status: 4 },
+      {
+        stdout: "",
+        stderr: "HTTP 502: Bad Gateway (https://api.github.com/graphql)\n",
+        status: 4,
+        outputs: [],
+        calls: [VIEW_SOURCE],
+      },
     ],
     [
       "verify-assets: both packaged assets beside the attestation pass silently",
@@ -1132,7 +866,7 @@ describe("the release hook's reads of the draft", () => {
       { stdout: assets("index.js") },
       {
         stdout:
-          "::error::release v2.1.0 carries assets [index.js], expected [index.js settings.schema.json]; " +
+          "::error::release source-v2.1.0 carries assets [index.js], expected [index.js settings.schema.json]; " +
           "re-run package-release before anything publishes.\n",
         stderr: "",
         status: 1,
@@ -1146,7 +880,7 @@ describe("the release hook's reads of the draft", () => {
       { stdout: assets() },
       {
         stdout:
-          "::error::release v2.1.0 carries assets [], expected [index.js settings.schema.json]; " +
+          "::error::release source-v2.1.0 carries assets [], expected [index.js settings.schema.json]; " +
           "re-run package-release before anything publishes.\n",
         stderr: "",
         status: 1,
@@ -1160,7 +894,7 @@ describe("the release hook's reads of the draft", () => {
       { stdout: assets("index.js", "settings.schema.json", "extra.txt") },
       {
         stdout:
-          "::error::release v2.1.0 carries assets [extra.txt index.js settings.schema.json], expected " +
+          "::error::release source-v2.1.0 carries assets [extra.txt index.js settings.schema.json], expected " +
           "[index.js settings.schema.json]; re-run package-release before anything publishes.\n",
         stderr: "",
         status: 1,
@@ -1174,84 +908,115 @@ describe("the release hook's reads of the draft", () => {
       { stderr: "release not found\n", status: 4 },
       { stdout: "", stderr: "release not found\n", status: 4, outputs: [], calls: [VIEW_ASSETS] },
     ],
+    [
+      "rename-draft: the draft takes the version tag as its tag and title, held to a tag origin has, and the step logs both names",
+      "rename-draft",
+      {},
+      {
+        stdout: "",
+        stderr: "release source-v2.1.0 now carries tag v2.1.0 and title v2.1.0\n",
+        status: 0,
+        outputs: [],
+        calls: [RENAME],
+      },
+    ],
+    [
+      "rename-draft: a gh that fails ends the step with its status and stderr",
+      "rename-draft",
+      {
+        stderr: "tag v2.1.0 doesn't exist in the repo o/r, aborting due to --verify-tag flag\n",
+        status: 1,
+      },
+      {
+        stdout: "",
+        stderr: "tag v2.1.0 doesn't exist in the repo o/r, aborting due to --verify-tag flag\n",
+        status: 1,
+        outputs: [],
+        calls: [RENAME],
+      },
+    ],
   ])("%s", async (_name, subcommand, gh, expected) => {
     expect(await runWithGh(gh, {}, subcommand)).toEqual(expected);
   });
 
-  test.each(["resolve-source", "verify-assets"])(
-    "%s without TAG is refused before gh is asked",
-    async (subcommand) => {
-      expect(await runWithGh({ stdout: `${sha}\n` }, { TAG: undefined }, subcommand)).toEqual({
+  test.each<[subcommand: string, unset: string]>([
+    ["resolve-source", "MARKER"],
+    ["verify-assets", "MARKER"],
+  ])("%s without %s is refused before gh is asked", async (subcommand, unset) => {
+    expect(
+      await runWithGh({ stdout: release(true, sha) }, { [unset]: undefined }, subcommand),
+    ).toEqual({
+      stdout: "",
+      stderr: `${unset} must be set for this step\n`,
+      status: 1,
+      outputs: [],
+      calls: [],
+    });
+  });
+
+  test.each<[what: string, handed: string]>([
+    ["the version tag itself", "v2.1.0"],
+    ["a name without the v", "source-2.1.0"],
+    ["another component's tag", "other-v2.1.0"],
+    ["a pre-release", "source-v2.1.0-rc.1"],
+    ["a two-part version", "source-v2.1"],
+    ["a word that is no tag", "release"],
+  ])(
+    "resolve-source: handed %s, it refuses the name before gh is asked and derives no version tag",
+    async (_what, handed) => {
+      expect(
+        await runWithGh({ stdout: release(true, sha) }, { MARKER: handed }, "resolve-source"),
+      ).toEqual({
         stdout: "",
-        stderr: "TAG must be set for this step\n",
+        stderr:
+          `release-pipeline resolve-source: the handed tag "${handed}" is not source-vX.Y.Z, the name release-please gives a release here; ` +
+          "refusing to derive a version tag from it.\n" +
+          'Fix release-please-config.json by PR: "include-component-in-tag": true at the top, "component": "source" on package ".".\n',
         status: 1,
         outputs: [],
         calls: [],
       });
     },
   );
-});
 
-describe("the release-please config", () => {
-  const malformed: [string, string, RegExp][] = [
-    ["not JSON", "{ not json\n", /^release-please-config\.json is not valid JSON \(/],
-    ["a JSON array", "[]\n", /^release-please-config\.json holds an array, not a JSON object;/],
-    [
-      "a boundary that is not a commit sha",
-      `${JSON.stringify({ "last-release-sha": 42, packages: {} })}\n`,
-      /^last-release-sha in release-please-config\.json is 42, not a 40-hex commit sha;/,
-    ],
-  ];
-  test.each(malformed)(
-    "a config that is %s is refused naming the file by every subcommand that reads it",
-    (_name, text, error) => {
-      const fx = seedFixture();
-      createReleasePrBranch(fx, fx.mergeSha, "2.2.0");
-      const checker = clone(fx.root, fx.origin, "config-boundary");
-      write(checker, "release-please-config.json", text);
-      expect(() => boundaryCheck(checker)).toThrow(error);
-      const pr = clone(fx.root, fx.origin, "config-anchor-check");
-      git(pr, "checkout", "--quiet", "release-please--branches--main");
-      write(pr, "release-please-config.json", text);
-      expect(() => anchorCheck(pr)).toThrow(error);
-      const branch = clone(fx.root, fx.origin, "config-branch");
-      git(branch, "checkout", "--quiet", "release-please--branches--main");
-      write(branch, "release-please-config.json", text);
-      commitAll(branch, "chore: a config release-please would not write");
-      git(branch, "push", "--quiet", "origin", "HEAD:refs/heads/release-please--branches--main");
-      const worker = clone(fx.root, fx.origin, "config-anchor");
-      expect(() => anchorReleasePr({ cwd: worker, sourceSha: fx.mergeSha })).toThrow(error);
-    },
-  );
-
-  test("a missing config is refused naming the file and where it was looked for", () => {
+  test("handed source-v2.1.0, the hook mints v2.1.0 on the merge commit's package and pushes no source-v* tag", async () => {
     const fx = seedFixture();
-    const checker = clone(fx.root, fx.origin, "config-missing");
-    rmSync(join(checker, "release-please-config.json"));
-    expect(() => boundaryCheck(checker)).toThrow(
-      `release-please-config.json is missing from ${checker}; the release pipeline reads ` +
-        "release-please's boundary (last-release-sha) from it. Restore it by PR.",
-    );
+    const resolved = await runWithGh({ stdout: release(true, fx.mergeSha) }, {}, "resolve-source");
+    expect(resolved.outputs).toEqual([`sha=${fx.mergeSha}`, "tag=v2.1.0"]);
+    const [sourceSha = "", tag = ""] = resolved.outputs.map((line) => line.slice(4));
+    let step: ReturnType<typeof runStep> | undefined;
+    const pushes = withPushPlans(fx, [], () => {
+      step = runStep(
+        "release-pipeline",
+        fx.work,
+        join(fx.root, "runner"),
+        { TAG: tag, GITHUB_SHA: sourceSha, RUN_URL: undefined },
+        "package",
+      );
+    });
+    expect(step?.status, step?.stderr).toBe(0);
+    const packaged = git(fx.origin, "rev-parse", `${TAG}^{}`);
+    expect(parentsOf(fx.origin, packaged)).toEqual([fx.mergeSha]);
+    expect(pushes).toEqual([
+      createOf(packaged, buildTagOf(fx, fx.mergeSha)),
+      createOf(packaged, TAG),
+      moveOf(LATEST, "", packaged),
+    ]);
+    expect(git(fx.origin, "rev-parse", MARKER)).toBe(fx.mergeSha);
   });
 });
 
 describe("release configuration contract", () => {
-  test("release-please cuts a tagless draft and leaves the release to the hook: no tag ever lands on main, and the release job runs from the hook", () => {
-    // An external tool's knobs the platform does not enforce: a tag release-please created would sit on main, and
-    // skip-github-release would leave release_created unfired, so the hook that packages and tags never runs.
-    // release-please resolves each knob per package first, then from the top level, then its default.
-    const config = JSON.parse(readFileSync(join(ROOT, "release-please-config.json"), "utf8")) as {
-      "skip-github-release"?: boolean;
-      packages: Record<
-        string,
-        { draft?: boolean; "force-tag-creation"?: boolean; "skip-github-release"?: boolean }
-      >;
-    };
+  test("the name release-please gives a release under release-please-config.json is one the hook parses", () => {
+    // release-please names the root package's tag <component>-v<version> when the component is in the tag, else
+    // v<version>; it reads each key per package first, then from the top level, and puts the component in by default.
+    type Naming = { "include-component-in-tag"?: boolean; component?: string };
+    const config = JSON.parse(
+      readFileSync(join(ROOT, "release-please-config.json"), "utf8"),
+    ) as Naming & { packages: Record<string, Naming> };
     const root = config.packages["."];
-    expect({
-      draft: root?.draft,
-      forceTagCreation: root?.["force-tag-creation"],
-      skipGithubRelease: root?.["skip-github-release"] ?? config["skip-github-release"] ?? false,
-    }).toEqual({ draft: true, forceTagCreation: false, skipGithubRelease: false });
+    const inTag = root?.["include-component-in-tag"] ?? config["include-component-in-tag"] ?? true;
+    const name = inTag && root?.component ? `${root.component}-v1.2.3` : "v1.2.3";
+    expect(versionTagOf(name)).toBe("v1.2.3");
   });
 });

@@ -2,7 +2,8 @@
  * The packaged commits and the refs that name them: a main commit's package under its build tag, the version tag
  * minted once on the release's package, and the pointers (latest, vX) that move forward along main alone. Every
  * push is a create-once, a lease, or the prune's deletion, and a refused one is judged by re-reading origin, never
- * by git's words.
+ * by git's words. The marker, release-please's own tag source-vX.Y.Z on a release's merge commit, is parsed and
+ * checked here and never pushed.
  */
 
 import { execFileSync } from "node:child_process";
@@ -54,6 +55,12 @@ const TAG_FETCH = ["--filter=blob:none"];
 /** Reads of a ref that keeps moving before a run gives up. */
 const PUSH_ATTEMPTS = 3;
 
+/** The marker's prefix: release-please creates `source-vX.Y.Z` on a release's merge commit on main and finds its previous release by it. */
+const MARKER_PREFIX = "source-";
+
+/** A marker's name, capturing the version tag it names. */
+const MARKER = new RegExp(`^${MARKER_PREFIX}(v\\d+\\.\\d+\\.\\d+)$`);
+
 /** Every ref derivation passes through this parse, so a malformed tag stops the pipeline instead of minting "v2"
  * from "v2.1-rc.0". */
 function releaseMajor(tag: string): string {
@@ -64,6 +71,19 @@ function releaseMajor(tag: string): string {
     );
   }
   return `v${match[1]}`;
+}
+
+/** The version tag a marker names (`source-v1.2.3` gives `v1.2.3`): the one parse of the tag the release hook is
+ * handed. Any other name is refused, so no ref derives from a name release-please's config stopped producing. */
+export function versionTagOf(handed: string): string {
+  const tag = handed.match(MARKER)?.[1];
+  if (tag === undefined) {
+    throw new Error(
+      `the handed tag ${JSON.stringify(handed)} is not ${MARKER_PREFIX}vX.Y.Z, the name release-please gives a release here; refusing to derive a version tag from it.\n` +
+        'Fix release-please-config.json by PR: "include-component-in-tag": true at the top, "component": "source" on package ".".',
+    );
+  }
+  return tag;
 }
 
 /** The required build files as non-empty REGULAR files: a symlink or a gitlink at that path has a size too, and no build. */
@@ -486,7 +506,7 @@ interface PackageOptions {
   /** The checkout, at the merge commit with the bundle built. */
   cwd: string;
 
-  /** The release's vX.Y.Z tag, as release-please cut the draft. */
+  /** The release's vX.Y.Z tag: the version tag the draft's marker name gives. */
   tag: string;
 
   /** The release's merge commit, resolved from the draft (not necessarily this run's own push); the tag's recorded source. */
@@ -508,6 +528,27 @@ interface PackagedRelease {
 
   /** latest's move: forward to this package, or left where it is. */
   latest: PointerMove;
+}
+
+/** The marker of the release `tag` names must sit on its merge commit: release-please starts the next changelog at
+ * the marker, ignores a marker it could not create, and reports nothing for one on another commit. packageRelease
+ * calls this before its first push, and each refusal names the push that repairs it. */
+function assertMarker(cwd: string, tag: string, sourceSha: string): void {
+  const ref = `refs/tags/${MARKER_PREFIX}${tag}`;
+  const at = observeRemote(cwd, ref).peeled;
+  if (at === sourceSha) {
+    return;
+  }
+  if (at === "") {
+    throw new Error(
+      `${ref} is missing on origin; release-please finds this release by that tag on the release merge ${sourceSha}.\n` +
+        `Create it, then rerun this job:\ngit push origin ${sourceSha}:${ref}`,
+    );
+  }
+  throw new Error(
+    `${ref} points at ${at}, not at the release merge ${sourceSha}; release-please would start the next changelog from the wrong commit.\n` +
+      `Move it as a repository admin (the source-tags ruleset freezes it), then rerun this job:\ngit push --force origin ${sourceSha}:${ref}`,
+  );
 }
 
 export const FROZEN =
@@ -540,6 +581,7 @@ export function packageRelease(options: PackageOptions): PackagedRelease {
     );
   }
   assertOnMain(cwd, sourceSha, "package, tag, or publish a commit main does not hold");
+  assertMarker(cwd, tag, sourceSha);
   const ref = `refs/tags/${tag}`;
   const tagged = ensureTag(
     cwd,

@@ -252,7 +252,7 @@ const PACKAGED_DIFF =
   "lib/index.js\nlib/pkg/index.d.ts\nlib/pkg/index.js\nlib/settings.schema.json\npackage.json";
 
 /** The changelog release-please writes for a 2.1.0 release. */
-export const CHANGELOG_21 = `# Changelog
+const CHANGELOG_21 = `# Changelog
 
 ## [2.1.0](https://example.invalid/compare/v2.0.0...v2.1.0) (2026-08-14)
 
@@ -323,9 +323,14 @@ export function expectPackage(
   expect(identityOf(fx.origin, packaged)).toBe(BOT_IDENTITY);
 }
 
+/** The marker: release-please's own tag for a release, as its cut creates it on the merge commit before the hook runs. */
+export function pushMarker(cwd: string, version: string, sha: string): void {
+  git(cwd, "push", "--quiet", "origin", `${sha}:refs/tags/source-v${version}`);
+}
+
 /**
- * origin/main at the 2.0.0 release (seed) plus the squash-merged 2.1.0 release PR, with the bundle freshly "built" in the work clone: the state the
- * packaging job sees.
+ * origin/main at the 2.0.0 release (seed) plus the squash-merged 2.1.0 release PR under its marker, with the bundle freshly "built" in the
+ * work clone: the state the packaging job sees.
  */
 export function seedFixture(): Fixture {
   const root = mkdtempSync(join(tmpdir(), FIXTURE_PREFIX));
@@ -340,14 +345,7 @@ export function seedFixture(): Fixture {
   write(
     work,
     "release-please-config.json",
-    `${JSON.stringify(
-      {
-        "last-release-sha": "0000000000000000000000000000000000000000",
-        packages: { ".": { "release-type": "simple", draft: true } },
-      },
-      null,
-      2,
-    )}\n`,
+    `${JSON.stringify({ packages: { ".": { "release-type": "simple", draft: true } } }, null, 2)}\n`,
   );
   write(work, "CHANGELOG.md", CHANGELOG_21.replace(/## \[2\.1\.0\][\s\S]*?\n\n## /, "## "));
   // A workflow file rides along in every packaged commit: its parent is the source, so no diff GitHub judges shows a workflow change.
@@ -361,6 +359,7 @@ export function seedFixture(): Fixture {
   write(work, "package.json", manifestJson("2.1.0"));
   const mergeSha = commitAll(work, "chore(main): release 2.1.0 (#42)");
   git(work, "push", "--quiet", "origin", "HEAD:refs/heads/main");
+  pushMarker(work, "2.1.0", mergeSha);
   writeBuild(work, "packaged-bundle-bytes-1\n");
   return { root, origin, work, seedSha, mergeSha };
 }
@@ -703,9 +702,6 @@ export function originHooks(fx: Fixture, hooks: { "pre-receive"?: string; update
 
 /** The moving pointer's ref. */
 export const LATEST = "refs/tags/latest";
-
-/** The anchor push, as the shim logs it. */
-export const ANCHOR_PUSH = ["push", "origin", "HEAD:refs/heads/release-please--branches--main"];
 
 /** A create-once push of `commit` to `ref`, as the shim logs it. */
 export const createOf = (commit: string, ref: string): string[] => [

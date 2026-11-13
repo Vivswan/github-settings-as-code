@@ -1,28 +1,29 @@
 # The update stage of the release pipeline: repo-owned, called by the managed ci.yml between release-please
-# cutting the DRAFT release and the attested publish. This hook, not release-please, mints the tag: main is
-# source-only, so every consumable ref must point at a packaged commit, the merge commit's child carrying its build
-# (the topology is in .github/scripts/release-pipeline/tags.ts; release-please-config.json sets `draft` and pins
-# `force-tag-creation` off).
+# cutting the DRAFT release and the attested publish. release-please names the draft source-vX.Y.Z and creates that
+# tag, the marker, on the merge commit on main (release-please-config.json: `draft`, `force-tag-creation`, component
+# `source`); it finds its previous release by it. This hook mints the tags a user pins: main is source-only, so each
+# points at a packaged commit, the merge commit's child carrying its build (the topology is in
+# .github/scripts/release-pipeline/tags.ts).
 #
-#   resolve the merge commit from the draft's target commitish -> build the bundle, the schema, and the library
-#   package      -> find or mint the merge commit's packaged commit under its build tag, mint vX.Y.Z there ONCE, move latest forward
-#   retag-major  -> move vX there (forward only), then upload bundle and schema to the draft (a published release freezes its assets)
-#   verify-release -> confirm the draft's assets; the managed publish stage then attests and flips the release live
-#   publish-npm  -> publish the library build to npm as the stable version through trusted publishing, once the assets check out
+#   resolve-source -> the handed source-vX.Y.Z parsed ONCE into vX.Y.Z, and the merge commit read from the draft's target commitish
+#   package        -> the marker held to the merge commit, then its packaged commit found or minted under its build tag, vX.Y.Z minted there ONCE, latest moved forward
+#   retag-major    -> move vX there (forward only), then upload bundle and schema to the draft (a published release freezes its assets)
+#   verify-release -> confirm the draft's assets, then give the draft vX.Y.Z as its tag and title; the managed publish stage attests and publishes it
+#   publish-npm    -> publish the library build to npm as the stable version through trusted publishing, once the assets check out
 #
 # Only ci.yml reaches this workflow, with the tag release-please just cut from its own merged PR, so a hand-edited
-# manifest never mints a tag. A rerun converges: a version npm already holds is skipped, and once a NEWER release
-# shipped, the major stays on it.
+# manifest never mints a tag. A rerun of the failed jobs converges: a version npm already holds is skipped, and once a
+# NEWER release shipped, the major stays on it. The draft answers to source-vX.Y.Z until the rename, to vX.Y.Z after.
 
 # Finishing a dead run by hand (prefer re-running its FAILED jobs: a hand run has no attestation.json, a packaged
-# commit it mints carries no run trailer, and the npm publish has no hand path at all, only the workflow's OIDC
-# identity may publish). NEVER publish before `package` has minted the tag: a tagless draft makes GitHub create
-# vX.Y.Z lazily on main.
+# commit it mints carries no run trailer, and only the workflow's OIDC identity may publish to npm). NEVER rename or
+# publish the draft before `package` has minted the tag: GitHub creates a missing vX.Y.Z on main when the draft publishes.
 #   git checkout <merge sha>                    (the draft's target commitish)
 #   bun install --frozen-lockfile --ignore-scripts && bun run build
 #   TAG=vX.Y.Z GITHUB_SHA=<merge sha> bun .github/scripts/release-pipeline.ts package
 #   TAG=vX.Y.Z GITHUB_SHA=<merge sha> bun .github/scripts/release-pipeline.ts retag-major
-#   gh release upload vX.Y.Z lib/settings.schema.json lib/index.js --clobber
+#   gh release upload source-vX.Y.Z lib/settings.schema.json lib/index.js --clobber
+#   MARKER=source-vX.Y.Z TAG=vX.Y.Z bun .github/scripts/release-pipeline.ts rename-draft
 #   gh release edit vX.Y.Z --draft=false
 
 name: Update Release
@@ -31,7 +32,7 @@ on:
   workflow_call:
     inputs:
       tag:
-        description: The draft release's tag (recorded on the release; the ref itself is created here, on the build commit)
+        description: The tag release-please cut the draft under, source-vX.Y.Z (the marker, on the merge commit)
         required: true
         type: string
 
@@ -45,6 +46,7 @@ jobs:
       contents: write
     outputs:
       source-sha: ${{ steps.source.outputs.sha }}
+      tag: ${{ steps.source.outputs.tag }}
     steps:
       # The run's own head, on main, supplies the script that resolves the release; the checkout below replaces it
       # with the release's source.
@@ -59,7 +61,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          TAG: ${{ inputs.tag }}
+          MARKER: ${{ inputs.tag }}
         run: bun .github/scripts/release-pipeline.ts resolve-source
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -74,27 +76,27 @@ jobs:
       # upload below relies on.
       - name: Create or verify the version tag on the build commit
         env:
-          TAG: ${{ inputs.tag }}
+          TAG: ${{ steps.source.outputs.tag }}
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts package
       - name: Move the major tag to the packaged commit
         env:
-          TAG: ${{ inputs.tag }}
+          TAG: ${{ steps.source.outputs.tag }}
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
         run: GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts retag-major
       - name: Upload the packaged artifacts to the draft release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag }}
-        run: gh release upload "$TAG" lib/settings.schema.json lib/index.js --clobber
+          MARKER: ${{ inputs.tag }}
+        run: gh release upload "$MARKER" lib/settings.schema.json lib/index.js --clobber
 
   verify-release:
     needs: [package-release]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      contents: write # read-only in spirit; write is what makes drafts visible to gh
+      contents: write # drafts are visible to gh under write alone, and the last step edits the draft
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup
@@ -107,13 +109,22 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          TAG: ${{ inputs.tag }}
+          MARKER: ${{ inputs.tag }}
         run: bun .github/scripts/release-pipeline.ts verify-assets
+      # The hook's last write to the draft, after the mint: the managed publish stage publishes the draft under the
+      # tag it carries, and GitHub creates a tag origin lacks on main, at the draft's target.
+      - name: Give the draft the version tag as its tag and title
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          MARKER: ${{ inputs.tag }}
+          TAG: ${{ needs.package-release.outputs.tag }}
+        run: bun .github/scripts/release-pipeline.ts rename-draft
 
   # Publishes the release's library build to npm as the stable version through trusted publishing: no registry
   # token, provenance attached by npm. Behind verify-release, so nothing reaches the registry before the draft's
   # assets check out. Until the owner's one-time npm setup exists this job fails and holds the draft; a rerun converges.
-  # package-release sits in needs for its output alone (a job reads outputs only from its direct dependencies).
+  # package-release sits in needs for its outputs alone (a job reads outputs only from its direct dependencies).
   # The lane is the one update-release-pr.yml's publish-next takes: the registry has no compare-and-set, so the two
   # publishers never overlap and a verdict still holds when its publish lands; queue: max keeps every queued
   # publish (a lane drops all but one pending job by default).
@@ -156,6 +167,6 @@ jobs:
       # recovered by a newer push's run has provenance naming two commits.
       - name: Publish the release to npm
         env:
-          TAG: ${{ inputs.tag }}
+          TAG: ${{ needs.package-release.outputs.tag }}
           SOURCE_SHA: ${{ needs.package-release.outputs.source-sha }}
         run: GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts npm-publish stable

@@ -1,6 +1,6 @@
 /**
- * The release pipeline's git topology. main stays source-only, no version tag ever lands on it, and every ref a
- * consumer names points at a packaged commit: the child of one main commit, carrying that commit's build.
+ * The release pipeline's git topology. main stays source-only, and every ref a consumer names points at a packaged
+ * commit: the child of one main commit, carrying that commit's build. A release puts one tag on main: its marker.
  *
  *   packaged commit                = parent: the main commit; tree: its tree + lib/index.js + lib/settings.schema.json + lib/pkg/,
  *                                     package.json minus its preparation scripts
@@ -8,27 +8,28 @@
  *   refs/tags/latest               -> the packaged commit of the newest main commit
  *   refs/tags/vX.Y.Z               -> the packaged commit of the release's merge commit; never moved
  *   refs/tags/vX                   -> the same commit, moved on each release in the line
+ *   refs/tags/source-vX.Y.Z        -> the release's merge commit itself, on main: the marker; never moved, never pushed here
  *
  * Every artifact is a function of its main commit alone, so runs for different commits never wait on each other
  * and a rerun mints the same name and verifies instead of appending. latest and vX move through movePointer alone.
  * Every subcommand is the whole `run:` of a workflow step; no step runs two.
  *
- * release-please cuts the DRAFT release without a tag (`draft` on, `force-tag-creation` off) and creates or
- * refreshes the release PR only when a releasable commit lands (release-please-config.json leaves always-update
- * off); that refresh is what publishes the `next` pre-release.
+ * release-please cuts the DRAFT release as source-vX.Y.Z, creates that tag on the merge commit, and finds its
+ * previous release by it (release-please-config.json: `draft` and `force-tag-creation` on, component `source`). The
+ * release hook parses the name into vX.Y.Z, checks the marker, mints the version refs, and renames the draft. Only a
+ * releasable commit creates or refreshes the release PR (always-update off), which publishes the `next` pre-release.
  *
- * This file dispatches; the sections live under release-pipeline/ rather than lib/, which holds what several
- * scripts share while these belong to this one.
+ * This file dispatches; its sections live under release-pipeline/, as lib/ holds only what several scripts share.
  *
  * Node builtins only: bun runs this before `bun install`.
  */
 
 import { dispatch, type Handler } from "./lib/entry.js";
 import { requireEnv, setOutput } from "./lib/workflow-step.js";
-import { anchorCheck, anchorReleasePr, boundaryCheck } from "./release-pipeline/anchor.js";
 import {
   RELEASE_ASSETS,
   releaseAssets,
+  renameDraft,
   resolveSource,
   STEP_OUTPUTS,
 } from "./release-pipeline/draft.js";
@@ -121,18 +122,6 @@ export const COMMANDS: Record<string, Handler> = {
     const result = retagMajor({ cwd, tag: requireEnv("TAG"), sourceSha: requireEnv("GITHUB_SHA") });
     console.error(result.move.reason);
   },
-  anchor: () => {
-    const result = anchorReleasePr({ cwd, sourceSha: requireEnv("GITHUB_SHA") });
-    console.error(result.reason);
-  },
-  "boundary-check": () => {
-    const result = boundaryCheck(cwd);
-    console.error(`boundary is fresh: ${result.boundary}`);
-  },
-  "anchor-check": () => {
-    const result = anchorCheck(cwd);
-    console.error(`the release PR carries this cycle's anchor: ${result.boundary}`);
-  },
   "package-commit": () => {
     const result = packageCommit({
       cwd,
@@ -170,23 +159,31 @@ export const COMMANDS: Record<string, Handler> = {
     }
   },
   "resolve-source": () => {
-    const source = resolveSource(requireEnv("TAG"));
+    const source = resolveSource(requireEnv("MARKER"));
     if ("refusal" in source) {
       console.log(`::error::${source.refusal}`);
       return 1;
     }
-    setOutput(STEP_OUTPUTS["resolve-source"][0], source.sha);
+    const [sha, tag] = STEP_OUTPUTS["resolve-source"];
+    setOutput(sha, source.sha);
+    setOutput(tag, source.tag);
   },
   "verify-assets": () => {
-    const tag = requireEnv("TAG");
-    const assets = releaseAssets(tag);
+    const marker = requireEnv("MARKER");
+    const assets = releaseAssets(marker);
     if (assets.join(" ") !== RELEASE_ASSETS.join(" ")) {
       console.log(
-        `::error::release ${tag} carries assets [${assets.join(" ")}], expected ` +
+        `::error::release ${marker} carries assets [${assets.join(" ")}], expected ` +
           `[${RELEASE_ASSETS.join(" ")}]; re-run package-release before anything publishes.`,
       );
       return 1;
     }
+  },
+  "rename-draft": () => {
+    const marker = requireEnv("MARKER");
+    const tag = requireEnv("TAG");
+    renameDraft(marker, tag);
+    console.error(`release ${marker} now carries tag ${tag} and title ${tag}`);
   },
 };
 
