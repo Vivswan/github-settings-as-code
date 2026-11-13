@@ -60,7 +60,8 @@ export function resolveSource(marker: string): { sha: string; tag: string } | { 
     return {
       refusal:
         `no release is named ${marker}.\n` +
-        `If the release ${tag} exists, this release is past this job: re-run only the jobs that failed.`,
+        `If the release ${tag} exists, the hook already renamed the draft and this job is done: do not re-run it.\n` +
+        "Of this workflow's jobs, only publish-npm can still be re-run.",
     };
   }
 
