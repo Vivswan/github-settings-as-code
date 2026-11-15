@@ -17,6 +17,7 @@ import {
   type DiscoveryResult,
   discoverRepos,
   formatSkipNotice,
+  type SkipGroup,
 } from "../discovery/discover.js";
 import { parseReposInput } from "../discovery/repos-input.js";
 import {
@@ -314,7 +315,7 @@ interface MaskedFleet {
   remote: Array<RemoteTarget | RejectedTarget>;
   plan: RedactionPlan;
   visibilityOf: (slug: string) => RepoVisibility;
-  skipGroups: Array<{ reason: string; repos: Parameters<typeof formatSkipNotice>[0]["repos"] }>;
+  skipGroups: SkipGroup[];
   filteredOutCount: number;
   redact: boolean;
 }

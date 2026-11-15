@@ -35,6 +35,16 @@ Redaction hides values, not the shape of the outcome. The public surfaces still 
 
 These are closed enumerations and numeric codes, safe to show, and enough to tell whether the fleet is healthy and which section broke. What they never carry is the slug, a live setting, a desired setting, or an API error message.
 
+A repository that a `repos: "*"` discovery filter drops is not a target, so it gets no placeholder: the skip notice counts it. The notice also says which filter dropped it. An `exclude` pattern can spell a private name, so a notice that hides a repository never quotes one:
+
+| The `exclude` pattern skipped         | The notice names the pattern as                                                               |
+| ------------------------------------- | --------------------------------------------------------------------------------------------- |
+| public repositories only              | its text: `exclude pattern "tmp-*"`                                                           |
+| a private or internal repository      | its place in the `exclude` list: `exclude pattern #2`, counted from 1, and the text is hidden |
+| anything, under `private-repos: show` | its text                                                                                      |
+
+The rule does not judge the pattern. A wildcard such as `secret-*` is hidden as well, because beside the count it would still say that a private repository has that prefix. The other filters (`visibility`, `archived`, `forks`, `topics`) are named in full: they hold a setting or a topic, never a repository name.
+
 ## One seal, every mode
 
 Every target ends the same way, whichever mode ran it: its lines and its end state go through one channel, which closes open for a shown target and sealed for a hidden one. Only the seal's projections open it, and they render the public view alone. No mode has a redaction path of its own.

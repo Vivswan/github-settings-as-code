@@ -1,0 +1,39 @@
+# Exclude-pattern redaction. repos: "*" enumerates a pool holding a PRIVATE
+# repository, and the second exclude pattern spells that repository's whole
+# slug. Quoting the pattern beside "1 private or internal repository" would name
+# the repository, so the notice echoes the pattern by its position in the
+# exclude list. The first pattern skips only a public repository and is still
+# quoted. The private name must appear on no public surface.
+name: discovery-private-exclude-pattern
+settings: {}
+discovery:
+  inputs:
+    exclude: "tmp-*,e2e-owner/disc-vault"
+  pool:
+    - { slug: e2e-owner/disc-keep, visibility: public }
+    - { slug: e2e-owner/tmp-1, visibility: public }
+    - { slug: e2e-owner/disc-vault, visibility: private }
+repos:
+  e2e-owner/disc-keep:
+    settings:
+      labels:
+        - name: managed
+          color: "00ff00"
+    expect:
+      result: applied
+token_permissions:
+  issues: write
+  contents: read
+expect:
+  exit_code: 0
+  result: applied
+  repos_result:
+    e2e-owner/disc-keep: applied
+  stdout_contains:
+    - 'skipped 1 repository by exclude pattern "tmp-*": e2e-owner/tmp-1'
+    - "skipped 1 private or internal repository by exclude pattern #2 (its text is hidden: it matches a private or internal repository)"
+  leaks_nowhere:
+    - disc-vault
+  never:
+    - "GET /repos/e2e-owner/tmp-1"
+    - "GET /repos/e2e-owner/disc-vault"

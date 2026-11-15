@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Decrypter, generateX25519Identity, identityToRecipient } from "age-encryption";
 import { DEFAULT_DISCOVERY_FILTERS } from "../../src/discovery/discover.js";
+import { compileExcludePattern } from "../../src/discovery/exclude-pattern.js";
 import { SectionSelection } from "../../src/engine/section-selection.js";
 import { runMulti } from "../../src/flows/multi.js";
 import { REDACTED_NOTE, type TargetOutcome } from "../../src/flows/redact.js";
@@ -518,6 +519,55 @@ describe("runMulti redaction (private-repos: redact)", () => {
     ]);
     // Pinned whole: two clean targets print no line, hidden or shown, so a sweep for the slug would have no control.
     expect(annotations).toEqual([]);
+  });
+
+  // Without it, an exclude pattern spelling a private repository's name is quoted beside the count that hides it.
+  test("an exclude pattern that skips a private repository is echoed by its position, never by its text", async () => {
+    const api = () =>
+      new MockApi({
+        "GET /user/repos?affiliation=owner&per_page=100&page=1": {
+          data: [
+            { full_name: "e2e-owner/keep", private: false },
+            { full_name: "e2e-owner/old-tool", private: false },
+            { full_name: "e2e-owner/secret-repo", private: true },
+          ],
+        },
+        "GET /repos/e2e-owner/keep": { data: { has_wiki: false, private: false } },
+        "GET /repos/e2e-owner/keep/contents/.github/settings.yml": {
+          data: "repository:\n  has_wiki: false\n",
+        },
+      });
+    const run = (privateRepos: "redact" | "show") =>
+      cfg({
+        reposInput: "*",
+        mode: "check",
+        privateRepos,
+        discoveryFilters: {
+          ...DEFAULT_DISCOVERY_FILTERS,
+          exclude: ["old-*", "e2e-owner/secret-repo"].map((pattern) =>
+            compileExcludePattern(pattern)._unsafeUnwrap(),
+          ),
+        },
+        discoveryFiltersSet: ["exclude"],
+      });
+    const hidden = captureIo();
+    const targets = await runTargets(api(), run("redact"), hidden.io);
+    expect(hidden.annotations).toEqual([
+      'notice: repos: "*" discovery skipped 1 repository by exclude pattern "old-*": e2e-owner/old-tool',
+      'notice: repos: "*" discovery skipped 1 private or internal repository by exclude pattern #2 ' +
+        "(its text is hidden: it matches a private or internal repository)",
+    ]);
+    // The ordered log holds the name only where a runner needs it: the mask registration.
+    expect(
+      hidden.events.filter((e) => e.includes("secret-repo") && !e.startsWith("mask: ")),
+    ).toEqual([]);
+    const shown = captureIo();
+    const shownTargets = await runTargets(api(), run("show"), shown.io);
+    expectSealed(
+      { ...publicSurfaces(hidden), "returned targets": JSON.stringify(targets) },
+      { ...publicSurfaces(shown), "returned targets": JSON.stringify(shownTargets) },
+      ["secret-repo"],
+    );
   });
 
   test("a probe error fails closed: an unknown-visibility target is redacted", async () => {
