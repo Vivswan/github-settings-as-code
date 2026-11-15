@@ -21,10 +21,16 @@ export const REFUSED_EXCLUDE_PATTERNS: readonly string[] = [
   "disc-[*]",
 ];
 
-/** The accepted shapes that drop a repo or two, aimed at pool repo `n`: literals, either case, "*", "?", classes, slugs, and ones that match nothing. */
-export function narrowExcludePatterns(n: number): readonly string[] {
+/**
+ * The accepted shapes that drop a repo or two, aimed at pool repo `n`: literals, either case, "*", "?", classes, slugs,
+ * and ones that match nothing. The whole slug is spelled only with `wholeSlug`: the action names a pattern in its skip
+ * notice, so the generator spells no non-public repository's slug.
+ */
+export function narrowExcludePatterns(n: number, wholeSlug = true): readonly string[] {
   const name = `disc-${n}`;
+  const slugs = wholeSlug ? [`${POOL_OWNER}/${name}`, `E2E-Owner/Disc-${n}`] : [];
   return [
+    ...slugs,
     name,
     name.toUpperCase(),
     `*-${n}`,
@@ -33,9 +39,7 @@ export function narrowExcludePatterns(n: number): readonly string[] {
     `disc-[${n}-${Math.min(n + 1, 9)}]`,
     `[a-d]isc-${n}`,
     `[D-Z]isc-${n}`,
-    `${POOL_OWNER}/${name}`,
     `*/${name}`,
-    `E2E-Owner/Disc-${n}`,
     "other-owner/*",
     "tmp-*",
   ];
@@ -124,14 +128,17 @@ function genDiscoveryPool(
 function genExclude(
   rng: Rng,
   n: number,
-  count: number,
+  pool: DiscoveryScenarioMeta["pool"],
   force?: DiscoveryForce,
 ): { exclude: string; refused: boolean } {
   // Rolled under "lists" too and then discarded, as the main stream's rolls are.
   const refused = rng.bool(1 / 6) && force !== "lists";
   const patterns = Array.from({ length: rng.int(3) + 1 }, () => {
-    const target = rng.bool(0.7) ? n : rng.int(count);
-    return rng.pick(rng.bool(0.06) ? wideExcludePatterns(target) : narrowExcludePatterns(target));
+    const target = rng.bool(0.7) ? n : rng.int(pool.length);
+    const isPublic = pool[target]?.visibility === "public";
+    return rng.pick(
+      rng.bool(0.06) ? wideExcludePatterns(target) : narrowExcludePatterns(target, isPublic),
+    );
   });
   if (refused) {
     patterns[rng.int(patterns.length)] = rng.pick(REFUSED_EXCLUDE_PATTERNS);
@@ -142,7 +149,7 @@ function genExclude(
 /** Rolled under a force too, so the main stream and every recorded seed stay stable; "converges" then discards the roll. */
 function genDiscoveryFilters(
   rng: Rng,
-  count: number,
+  pool: DiscoveryScenarioMeta["pool"],
   force?: DiscoveryForce,
 ): { filters: DiscoveryScenarioMeta["filters"]; excludeRefused: boolean } {
   const rolled: DiscoveryScenarioMeta["filters"] = {};
@@ -161,7 +168,7 @@ function genDiscoveryFilters(
   let excludeRefused = false;
   if (rng.bool(0.3)) {
     // The main stream still spends the one draw the literal `disc-N` took, so every other field of a recorded seed reproduces.
-    const drawn = genExclude(rng.fork("discovery-exclude"), rng.int(count), count, force);
+    const drawn = genExclude(rng.fork("discovery-exclude"), rng.int(pool.length), pool, force);
     rolled.exclude = drawn.exclude;
     excludeRefused = drawn.refused;
   }
@@ -184,7 +191,7 @@ export function genDiscoveryScenario(
 } {
   const count = rng.int(5) + 4;
   const pool = genDiscoveryPool(rng, count, force);
-  const { filters, excludeRefused } = genDiscoveryFilters(rng, count, force);
+  const { filters, excludeRefused } = genDiscoveryFilters(rng, pool, force);
 
   const repos: Record<string, MultiRepo> = {};
   for (const repo of pool) {
