@@ -58,7 +58,7 @@ describe("paginate plugin assumptions of the list walk", () => {
     await walk(request);
     expect(
       asked.mock.calls.map((args) => [args.length, args[0].method, args[0].url]),
-      `the plugin no longer builds the first page through request.endpoint, no longer passes each page as one {method, url, headers} object with an absolute url, or no longer follows the Link header of a page handed back as \`data: []\`: ${LIST} reads page.url with new URL() and withholds every body`,
+      `the plugin changed how it calls a request method (first page through request.endpoint, one options object with an absolute url per page, next page from the Link header alone): ${LIST} reads page.url and withholds every body`,
     ).toEqual([
       [1, "GET", "https://api.test/things?per_page=2&page=1"],
       [1, "GET", NEXT],
