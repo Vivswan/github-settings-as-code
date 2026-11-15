@@ -15,7 +15,7 @@ import {
   git,
   gitWithEnv,
   isAncestor,
-  mainPosition,
+  mainCount,
   manifestVersionAt,
   push,
   tryGit,
@@ -310,7 +310,7 @@ const BUILD_REMEDY =
 /** sourceSha's packaged commit under its build tag: this checkout's build `tree` as the source's child, minted once.
  * Both parts of the name are the commit's own, so every run for one commit names one tag. */
 function ensurePackaged(cwd: string, sourceSha: string, tree: string, runUrl?: string): EnsuredTag {
-  const ref = `${BUILD_TAG_PREFIX}${mainPosition(cwd, sourceSha).count}.${sourceSha.slice(0, 7)}`;
+  const ref = `${BUILD_TAG_PREFIX}${mainCount(cwd, sourceSha)}.${sourceSha.slice(0, 7)}`;
   return ensureTag(
     cwd,
     ref,

@@ -1,14 +1,12 @@
 /**
- * The hooks ci.yml calls after the all-green gate (post-green.yml, update-release.yml, update-release-pr.yml) push refs and publish
- * packages, so what they can do follows from where they are reachable and what each job is granted. The relations here: every hook is
- * reachable through workflow_call alone and its ci.yml caller sits downstream of all-green; a job's effective grant covers what its
- * steps consume; a hook job's own condition is the fork guard or nothing; post-green's judged sha, and the caller's sha in the
- * release-PR hook, reach every checkout and every step that names a source; every output a step writes is read by a later step, and
- * every gate reads an output an earlier step writes, back to the probe. The push probe's script also runs against a stubbed git,
- * since no pin shows what a branch does.
- *
- * The static guards catch ACCIDENTAL drift: a trigger, grant, gate, or step added or dropped in plain YAML. Deliberately hiding one
- * behind other syntax is out of scope.
+ * The hooks ci.yml calls after the all-green gate (post-green.yml, update-release.yml, update-release-pr.yml) push refs, so what
+ * they can do follows from where they are reachable and what each job is granted. The relations here: every hook is reachable
+ * through workflow_call alone and its ci.yml caller sits downstream of all-green; a job's effective grant covers what its steps
+ * consume; a hook job's own condition is the fork guard or nothing; post-green's judged sha reaches every checkout and every step
+ * that names a source; every output a step writes is read by a later step, and every gate reads an output an earlier step
+ * writes, back to the probe. The push probe's script also runs against a stubbed git, since no pin shows what a branch does.
+ * The static guards catch ACCIDENTAL drift: a trigger, grant, gate, or step added or dropped in plain YAML. Deliberately hiding
+ * one behind other syntax is out of scope.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -165,9 +163,7 @@ function consumedGrants(step: Step): Array<[scope: string, why: string]> {
   ) {
     grants.push(["contents", `"${label}" pushes or touches a release`]);
   }
-  if (
-    /\bnpm\s+publish\b|release-pipeline\.ts npm-publish\b|ACTIONS_ID_TOKEN_REQUEST_URL/.test(run)
-  ) {
+  if (/\bnpm\s+publish\b|ACTIONS_ID_TOKEN_REQUEST_URL/.test(run)) {
     grants.push(["id-token", `"${label}" publishes through OIDC`]);
   }
   return grants;
@@ -196,7 +192,7 @@ function grantProblems(
 
 describe("the hooks' grants", () => {
   test("every job's effective grant covers what its steps consume", () => {
-    // A missing grant is quiet here: the push probe warns and skips, the OIDC probe warns and skips, and the job stays green.
+    // A missing grant is quiet here: the push probe warns and skips, and the job stays green.
     const consumers = HOOKS.flatMap(({ file }) =>
       Object.values(readWorkflow(file).jobs).flatMap((job) =>
         (job.steps ?? []).flatMap(consumedGrants),
@@ -220,13 +216,6 @@ describe("the hooks' grants", () => {
 
   test.each<[string, string, string, Record<string, string>, RegExp]>([
     [
-      "a publish job without the OIDC grant its npm publish consumes",
-      "update-release-pr.yml",
-      "publish-next",
-      { contents: "read" },
-      /update-release-pr\.yml#publish-next: .* needs id-token: write/,
-    ],
-    [
       "a package job narrowed to read while its source step reads the draft",
       "update-release.yml",
       "package-release",
@@ -248,10 +237,11 @@ describe("the hooks' grants", () => {
   });
 });
 
+/** What a library-page claim says something runs on. */
+type Trigger = "a release cut" | "a release-PR refresh" | "a green push to main";
+
 /** The trigger a library-page claim names: a release cut, a release-PR refresh, else a green push to main. */
-function triggerOf(
-  claim: string,
-): "a release cut" | "a release-PR refresh" | "a green push to main" {
+function triggerOf(claim: string): Trigger {
   if (/release cut/i.test(claim)) {
     return "a release cut";
   }
@@ -262,30 +252,29 @@ function triggerOf(
 }
 
 /**
- * The hook a library-page claim about "every green push", "every release cut", or a refresh of "the release PR" points at, by its
- * ci.yml caller's condition.
+ * Whether a ci.yml job's own condition runs it on the trigger. A green push: the condition names the push event and the main ref
+ * beside the gate's success; a release cut: release-please's release_created output; a release-PR refresh: its prs_created output.
  */
+function runsOn(job: Job, trigger: Trigger): boolean {
+  const on = condition(job.if);
+  switch (trigger) {
+    case "a release cut":
+      return /release_created == 'true'/.test(on);
+    case "a release-PR refresh":
+      return /prs_created == 'true'/.test(on);
+    default:
+      return (
+        /needs\.all-green\.result == 'success'/.test(on) &&
+        /github\.event_name == 'push'/.test(on) &&
+        /github\.ref == 'refs\/heads\/main'/.test(on)
+      );
+  }
+}
+
+/** The hook a library-page claim about "every green push" points at, by its ci.yml caller's condition: one caller, or the claim points at nothing. */
 function hookFor(claim: string): { file: string; workflow: Workflow } {
   const trigger = triggerOf(claim);
-  // A green push: the caller's own condition names the push event and the main ref beside the gate's success; a release cut: it
-  // names release-please's release_created output; a release-PR refresh: its prs_created output. One caller each, or the claim
-  // points at nothing.
-  const runsOn = (job: Job) => {
-    const on = condition(job.if);
-    switch (trigger) {
-      case "a release cut":
-        return /release_created == 'true'/.test(on);
-      case "a release-PR refresh":
-        return /prs_created == 'true'/.test(on);
-      default:
-        return (
-          /needs\.all-green\.result == 'success'/.test(on) &&
-          /github\.event_name == 'push'/.test(on) &&
-          /github\.ref == 'refs\/heads\/main'/.test(on)
-        );
-    }
-  };
-  const matching = HOOKS.filter(({ job }) => runsOn(job));
+  const matching = HOOKS.filter(({ job }) => runsOn(job, trigger));
   expect(
     matching.map((hook) => hook.file),
     `exactly one hook caller runs on ${trigger}`,
@@ -307,19 +296,25 @@ const runsSubcommand = (workflow: Workflow, subcommand: string): boolean =>
     ),
   );
 
-/** The library page's claims about what publishes when, against the steps the hooks run. */
-function claimProblems(page: string): string[] {
+/** ci.yml's legs that publish a channel to npm: the calls of the platform's npm publish workflow passing that channel. */
+const npmLegs = (ci: Workflow, channel: string): Job[] =>
+  Object.values(ci.jobs).filter(
+    (job) => /\/fleet-npm-publish\.yml@/.test(job.uses ?? "") && job.with?.channel === channel,
+  );
+
+/** The library page's claims about what publishes when, against the ci.yml legs that publish and the steps the green-push hook runs. */
+function claimProblems(page: string, ci: Workflow = CI): string[] {
   const problems: string[] = [];
   const rows = tableRows(page).filter(([span]) => span === "`next`" || span === "`latest`");
   if (rows.length !== 2)
     problems.push("the dist-tag table no longer has a next row and a latest row");
   for (const [span = "", publishesOn = ""] of rows) {
-    const tag = span.slice(1, -1);
-    const channel = tag === "latest" ? "stable" : tag;
-    const { file, workflow } = hookFor(publishesOn);
-    if (!runsSubcommand(workflow, `npm-publish ${channel}`)) {
+    const channel = span.slice(1, -1);
+    const trigger = triggerOf(publishesOn);
+    const legs = npmLegs(ci, channel);
+    if (legs.length !== 1 || !legs.every((leg) => runsOn(leg, trigger))) {
       problems.push(
-        `the page says ${tag} publishes on "${publishesOn.trim()}", but ${file} runs no npm-publish ${channel}`,
+        `the page says ${channel} publishes on "${publishesOn.trim()}", but ci.yml has no one ${channel} leg running on ${trigger}`,
       );
     }
   }
@@ -336,7 +331,7 @@ function claimProblems(page: string): string[] {
 describe("the library page's publishing claims", () => {
   const page = readFileSync(join(ROOT, "docs", "reference", "library.md"), "utf8");
 
-  test("each channel the page says publishes on a green push or a release cut is published by that hook", () => {
+  test("each channel the page says publishes on a release-PR refresh or a release cut is published by that ci.yml leg", () => {
     expect(claimProblems(page)).toEqual([]);
   });
 
@@ -353,39 +348,25 @@ describe("the library page's publishing claims", () => {
     expect(widened.map((hook) => hook.file)).not.toContain("post-green.yml");
   });
 
-  test("a packaging step gone, a channel's verdict gone, or next claimed back on the green push, fails the claim (negative control)", () => {
+  test("a packaging step gone, a channel's leg gone, or next claimed back on the green push, fails the claim (negative control)", () => {
     const { workflow } = hookFor("green push");
     const build = must(workflow.jobs.build, "build job");
     build.steps = build.steps?.filter((step) => !/package-commit/.test(step.run ?? ""));
     expect(runsSubcommand(workflow, "package-commit")).toBe(false);
-    // The pre-release publish runs in the release-PR hook alone: the green-push hook publishes nothing to npm.
-    expect(runsSubcommand(workflow, "npm-publish next")).toBe(false);
-    expect(runsSubcommand(hookFor("the release PR").workflow, "npm-publish next")).toBe(true);
-    expect(runsSubcommand(workflow, "npm-publish stable")).toBe(false);
     expect(
       claimProblems(
         page.replace(/^\| `next` +\| [^|]+\|/m, "| `next` | Every green push to `main` |"),
       ),
     ).toEqual([
-      'the page says next publishes on "Every green push to `main`", but post-green.yml runs no npm-publish next',
+      'the page says next publishes on "Every green push to `main`", but ci.yml has no one next leg running on a green push to main',
     ]);
-    // A publish step conditioned on the caller's event skips on the push that calls it, so the channel's claim fails.
-    const conditioned = readWorkflow("update-release.yml");
-    for (const job of Object.values(conditioned.jobs)) {
-      for (const step of job.steps ?? []) {
-        if (/npm-publish stable/.test(step.run ?? "")) step.if = "github.event_name == 'release'";
-      }
+    // A ci.yml without the release's leg publishes no release, whatever the page says.
+    const legless = structuredClone(CI);
+    for (const [id, job] of Object.entries(legless.jobs)) {
+      if (job.with?.channel === "latest") delete legless.jobs[id];
     }
-    expect(runsSubcommand(conditioned, "npm-publish stable")).toBe(false);
-    expect(
-      claimProblems(
-        page.replace(
-          /^\| `latest` +\| Every release cut +\|/m,
-          "| `latest` | Every green push to `main` |",
-        ),
-      ),
-    ).toEqual([
-      'the page says latest publishes on "Every green push to `main`", but post-green.yml runs no npm-publish stable',
+    expect(claimProblems(page, legless)).toEqual([
+      'the page says latest publishes on "Every release cut", but ci.yml has no one latest leg running on a release cut',
     ]);
   });
 });
@@ -535,9 +516,6 @@ function wiringProblems(workflow: Workflow): string[] {
   });
 }
 
-/** The release-PR hook, whose publish job the post-green one used to hold. */
-const RELEASE_PR = "update-release-pr.yml";
-
 /** The post-green hook. */
 const POST_GREEN = "post-green.yml";
 
@@ -554,10 +532,8 @@ describe("the probed hooks' wiring", () => {
   test("every step after a probe runs on its verdict, every read names a written output, every output is read, in every hook", () => {
     const probed = (file: string) =>
       Object.values(readWorkflow(file).jobs).filter((job) => (job.steps ?? []).some(isProbe));
-    // post-green's one job and the release-PR hook's publish job open with a probe today; the other release-hook jobs have none,
-    // and their output reads are judged the same way.
+    // post-green's one job opens with a probe today; the release-hook jobs have none, and their output reads are judged the same way.
     expect(probed(POST_GREEN).length).toBe(Object.keys(workflow.jobs).length);
-    expect(probed(RELEASE_PR)).toHaveLength(1);
     // Every step that runs a steps script is one the relation reads: a run shape SCRIPT_STEP misses would pass unjudged.
     const scriptSteps = HOOKS.flatMap(({ file }) =>
       Object.values(readWorkflow(file).jobs).flatMap((job) =>
@@ -583,8 +559,6 @@ describe("the probed hooks' wiring", () => {
     }
   });
 
-  const publishJob = (w: Workflow) => must(w.jobs["publish-next"], "publish-next");
-
   test.each<[string, string, (w: Workflow) => void, RegExp]>([
     [
       "the packaging step without its gate",
@@ -593,12 +567,15 @@ describe("the probed hooks' wiring", () => {
       /runs whatever the probe found/,
     ],
     [
-      "the publish gated on a step that is not gated itself",
-      RELEASE_PR,
+      "the packaging step gated on a step that is not gated itself",
+      POST_GREEN,
       (w) => {
-        const steps = must(publishJob(w).steps, "steps");
-        must(steps.at(-1), "publish").if = "steps.oidc-copy.outputs.proceed == 'true'";
-        steps.splice(1, 0, { id: "oidc-copy", run: 'echo "proceed=true" >> "$GITHUB_OUTPUT"' });
+        const steps = must(must(w.jobs.build, "build").steps, "steps");
+        must(steps.at(-1), "packaging step").if = "steps.token-copy.outputs.proceed == 'true'";
+        steps.splice(steps.findIndex(isProbe) + 1, 0, {
+          id: "token-copy",
+          run: 'echo "proceed=true" >> "$GITHUB_OUTPUT"',
+        });
       },
       /runs whatever the probe found/,
     ],
@@ -725,8 +702,8 @@ describe("the probed hooks' wiring", () => {
     ],
     [
       "a verdict gate copied onto a hook without that probe",
-      (w) => gateSteps(w, /npm-publish stable/, "steps.oidc.outputs.proceed == 'true'"),
-      /reads steps\.oidc\.outputs\.proceed, which no earlier step writes/,
+      (w) => gateSteps(w, /rename-draft/, "steps.token.outputs.proceed == 'true'"),
+      /reads steps\.token\.outputs\.proceed, which no earlier step writes/,
     ],
   ])("%s fails the wiring there (negative control)", (_case, mutate, message) => {
     const stable = readWorkflow("update-release.yml");
@@ -735,9 +712,9 @@ describe("the probed hooks' wiring", () => {
   });
 
   /**
-   * The one sha a hook acts on must reach every checkout that names a ref and every step that passes a source to the pipeline or
-   * to npm (found by the script that reads the variable, not by the env that sets it). A checkout naming no ref takes the caller's
-   * event sha, which is the same commit in both hooks.
+   * The one sha a hook acts on must reach every checkout that names a ref and every step that passes a source to the pipeline
+   * (found by the script that reads the variable, not by the env that sets it). A checkout naming no ref takes the caller's
+   * event sha.
    */
   function expectSource(
     file: string,
@@ -771,12 +748,6 @@ describe("the probed hooks' wiring", () => {
     // Compared as expressions, so a sync respelling the managed caller's braces or spacing is not a behavior change here.
     expect(condition(caller.with?.[input ?? ""])).toBe("github.sha");
     expectSource(POST_GREEN, `inputs.${input}`, { checkouts: 1, sources: 1 });
-  });
-
-  test("the release-PR hook publishes the caller's sha: the push release-please judged is what its checkout takes and its publish names", () => {
-    // Inside a called workflow github.sha is the caller's, the head the refresh was built on, so the version, the provenance,
-    // and the guard all speak of one commit.
-    expectSource(RELEASE_PR, "github.sha", { checkouts: 1, sources: 1 });
   });
 
   test("the push probe tells a rejected PAT from a read ceiling by the same secret the checkout falls back from", () => {

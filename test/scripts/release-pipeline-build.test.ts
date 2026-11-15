@@ -50,11 +50,11 @@ import {
   rivalPackage,
   seedFixture,
   shallowClone,
-  subcommand,
   withPushPlans,
   write,
   writeBuild,
 } from "./release-pipeline-fixture.js";
+import { runStep } from "./step-fixture.js";
 
 // Dozens of git spawns per test time out bun's 5s default under parallel machine load.
 setDefaultTimeout(60_000);
@@ -693,7 +693,7 @@ describe("packageCommit", () => {
     expect(git(fx.origin, "rev-parse", "refs/tags/v2^{}")).toBe(remintedSha);
   });
 
-  test("a legacy latest on the retired build chain is replaced, and the chain is never touched", async () => {
+  test("a legacy latest on the retired build chain is replaced, and the chain is never touched", () => {
     const fx = seedFixture();
     // The chain as the pipeline left it: a root packaging the seed with a Source trailer, its child packaging the
     // merge commit, build at the child and latest on it.
@@ -723,8 +723,10 @@ describe("packageCommit", () => {
       `${tip.sha}:${LATEST}`,
     );
     const ref = buildTagOf(fx, fx.mergeSha);
-    const run = await subcommand(
+    const run = runStep(
+      "release-pipeline",
       fx.work,
+      join(fx.root, "runner-temp"),
       { GITHUB_SHA: fx.mergeSha, RUN_URL: undefined },
       "package-commit",
     );
@@ -734,6 +736,7 @@ describe("packageCommit", () => {
       stdout: "",
       stderr: `${ref}: created at ${packaged}; no build tag beyond the window; ${LATEST}: moved to ${packaged} from ${tip.sha}`,
       status: 0,
+      outputs: [],
     });
     expect(latestTag(fx)).toBe(packaged);
     expect(git(fx.origin, "rev-parse", "refs/heads/build")).toBe(tip.sha);

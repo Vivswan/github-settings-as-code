@@ -24,7 +24,7 @@ npm install --global @vivswan/github-settings-as-code
 gsac --help
 ```
 
-Each form fetches the released version. Append `@next` to the package name for the pre-release of `main`; [Versioning](../reference/library.md#versioning) says which build that is.
+Each form fetches the released version. Append `@next` to the package name for the newest build, the pre-release of `main` or, after a release, that release until the next releasable commit; [Versioning](../reference/library.md#versioning) says which build that is.
 
 The package needs Node 22.14 or newer; `bunx` fetches it the same way and honors the executable's `node` shebang. The command reads its token from `--token` or the `GITHUB_TOKEN` environment variable; the same fine-grained PAT the action uses (see [Token permissions](../reference/permissions.md)).
 

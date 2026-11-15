@@ -133,8 +133,7 @@ describe("package.json as the npm manifest", () => {
   });
 
   test("names the repository the schema names", () => {
-    // update-release-pr.yml (publish-next) and update-release.yml (publish-npm) publish under trusted publishing, whose provenance verifies
-    // repository.url against the workflow's repository.
+    // ci.yml's npm legs publish under trusted publishing, whose provenance verifies repository.url against the workflow's repository.
     const [owner, repo] = new URL(schema.$id).pathname.split("/").filter(Boolean);
     expect(pkg.repository).toEqual({
       type: "git",

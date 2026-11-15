@@ -70,4 +70,4 @@ Never take an exception silently, and never apply a guideline against the eviden
 - The `release` job in ci.yml stays out of all-green's `needs`, so a release only happens from a green main.
 - Every consumable ref points at a packaged commit off main, and a pointer only ever moves forward along main; no tag a user can pin lands on main.
 - `source-vX.Y.Z` marks a release merge on main: release-please creates it and finds its previous release by it. The release hook checks it and never writes one.
-- The npm package publishes from the release hooks through trusted publishing; docs/reference/library.md states the versioning rules.
+- The npm package publishes through the platform's npm module (the trusted publisher's workflow is `ci.yml`); docs/reference/library.md states the versioning rules.

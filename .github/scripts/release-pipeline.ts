@@ -16,8 +16,7 @@
  *
  * release-please cuts the DRAFT release as source-vX.Y.Z, creates that tag on the merge commit, and finds its
  * previous release by it (release-please-config.json: `draft` and `force-tag-creation` on, component `source`). The
- * release hook parses the name into vX.Y.Z, checks the marker, mints the version refs, and renames the draft. Only a
- * releasable commit creates or refreshes the release PR (always-update off), which publishes the `next` pre-release.
+ * release hook parses the name into vX.Y.Z, checks the marker, mints the version refs, and renames the draft.
  *
  * This file dispatches; its sections live under release-pipeline/, as lib/ holds only what several scripts share.
  *
@@ -33,76 +32,10 @@ import {
   resolveSource,
   STEP_OUTPUTS,
 } from "./release-pipeline/draft.js";
-import {
-  type ConfirmVerdict,
-  NPM_FLOOR,
-  type NpmPublishOptions,
-  npmFloor,
-  npmPublish,
-} from "./release-pipeline/npm.js";
 import { packageCommit, packageRelease, retagMajor } from "./release-pipeline/tags.js";
-
-/** Where npm-publish publishes unless NPM_REGISTRY_URL names another registry, as the tests do with a local one. */
-const DEFAULT_REGISTRY = "https://registry.npmjs.org";
-
-/** 15 reads 20 s apart (up to 280 s): three of the first five publishes were still unreadable after 80 s. */
-const CONFIRM_READS = 15;
-
-/** The pause between confirm reads; NPM_CONFIRM_PAUSE_MS overrides it for the test against a local registry. */
-const CONFIRM_PAUSE_MS = 20_000;
 
 /** The step's working directory: the checkout every subcommand works in. */
 const cwd = process.cwd();
-
-/** NPM_CONFIRM_PAUSE_MS exists for the test that confirms against a local registry without the wait. */
-function confirmPauseMs(value: string | undefined): number {
-  if (value === undefined || value === "") {
-    return CONFIRM_PAUSE_MS;
-  }
-  if (!/^\d+$/.test(value)) {
-    throw new Error(
-      `NPM_CONFIRM_PAUSE_MS must be a whole number of milliseconds, not ${JSON.stringify(value)}`,
-    );
-  }
-  return Number(value);
-}
-
-/** The next channel confirms the registry's record after publishing; stable publishes under the release's tag. */
-function publishOptions(channel: "next" | "stable"): NpmPublishOptions {
-  const shared = {
-    cwd,
-    sourceSha: requireEnv("GITHUB_SHA"),
-    registry: process.env.NPM_REGISTRY_URL || DEFAULT_REGISTRY,
-  };
-  if (channel === "next") {
-    return {
-      ...shared,
-      channel,
-      confirm: {
-        attempts: CONFIRM_READS,
-        delayMs: confirmPauseMs(process.env.NPM_CONFIRM_PAUSE_MS),
-      },
-    };
-  }
-  return { ...shared, channel, tag: requireEnv("TAG") };
-}
-
-/** The confirmation as a workflow annotation; 1 when this run moved next back behind a descendant's pre-release. */
-function reportConfirmed(confirmed: ConfirmVerdict): number | undefined {
-  if (confirmed.outcome === "settled") {
-    console.log(
-      `::notice::${confirmed.version} is on the registry after ${confirmed.reads} ` +
-        `${confirmed.reads === 1 ? "read" : "reads"}; next is not behind a descendant's pre-release`,
-    );
-    return;
-  }
-  if (confirmed.outcome === "unsettled") {
-    console.log(`::warning::${confirmed.reason}`);
-    return;
-  }
-  console.log(`::error::${confirmed.reason}`);
-  return 1;
-}
 
 /** The subcommands by name; test/workflows reads the keys as the set a step may run. */
 export const COMMANDS: Record<string, Handler> = {
@@ -131,32 +64,6 @@ export const COMMANDS: Record<string, Handler> = {
     console.error(
       `${result.ref}${result.created ? ": created at" : " already packages the commit at"} ${result.commit}; ${result.pruned.length === 0 ? "no build tag beyond the window" : `pruned ${result.pruned.join(", ")}`}; ${result.latest.reason}`,
     );
-  },
-  "npm-publish": async ([channel]) => {
-    if (channel !== "next" && channel !== "stable") {
-      throw new Error(
-        `npm-publish takes the channel, next or stable, not ${JSON.stringify(channel ?? null)}`,
-      );
-    }
-    const result = await npmPublish(publishOptions(channel), (line) => console.error(line));
-    if (!result.published) {
-      // A skipped pre-release is routine (a stale retry); a skipped release is a rerun worth a look.
-      console.log(`::${channel === "next" ? "notice" : "warning"}::${result.reason}`);
-      return;
-    }
-    if (result.channel === "next") {
-      return reportConfirmed(result.confirmed);
-    }
-  },
-  "npm-floor": () => {
-    // Silent when the floor holds, as the shell step was; the refusal is the annotation it printed.
-    const result = npmFloor();
-    if (!result.atFloor) {
-      console.log(
-        `::error::npm ${result.version} cannot publish through OIDC; trusted publishing needs npm ${NPM_FLOOR} or newer.`,
-      );
-      return 1;
-    }
   },
   "resolve-source": () => {
     const source = resolveSource(requireEnv("MARKER"));

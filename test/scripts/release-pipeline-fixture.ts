@@ -740,28 +740,3 @@ export const PERMANENT: [string, string][] = [
       "error: failed to push some refs to 'https://github.com/o/r.git'\n",
   ],
 ];
-
-/** Run the script's subcommand under this bun as the workflow does: stdout, stderr, and status as they were.
- * Asynchronous, so a registry served from the test process can answer the child. */
-export async function subcommand(
-  cwd: string,
-  env: Record<string, string | undefined>,
-  ...args: string[]
-): Promise<{ stdout: string; stderr: string; status: number }> {
-  const script = join(import.meta.dir, "..", "..", ".github", "scripts", "release-pipeline.ts");
-  const child = Bun.spawn([process.execPath, script, ...args], {
-    cwd,
-    env: Object.fromEntries(
-      Object.entries({ ...process.env, ...env }).filter(([, v]) => v !== undefined),
-    ) as Record<string, string>,
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const [stdout, stderr, status] = await Promise.all([
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-    child.exited,
-  ]);
-  return { stdout, stderr, status };
-}

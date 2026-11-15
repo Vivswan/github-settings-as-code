@@ -24,7 +24,7 @@ Every green push to `main` now mints one packaged commit, the main commit's chil
 
 For anyone installing `@vivswan/github-settings-as-code@next`. The pre-release v3 builds published a `next` pre-release from every green push to `main` that changed what the tarball ships or builds it; v3 publishes one when release-please creates or refreshes the release PR, and nowhere else.
 
-A releasable commit publishes in the run that lands it; a merge of hidden types alone (a `build(deps)` bump, a test, a doc) publishes nothing. [Versioning](../../reference/library.md#versioning) owns the rule, the guard that keeps `next` from moving back, and its residual window.
+A releasable commit publishes in the run that lands it; a merge of hidden types alone (a `build(deps)` bump, a test, a doc) publishes nothing. [Versioning](../../reference/library.md#versioning) owns the rule and the guard that keeps `next` from moving back.
 
 ```text
 pre-release   merge build(deps): bump yaml   -> green -> bun.lock changed        -> publish 3.0.1-main.447.20260922.gabc1234 under next
