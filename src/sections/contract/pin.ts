@@ -14,32 +14,42 @@ interface Routed {
   readonly route: string;
 }
 
-/** The body Octokit publishes for a declared endpoint; `never` for a route it lags (src/upstream-gaps), which Pinned refuses. */
+declare const UNTYPED: unique symbol;
+
+/** Stands in for the body of a route Octokit lags (src/upstream-gaps), so it survives a union of routes for the pin to refuse. */
+interface Untyped {
+  readonly [UNTYPED]: true;
+}
+
+/** The body Octokit publishes for a declared endpoint. */
 export type Body<E extends Routed> = E extends unknown
   ? E["route"] extends keyof Endpoints
     ? Endpoints[E["route"]]["response"]["data"]
-    : never
+    : Untyped
   : never;
 
 /** One item of a declared list endpoint, whose body is a bare array. */
 export type Item<E extends Routed> = ElementOf<Body<E>>;
 
-type ElementOf<T> = T extends readonly (infer Element)[] ? Element : never;
+/** A list body's element; a body that is no list yields `never`, which the pin refuses. */
+type ElementOf<T> = T extends Untyped ? T : T extends readonly (infer Element)[] ? Element : never;
 
 /** One item of an enveloped list (`{ total_count, <key>: [...] }`), as listAllEnveloped unwraps it. */
 export type EnvelopedItem<E extends Routed, Key extends string> = Enveloped<Body<E>, Key>;
 
-type Enveloped<T, Key extends string> = T extends unknown
-  ? Key extends keyof T
+/** The element under an envelope key, optional or not. */
+type Enveloped<T, Key extends string> = T extends Untyped
+  ? T
+  : Key extends keyof T
     ? ElementOf<NonNullable<T[Key]>>
-    : never
-  : never;
+    : never;
 
 /** A type's declared keys: an index signature is dropped, since it names no field. */
 type Declared<T> = {
   [K in keyof T as string extends K ? never : number extends K ? never : K]: T[K];
 };
 
+/** The declared keys as a path can spell them. */
 type DeclaredKey<T> = keyof Declared<T> & (string | number);
 
 /** Every key some variant of a union carries; the empty-object variant (`{ [key: string]: never }`) carries none. */
@@ -54,10 +64,13 @@ type ValueAt<T, K extends PropertyKey> = T extends unknown
       : never
   : never;
 
+/** The object variants of a type, lists aside. */
 type Plain<T> = Exclude<T, readonly unknown[]> & object;
 
+/** The list variants of a type. */
 type Listed<T> = Extract<T, readonly unknown[]>;
 
+/** A finding's path: `config.url`, `rules[].type`. */
 type Path<P extends string, K extends string | number> = P extends "" ? `${K}` : `${P}.${K}`;
 
 /** Octokit's type as JSON carries it: an int64 field is typed `number | bigint` there, and no body holds a bigint. */
@@ -74,9 +87,13 @@ type OnTheWire<T> = T extends bigint
  *   Refused    -> a body Octokit's type admits that the schema would not parse (TypeScript's own assignability)
  *   Strangers  -> a key the schema declares that Octokit's type lacks in every variant (misspelled, renamed)
  */
-export type Disagreements<Hand, Theirs> =
-  | Refused<Hand, OnTheWire<Theirs>>
-  | Strangers<Hand, OnTheWire<Theirs>, "">;
+export type Disagreements<Hand, Theirs> = [Theirs] extends [never]
+  ? "(body): Octokit types no response for this route"
+  : Untyped extends Theirs
+    ? "(body): Octokit types no response for this route"
+    : unknown extends Hand
+      ? "(body): the schema's input type is erased"
+      : Refused<Hand, OnTheWire<Theirs>> | Strangers<Hand, OnTheWire<Theirs>, "">;
 
 /** Distributes over Octokit's variants: each one alone must parse. */
 type Refused<Hand, Theirs> = Theirs extends unknown
@@ -96,6 +113,7 @@ type RefusedField<Hand, Theirs> = {
     : `${K}: Octokit's type admits a value this schema refuses`;
 }[DeclaredKey<Hand>];
 
+/** The declared keys Octokit's type lacks, at every depth; `unknown` on either side leaves nothing to compare. */
 type Strangers<Hand, Theirs, P extends string> = unknown extends Hand
   ? never
   : unknown extends Theirs
@@ -106,6 +124,7 @@ type Strangers<Hand, Theirs, P extends string> = unknown extends Hand
             ? never
             : Strangers<Listed<Hand>[number], Listed<Theirs>[number], `${P}[]`>);
 
+/** One object level of the walk: a record's value type, then each declared key. */
 type StrangersIn<Hand, Theirs, P extends string> = [Theirs] extends [never]
   ? never
   : Hand extends unknown
@@ -123,16 +142,19 @@ type StrangersIn<Hand, Theirs, P extends string> = [Theirs] extends [never]
     : never;
 
 /**
- * What a pin's schema must satisfy. `Lag` names the findings Octokit's description is behind GitHub on;
- * a name that is no longer a finding fails too, so a relaxation graduates when Octokit catches up.
+ * What a pin's schema must satisfy. `Lag` names the findings to relax; a name that is no longer a finding
+ * fails too, so a relaxation graduates when Octokit's type changes. A route Octokit does not type is
+ * refused, never passed: alone, in a union of routes, and as `any`.
  */
 type Agrees<Theirs, Found, Lag extends string> = [Theirs] extends [never]
   ? { readonly "Octokit types no response for this route": true }
-  : [Exclude<Found, Lag>] extends [never]
-    ? [Lag] extends [Found]
-      ? unknown
-      : { readonly "relaxed, yet Octokit's type now agrees": Exclude<Lag, Found> }
-    : { readonly "disagrees with Octokit's response type": Exclude<Found, Lag> };
+  : Untyped extends Theirs
+    ? { readonly "Octokit types no response for this route": true }
+    : [Exclude<Found, Lag>] extends [never]
+      ? [Lag] extends [Found]
+        ? unknown
+        : { readonly "relaxed, yet Octokit's type now agrees": Exclude<Lag, Found> }
+      : { readonly "disagrees with Octokit's response type": Exclude<Found, Lag> };
 
 /**
  * What a schema reading `Hand` must also be: nothing more when it agrees with `Theirs`, an unmeetable field
@@ -147,12 +169,18 @@ export type Agreeing<Hand, Theirs, Lag extends string = never> = Agrees<
   Lag
 >;
 
+/** What a schema annotated `z.ZodType<T>` cannot meet: its input type is `unknown`, so a pin would compare nothing. */
+interface Erased {
+  readonly "the schema's input type is erased": true;
+}
+
 /**
  * The pin: `type _LiveLabelPin = Pinned<typeof LiveLabel, Item<typeof ENDPOINTS.list>>` fails typecheck,
  * naming each field, once the schema and Octokit's type for the route part ways.
  */
 export type Pinned<
-  Schema extends z.ZodType & Agreeing<z.input<Schema>, Theirs, Lag>,
+  Schema extends z.ZodType &
+    (unknown extends z.input<Schema> ? Erased : Agreeing<z.input<Schema>, Theirs, Lag>),
   Theirs,
   Lag extends string = never,
 > = [Schema, Theirs, Lag];
