@@ -21,7 +21,7 @@ import { err, ok, type Result } from "neverthrow";
 /** The autolink extension's own rules for what the serializer must escape so text is not linked by accident. */
 const AUTOLINK = gfmAutolinkLiteralToMarkdown();
 
-/** Its colon rule covers lowercase `http:/` and `https:/` alone; GitHub also links an uppercase scheme, so the same rule is repeated for any letter before the colon. */
+/** Its colon rule covers a colon after `p` or `s` and before `/`; GitHub also links an uppercase scheme, so the same rule is repeated for any letter before the colon. */
 const ANY_SCHEME = {
   unsafe: (AUTOLINK.unsafe ?? [])
     .filter((pattern) => pattern.character === ":")

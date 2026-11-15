@@ -1,7 +1,8 @@
 /**
- * The grammar used to read the output back is micromark's, which is weaker than GitHub's cmark-gfm on two points:
- * it does not decode a character reference inside an angle autolink's target, and it does not autolink an uppercase scheme or a
- * host without a dot. The rows for those two cases therefore assert the emitted text, not the parsed tree.
+ * The grammar used to read the output back is micromark's, which differs from GitHub's cmark-gfm on two points:
+ * it does not decode a character reference inside an angle autolink's target, and its bare-URL reader runs on the
+ * text after unescaping, so it links a URL whose colon is escaped where GitHub leaves it plain. The rows for a
+ * URL that must come out unlinked therefore assert the emitted text, not the parsed tree.
  */
 
 import { describe, expect, test } from "bun:test";
