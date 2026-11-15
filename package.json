@@ -123,6 +123,6 @@
     "tsdown": "0.23.2",
     "typescript": "7.0.2",
     "unist-util-source": "5.0.0",
-    "unist-util-visit-parents": "6.0.2"
+    "unist-util-visit-parents": "6.1.0"
   }
 }

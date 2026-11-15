@@ -12,9 +12,6 @@
  */
 
 import { parseArgs } from "node:util";
-import { fromMarkdown } from "mdast-util-from-markdown";
-import { gfmTableFromMarkdown } from "mdast-util-gfm-table";
-import { gfmTable } from "micromark-extension-gfm-table";
 import { canonicalDocument } from "../../src/engine/canonical.js";
 import { describeRemoval } from "../../src/engine/layers.js";
 import { MAX_RETRIES } from "../../src/github/api.js";
@@ -22,6 +19,7 @@ import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
 import { endpointPath } from "../../src/sections/contract/endpoints.js";
 import { sectionModule } from "../../src/sections/registry.js";
 import { quote } from "../../src/text.js";
+import { reportTree } from "../report/report-tree.js";
 import { iterationSummary, runIterations } from "./fuzz-iterations.js";
 import {
   type DiscoveryScenarioMeta,
@@ -296,16 +294,12 @@ const REQUIRED_CLASSES: Record<WitnessSection, MutationClass[]> = {
 };
 
 /**
- * The engine escapes a cell's pipes and backslashes (markdownCell, src/report/markdown.ts), so under HOSTILE_NAMES a
- * broken escape surfaces as a row whose cell count differs from the header's; the GFM grammar reads the table as
- * GitHub renders it, and a malformed delimiter row leaves no table at all.
+ * Under HOSTILE_NAMES a free-text cell (markdownCell, src/report/markdown.ts) whose pipe escape broke shows as a row
+ * narrower or wider than the header, and a malformed delimiter row as no table at all. A cell's inline markup is not
+ * judged here.
  */
 function summaryTableProblems(summary: string, expectedRows: number): string[] {
-  const tree = fromMarkdown(summary, {
-    extensions: [gfmTable()],
-    mdastExtensions: [gfmTableFromMarkdown()],
-  });
-  const table = tree.children.find((node) => node.type === "table");
+  const table = reportTree(summary).children.find((node) => node.type === "table");
   if (table === undefined) {
     // A completed run renders the header and delimiter row even with zero data rows, so absence is an error at any expectedRows.
     return ["summary carries no markdown table"];

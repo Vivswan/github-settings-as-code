@@ -7,6 +7,7 @@ import {
   wideExcludePatterns,
 } from "./discovery-scenario.js";
 import { Rng } from "./prng.js";
+import { forEachSeed, seedsBelow } from "./seed-property.js";
 
 // The fuzzer predicts a refused run from the pool a pattern was drawn from, so a pattern the grammar judges the other way makes the prediction wrong.
 test("the exclude pools agree with the grammar: every accepted pattern compiles and every refused one is refused", () => {
@@ -22,13 +23,14 @@ test("the exclude pools agree with the grammar: every accepted pattern compiles 
 
 // A redacted run tells such a pattern by position; a generator that stopped spelling one would leave the leak check nothing to judge.
 test("some exclude pattern spells the whole slug of a non-public pool repository", () => {
-  const spelled: number[] = [];
-  for (let seed = 0; seed < 3000; seed++) {
+  const spellsPrivateSlug = (seed: number): boolean => {
     const { meta } = genDiscoveryScenario(new Rng(seed));
     const patterns = (meta.filters.exclude ?? "").toLowerCase().split(/,\s*/);
-    if (meta.pool.some((repo) => repo.visibility !== "public" && patterns.includes(repo.slug))) {
-      spelled.push(seed);
-    }
-  }
-  expect(spelled.length).toBeGreaterThan(30);
+
+    return meta.pool.some((repo) => repo.visibility !== "public" && patterns.includes(repo.slug));
+  };
+
+  forEachSeed(seedsBelow(3000), spellsPrivateSlug, (spelled) => {
+    expect(spelled.filter(Boolean).length).toBeGreaterThan(30);
+  });
 });

@@ -51,8 +51,9 @@ function codeBlocks(
   // The parser's own fence tokens say where a block opens and whether it closes; the finished tree keeps neither.
   const fenceLines = new Map<object, number[]>();
   const tree = fromMarkdown(markdown, {
-    extensions: [frontmatter()],
+    extensions: [gfmTable(), frontmatter()],
     mdastExtensions: [
+      gfmTableFromMarkdown(),
       frontmatterFromMarkdown(),
       {
         enter: {
