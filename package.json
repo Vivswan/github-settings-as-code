@@ -106,12 +106,14 @@
     "libsodium-wrappers": "0.8.4",
     "mdast-util-from-markdown": "2.1.0",
     "mdast-util-gfm-table": "2.0.0",
+    "mdast-util-heading-range": "4.0.0",
     "mdast-util-to-string": "4.0.0",
     "micromark-extension-gfm-table": "2.1.2",
     "oxc-parser": "0.155.0",
     "publint": "0.3.25",
     "tsdown": "0.23.2",
     "typescript": "7.0.2",
+    "unist-util-source": "5.0.0",
     "unist-util-visit-parents": "6.0.2"
   }
 }

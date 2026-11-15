@@ -1,7 +1,8 @@
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { gfmTableFromMarkdown } from "mdast-util-gfm-table";
-import { toString as headingText } from "mdast-util-to-string";
+import { headingRange } from "mdast-util-heading-range";
 import { gfmTable } from "micromark-extension-gfm-table";
+import { source as sourceText } from "unist-util-source";
 import { visitParents } from "unist-util-visit-parents";
 
 /** The syntax tree of a CommonMark document with GFM tables, every node carrying its source position. */
@@ -92,36 +93,25 @@ export function fencedBlocks(markdown: string, info: string): string[] {
  * blockquote, or a list item is content.
  */
 export function sectionText(markdown: string, heading: string, source: string): string {
-  const blocks = markdownTree(markdown).children;
-  const start = blocks.findIndex(
-    (block) => block.type === "heading" && block.depth === 2 && headingText(block) === heading,
+  let bounds: { from: number; to: number } | undefined;
+  headingRange(
+    markdownTree(markdown),
+    (text, node) => node.depth === 2 && text === heading,
+    (opener, _between, next) => {
+      bounds = {
+        from: opener.position?.end.offset ?? 0,
+        to: next?.position?.start.offset ?? markdown.length,
+      };
+    },
   );
-  const opener = blocks[start];
-  if (opener === undefined) {
+  if (bounds === undefined) {
     throw new Error(`no "## ${heading}" section found in ${source}`);
   }
-  const next = blocks
-    .slice(start + 1)
-    .find((block) => block.type === "heading" && block.depth <= 2);
-  const from = opener.position?.end.offset ?? 0;
   // Only the blank lines around the section go: an indent on its first line is content (an indented code block).
   return markdown
-    .slice(from, next?.position?.start.offset ?? markdown.length)
+    .slice(bounds.from, bounds.to)
     .replace(/^(?:[ \t]*\r?\n)+/, "")
     .trimEnd();
-}
-
-/** A node's source text. */
-function sourceOf(
-  node: { type: string; position?: { start: { offset?: number }; end: { offset?: number } } },
-  markdown: string,
-): string {
-  const start = node.position?.start.offset;
-  const end = node.position?.end.offset;
-  if (start === undefined || end === undefined) {
-    throw new Error(`BUG: mdast-util-from-markdown left a ${node.type} node without a position`);
-  }
-  return markdown.slice(start, end);
 }
 
 /**
@@ -135,7 +125,11 @@ export function tableRows(markdown: string): string[][] {
     rows.push(
       row.children.map((cell) => {
         // The closing pipe goes; a cell ending in an escaped pipe keeps it, since that one is content.
-        return sourceOf(cell, markdown)
+        const text = sourceText(markdown, cell);
+        if (text === undefined) {
+          throw new Error("BUG: mdast-util-from-markdown left a tableCell node without a position");
+        }
+        return text
           .replace(/^\|/, "")
           .replace(/(?<!\\)\|$/, "")
           .trim();
