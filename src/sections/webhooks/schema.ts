@@ -1,9 +1,12 @@
 /** The `webhooks:` section's schema slice; root src/schema.ts composes the SettingsFile property from it. */
 
 import { z } from "zod";
+import {
+  REPOSITORY_WEBHOOK_EVENTS,
+  WEBHOOK_EVENTS_REFERENCE,
+} from "../../generated/spec-webhooks.js";
 import { describeValue } from "../../plain-data.js";
 import { open, rule } from "../shared/schema-helpers.js";
-import { REPOSITORY_WEBHOOK_EVENTS, WEBHOOK_EVENTS_REFERENCE } from "./events.js";
 
 // The REST wire types are bare strings and GitHub 422s a bad event only at apply time ("is not a valid event"), so the parser carries the list GitHub's webhooks description publishes.
 const WebhookEvent = z.enum([...REPOSITORY_WEBHOOK_EVENTS, "*"] as const, {

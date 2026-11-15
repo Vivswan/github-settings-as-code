@@ -2,7 +2,7 @@
  * The webhooks fuzz generator fragment, aggregated by test/e2e/generators/settings.ts.
  */
 
-import { REPOSITORY_WEBHOOK_EVENTS } from "../../../src/sections/webhooks/events.js";
+import { REPOSITORY_WEBHOOK_EVENTS } from "../../../src/generated/spec-webhooks.js";
 import {
   E2E_SECRET_ENV,
   type EntriesForm,

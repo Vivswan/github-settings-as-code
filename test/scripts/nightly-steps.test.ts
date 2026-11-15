@@ -505,6 +505,6 @@ describe("refresh-openapi", () => {
         "gh pr create --draft --head nightly/openapi-25.0.0 --title build(deps): bump @octokit/openapi to 25.0.0 --body ## What this adds",
       );
       expect(log).toContain("before: @octokit/openapi 24.0.0 pinned, 25.0.0 released");
-      expect(log).toContain(`${RULES_PATH} | 2 +-`);
+      expect(log).toMatch(new RegExp(`${RULES_PATH} +\\| 2 \\+-`));
     }));
 });
