@@ -20,17 +20,15 @@ test("the exclude pools agree with the grammar: every accepted pattern compiles 
   ).toEqual([]);
 });
 
-// The product names an exclude pattern in its skip notice, so a pattern spelling a private repository's whole slug would put that slug where the leak check forbids it.
-test("no exclude pattern spells the whole slug of a non-public pool repository", () => {
-  const spelled: string[] = [];
+// A redacted run tells such a pattern by position; a generator that stopped spelling one would leave the leak check nothing to judge.
+test("some exclude pattern spells the whole slug of a non-public pool repository", () => {
+  const spelled: number[] = [];
   for (let seed = 0; seed < 3000; seed++) {
     const { meta } = genDiscoveryScenario(new Rng(seed));
-    const exclude = (meta.filters.exclude ?? "").toLowerCase();
-    for (const repo of meta.pool) {
-      if (repo.visibility !== "public" && exclude.split(/,\s*/).includes(repo.slug)) {
-        spelled.push(`seed ${seed}: ${meta.filters.exclude}`);
-      }
+    const patterns = (meta.filters.exclude ?? "").toLowerCase().split(/,\s*/);
+    if (meta.pool.some((repo) => repo.visibility !== "public" && patterns.includes(repo.slug))) {
+      spelled.push(seed);
     }
   }
-  expect(spelled).toEqual([]);
+  expect(spelled.length).toBeGreaterThan(30);
 });

@@ -12,12 +12,16 @@ import {
   FORKS_FILTERS,
   VISIBILITY_FILTERS,
 } from "../discovery/discover.js";
-import { compileExcludePattern, type ExcludePattern } from "../discovery/exclude-pattern.js";
+import {
+  compileExcludePattern,
+  compileHiddenExcludePattern,
+  type ExcludePattern,
+} from "../discovery/exclude-pattern.js";
 import { splitList } from "../discovery/repos-input.js";
 import { parseRepoSlug, type RepoRef } from "../discovery/targets.js";
 import { UNDECLARED_POLICIES } from "../engine/layers.js";
 import { SectionSelection } from "../engine/section-selection.js";
-import type { Problem } from "../problem.js";
+import type { Problem, RefusalText } from "../problem.js";
 import { parseRecipient } from "../report/artifact-report.js";
 import type { PrivateReportChannel } from "../report/delivery.js";
 import { SECTION_KEYS, type SectionKey } from "../schema.js";
@@ -160,6 +164,7 @@ export function readPolicies(input: Inputs): Result<
 /** The validated filters plus the names the workflow set explicitly, which the misuse rejections name. */
 export function readDiscoveryFilters(
   input: Inputs,
+  refusals: RefusalText,
 ): Result<{ discoveryFilters: DiscoveryFilters; discoveryFiltersSet: string[] }, Problem> {
   return safeTry(function* () {
     const discoveryFiltersSet = FILTER_INPUTS.filter((name) => input.value(name) !== "");
@@ -196,8 +201,12 @@ export function readDiscoveryFilters(
       });
     }
     const exclude: ExcludePattern[] = [];
-    for (const pattern of input.list("exclude")) {
-      exclude.push(yield* compileExcludePattern(pattern));
+    for (const [index, pattern] of input.list("exclude").entries()) {
+      exclude.push(
+        yield* refusals.text === "hidden"
+          ? compileHiddenExcludePattern(pattern, index + 1, refusals.revealable)
+          : compileExcludePattern(pattern),
+      );
     }
     const discoveryFilters: DiscoveryFilters = {
       visibility,
@@ -211,13 +220,21 @@ export function readDiscoveryFilters(
   });
 }
 
-/** The single-repo target: the repository input, else the workflow's own repository. */
+/**
+ * The single-repo target: the repository input, else the workflow's own repository. A refused `repository` input is
+ * not quoted where `refusals` hides text; the workflow's own repository is never hidden, so its text is.
+ */
 export function readSingleTarget(
   input: Inputs,
   githubRepository: string,
+  refusals: RefusalText,
 ): Result<RepoRef, Problem> {
-  const rawRepo = input.value("repository") || githubRepository;
+  const named = input.value("repository");
+  const rawRepo = named || githubRepository;
   return parseRepoSlug(rawRepo).mapErr(
-    (): Problem => ({ code: "input-repository-not-slug", value: rawRepo }),
+    (): Problem =>
+      named !== "" && refusals.text === "hidden"
+        ? { code: "input-repository-not-slug-hidden", revealable: refusals.revealable }
+        : { code: "input-repository-not-slug", value: rawRepo },
   );
 }

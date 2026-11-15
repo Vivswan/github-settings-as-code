@@ -190,6 +190,8 @@ The exit codes are the action's:
 | `validate`                    | the file is invalid                                                                           |
 | `permissions`                 | never for a valid file                                                                        |
 
-A flag the mode does not read is unknown to that subcommand and exits 1 with the parser's message, where the action rejects the same input by name. A value the mode refuses (a filter without `--repos "*"`, a `--repository` that is not a slug) fails with the action's own message, reworded where the action's remedy names the workflow step.
+A flag the mode does not read is unknown to that subcommand and exits 1, where the action rejects the same input by name. The line says what kind of mistake the command line holds and points at `--help`; it never repeats what you typed, since an argument may name a private repository.
+
+A value the mode refuses (a filter without `--repos "*"`, a `--repository` that is not a slug) fails with the action's own message, reworded where the action's remedy names the workflow step.
 
 The token passed on the command line is masked as `***` wherever a line would echo it.

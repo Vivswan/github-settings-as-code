@@ -17,8 +17,9 @@ import {
   type DiscoveryResult,
   discoverRepos,
   formatSkipNotice,
+  type SkipGroup,
 } from "../discovery/discover.js";
-import { parseReposInput } from "../discovery/repos-input.js";
+import { parseReposInputUnder } from "../discovery/repos-input.js";
 import {
   type CentralTarget,
   dedupeTargets,
@@ -35,7 +36,7 @@ import { createVisibilityResolver, type RepoVisibility } from "../github/repo-vi
 import { type SlugKey, slugKey } from "../github/slug.js";
 import type { Io } from "../io.js";
 import type { Private } from "../private.js";
-import { describeProblem, type Problem, RERUN_ADVICE } from "../problem.js";
+import { describeProblem, type Problem, RERUN_ADVICE, refusalText } from "../problem.js";
 import type { ArtifactUploader } from "../report/artifact-report.js";
 import { applyMarkerInjection } from "../report/delivery.js";
 import {
@@ -69,7 +70,7 @@ export interface TargetsConfig extends Pick<RunFlowConfig, "privateRepos" | "sel
   /** The `repos-dir` input: a directory of central files, empty when unset. */
   reposDir: string;
 
-  /** The `repos` input as written, split and judged by parseReposInput; empty when unset. */
+  /** The `repos` input as written, split and judged by parseReposInputUnder; empty when unset. */
   reposInput: string;
 
   /** The owner a bare `<name>.yml` file under repos-dir belongs to. */
@@ -314,7 +315,7 @@ interface MaskedFleet {
   remote: Array<RemoteTarget | RejectedTarget>;
   plan: RedactionPlan;
   visibilityOf: (slug: string) => RepoVisibility;
-  skipGroups: Array<{ reason: string; repos: Parameters<typeof formatSkipNotice>[0]["repos"] }>;
+  skipGroups: SkipGroup[];
   filteredOutCount: number;
   redact: boolean;
 }
@@ -390,7 +391,10 @@ function remoteFleet(api: GitHubClient, cfg: TargetsConfig): ResultAsync<RemoteF
       return ok(none);
     }
 
-    const parsed = yield* parseReposInput(cfg.reposInput);
+    const parsed = yield* parseReposInputUnder(
+      cfg.reposInput,
+      refusalText(cfg.privateRepos === "redact", true),
+    );
     if (parsed.discover) {
       const discovered = yield* discoverRepos(api, cfg.discoveryFilters);
       return ok(discoveredFleet(discovered));

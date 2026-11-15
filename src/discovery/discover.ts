@@ -71,10 +71,27 @@ export const DEFAULT_DISCOVERY_FILTERS: DiscoveryFilters = {
   exclude: [],
 };
 
+/**
+ * The repositories one filter dropped. `reason` quotes the operator's filter; `sealedReason` is its form for a run that
+ * hides private repositories, set only where the quoted text could name one: an exclude pattern, told by its 1-based
+ * position in the `exclude` list. A pattern names a repository it skipped, or one a negated pattern kept.
+ */
+export interface SkipGroup {
+  reason: string;
+  sealedReason?: string;
+  repos: FilteredRepoRef[];
+}
+
 export interface DiscoveryResult {
   repos: DiscoveredRepoRef[];
-  filtered: Array<{ reason: string; repos: FilteredRepoRef[] }>;
+  filtered: SkipGroup[];
 }
+
+/** One filter's verdict on one repository: null keeps it. */
+type SkipReason = Pick<SkipGroup, "reason" | "sealedReason"> | null;
+
+/** A verdict whose reason quotes no repository name, so it needs no sealed form. */
+const skippedBy = (reason: string): SkipReason => ({ reason });
 
 /** Shared by the rule that emits it and formatSkipNotice, which special-cases it for the unarchive-to-manage prose; a literal in one place and not the other would silently drop that guidance. */
 const ARCHIVED_REASON = "archived";
@@ -138,32 +155,32 @@ function applyFilters(
   repos: readonly DiscoveredRepo[],
   filters: DiscoveryFilters,
 ): DiscoveryResult {
-  const rules: Array<(repo: DiscoveredRepo) => string | null> = [
+  const rules: Array<(repo: DiscoveredRepo) => SkipReason> = [
     (repo) => {
       const isInternal = repo.visibility === "internal";
       if (filters.visibility === "internal" && !isInternal) {
-        return "visibility=internal";
+        return skippedBy("visibility=internal");
       }
       if (filters.visibility === "private" && isInternal) {
-        return "visibility=private";
+        return skippedBy("visibility=private");
       }
       return null;
     },
     (repo) => {
       if (filters.archived === "skip" && repo.archived) {
-        return ARCHIVED_REASON;
+        return skippedBy(ARCHIVED_REASON);
       }
       if (filters.archived === "only" && !repo.archived) {
-        return "archived=only";
+        return skippedBy("archived=only");
       }
       return null;
     },
     (repo) => {
       if (filters.forks === "exclude" && repo.fork) {
-        return "forks=exclude";
+        return skippedBy("forks=exclude");
       }
       if (filters.forks === "only" && !repo.fork) {
-        return "forks=only";
+        return skippedBy("forks=only");
       }
       return null;
     },
@@ -172,22 +189,28 @@ function applyFilters(
         filters.topics.length > 0 &&
         !(repo.topics ?? []).some((topic) => filters.topics.includes(topic.toLowerCase()))
       ) {
-        return `topics (has none of: ${filters.topics.join(", ")})`;
+        return skippedBy(`topics (has none of: ${filters.topics.join(", ")})`);
       }
       return null;
     },
     (repo) => {
-      const hit = filters.exclude.find((exclude) => excludeMatches(exclude, repo.full_name));
-      return hit ? `exclude pattern "${hit.pattern}"` : null;
+      const at = filters.exclude.findIndex((exclude) => excludeMatches(exclude, repo.full_name));
+      const hit = filters.exclude[at];
+      return hit === undefined
+        ? null
+        : {
+            reason: `exclude pattern "${hit.pattern}"`,
+            sealedReason: `exclude pattern #${at + 1} (its text is hidden under private-repos: redact)`,
+          };
     },
   ];
   const kept: DiscoveredRepoRef[] = [];
-  const filtered = new Map<string, FilteredRepoRef[]>();
+  const filtered = new Map<string, SkipGroup>();
   for (const repo of repos) {
-    let reason: string | null = null;
+    let skipped: SkipReason = null;
     for (const rule of rules) {
-      reason = rule(repo);
-      if (reason) {
+      skipped = rule(repo);
+      if (skipped) {
         break;
       }
     }
@@ -195,32 +218,27 @@ function applyFilters(
       slug: repo.full_name,
       visibility: normalizeVisibility(repo),
     };
-    if (!reason) {
+    if (!skipped) {
       kept.push(ref);
       continue;
     }
-    const group = filtered.get(reason);
+    const group = filtered.get(skipped.reason);
     if (group) {
-      group.push(sealFiltered(ref));
+      group.repos.push(sealFiltered(ref));
     } else {
-      filtered.set(reason, [sealFiltered(ref)]);
+      filtered.set(skipped.reason, { ...skipped, repos: [sealFiltered(ref)] });
     }
   }
-  return {
-    repos: kept,
-    filtered: [...filtered.entries()].map(([reason, group]) => ({ reason, repos: group })),
-  };
+  return { repos: kept, filtered: [...filtered.values()] };
 }
 
 /**
  * One aggregate notice per filter reason: per-repo notices for a "*" fleet would flood the annotations UI (GitHub caps
- * annotations per step). Under `redactPrivate` only public slugs are listed and hidden ones become a count; under
- * `show` the operator opted into naming them, so the seal opens here.
+ * annotations per step). Under `redactPrivate` only public slugs are listed, hidden ones become a count, and every
+ * notice states the sealed reason, so no pattern's text is printed; under `show` the operator opted into naming them,
+ * so the seal opens here.
  */
-export function formatSkipNotice(
-  group: { reason: string; repos: FilteredRepoRef[] },
-  redactPrivate: boolean,
-): string {
+export function formatSkipNotice(group: SkipGroup, redactPrivate: boolean): string {
   const named: string[] = redactPrivate
     ? group.repos.flatMap((repo) => (repo.visibility === "public" ? [repo.slug] : []))
     : group.repos.map((repo) => (isPrivate(repo.slug) ? revealPrivate(repo.slug) : repo.slug));
@@ -241,5 +259,6 @@ export function formatSkipNotice(
   if (group.reason === ARCHIVED_REASON) {
     return `repos: "*" discovery skipped ${count} because settings writes fail on archived repositories; unarchive them to manage them${names}`;
   }
-  return `repos: "*" discovery skipped ${count} by ${group.reason}${names}`;
+  const reason = redactPrivate ? (group.sealedReason ?? group.reason) : group.reason;
+  return `repos: "*" discovery skipped ${count} by ${reason}${names}`;
 }

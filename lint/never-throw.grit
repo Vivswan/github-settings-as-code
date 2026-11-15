@@ -5,9 +5,8 @@
 // Reach and exemptions are the plugin's `overrides` entry in biome.local.jsonc, with `includes` relative to the repository
 // root; a top-level `plugins[].includes` matches the absolute path (biomejs/biome#11082), so the checkout's parent
 // directories would decide the reach. The rule covers src/** only; .github/scripts/ stays exempt by policy, since a
-// build script may throw on a user-caused failure.
-//   src/cli/inputs.ts  -> one `// biome-ignore lint/plugin:` suppression on the InvalidArgumentError throw: commander's
-//                         argParser can only refuse a value by throwing
+// build script may throw on a user-caused failure. No file under src/ suppresses the rule: a refusal inside a
+// commander argParser goes through the command's own error(), not a thrown InvalidArgumentError.
 //
 // GritQL has no scopes, so a second binding of the caught name anywhere in the catch body flags every rethrow in that
 // body, not only the shadowed one; the fix is to rename. The regex reads the literal's source text, so BUG: must open

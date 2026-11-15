@@ -152,6 +152,37 @@ const SPECIMENS = {
       "reads exactly one settings file, and only mode: render takes a newline- or comma-separated " +
       "list. Name one file, or set mode: render to fold the list into one document",
   ],
+  "input-exclude-pattern-invalid-hidden": [
+    {
+      code: "input-exclude-pattern-invalid-hidden",
+      position: 2,
+      reason: "it takes at most one slash, with a glob on each side of it",
+      revealable: true,
+    },
+    'the "exclude" input pattern #2 is not a usable glob: it takes at most one slash, with a glob on each side ' +
+      'of it. Write "<name-glob>" or "<owner-glob>/<name-glob>", where a glob is letters, digits, ".", "-", "_", ' +
+      '"*", "?", and the classes "[abc]", "[!abc]", or "[^abc]" over those characters, with one optional leading ' +
+      '"!" negating the whole pattern. The pattern is named by its place in the list, counted from 1: its text is ' +
+      "hidden under private-repos: redact, since it may name a private repository; set private-repos: show to print it",
+  ],
+  "repos-input-invalid-entries-hidden": [
+    {
+      code: "repos-input-invalid-entries-hidden",
+      invalid: [1, 3, 5],
+      duplicated: [4],
+      revealable: true,
+    },
+    'the "repos" input has 4 invalid entries: entries #1, #3 and #5 are not owner/name slugs (use values like ' +
+      '"octocat/hello-world", comma- or newline-separated); entry #4 is listed more than once (keep exactly one ' +
+      "entry per repository). An entry is named by its place in the list, counted from 1: its text is hidden " +
+      "under private-repos: redact, since it may name a private repository; set private-repos: show to print it. " +
+      'Or use "*" alone to discover repositories',
+  ],
+  "input-repository-not-slug-hidden": [
+    { code: "input-repository-not-slug-hidden", revealable: false },
+    'cannot target a repository: the "repository" input is not an owner/name slug (its text is hidden, since it ' +
+      'may name a private repository). Set it (--repository on the command line) to a value like "octocat/hello-world"',
+  ],
   "input-repository-not-slug": [
     { code: "input-repository-not-slug", value: "nope" },
     'cannot target a repository: "nope" is not an owner/name slug. Set the "repository" input (--repository on the command line) to a value like "octocat/hello-world"; inside GitHub Actions, GITHUB_REPOSITORY supplies it',

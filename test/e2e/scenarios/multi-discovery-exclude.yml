@@ -3,7 +3,8 @@
 # character after the dash, so it drops tmp-1 and keeps tmp-20, and
 # "E2E-Owner/legacy-*" matches the whole owner/name case-insensitively. The
 # action must issue zero requests to the two excluded repos, and the skip notice
-# names the pattern that fired.
+# names the pattern that fired by its place in the list: the run redacts by
+# default, so no pattern's text is printed.
 name: multi-discovery-exclude
 settings: {}
 discovery:
@@ -48,8 +49,8 @@ expect:
     e2e-owner/svc-b: applied
     e2e-owner/tmp-20: applied
   stdout_contains:
-    - 'skipped 1 repository by exclude pattern "tmp-?": e2e-owner/tmp-1'
-    - 'skipped 1 repository by exclude pattern "E2E-Owner/legacy-*": e2e-owner/legacy-old'
+    - "skipped 1 repository by exclude pattern #1 (its text is hidden under private-repos: redact): e2e-owner/tmp-1"
+    - "skipped 1 repository by exclude pattern #2 (its text is hidden under private-repos: redact): e2e-owner/legacy-old"
   never:
     - "GET /repos/e2e-owner/tmp-1"
     - "GET /repos/e2e-owner/legacy-old"

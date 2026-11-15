@@ -23,14 +23,14 @@ export const REFUSED_EXCLUDE_PATTERNS: readonly string[] = [
 
 /**
  * The accepted shapes that drop a repo or two, aimed at pool repo `n`: literals, either case, "*", "?", classes, slugs,
- * and ones that match nothing. The whole slug is spelled only with `wholeSlug`: the action names a pattern in its skip
- * notice, so the generator spells no non-public repository's slug.
+ * and ones that match nothing. The whole slug is spelled for a non-public repository too: a redacted run tells such a
+ * pattern by its position, so the leak check judges that on every draw.
  */
-export function narrowExcludePatterns(n: number, wholeSlug = true): readonly string[] {
+export function narrowExcludePatterns(n: number): readonly string[] {
   const name = `disc-${n}`;
-  const slugs = wholeSlug ? [`${POOL_OWNER}/${name}`, `E2E-Owner/Disc-${n}`] : [];
   return [
-    ...slugs,
+    `${POOL_OWNER}/${name}`,
+    `E2E-Owner/Disc-${n}`,
     name,
     name.toUpperCase(),
     `*-${n}`,
@@ -135,10 +135,7 @@ function genExclude(
   const refused = rng.bool(1 / 6) && force !== "lists";
   const patterns = Array.from({ length: rng.int(3) + 1 }, () => {
     const target = rng.bool(0.7) ? n : rng.int(pool.length);
-    const isPublic = pool[target]?.visibility === "public";
-    return rng.pick(
-      rng.bool(0.06) ? wideExcludePatterns(target) : narrowExcludePatterns(target, isPublic),
-    );
+    return rng.pick(rng.bool(0.06) ? wideExcludePatterns(target) : narrowExcludePatterns(target));
   });
   if (refused) {
     patterns[rng.int(patterns.length)] = rng.pick(REFUSED_EXCLUDE_PATTERNS);

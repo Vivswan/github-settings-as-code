@@ -7,6 +7,7 @@ import {
   discoverRepos,
   type FilteredRepoRef,
   formatSkipNotice,
+  type SkipGroup,
 } from "../../src/discovery/discover.js";
 import { compileExcludePattern } from "../../src/discovery/exclude-pattern.js";
 import { markPrivate } from "../../src/private.js";
@@ -33,7 +34,7 @@ describe("discoverRepos", () => {
   };
   const slugs = (repos: DiscoveredRepoRef[]) => repos.map((repo) => repo.slug);
   /** Filtered refs by reason; a non-public one compares against its sealed slug (`hidden`). */
-  const filteredSlugs = (filtered: Array<{ reason: string; repos: FilteredRepoRef[] }>) =>
+  const filteredSlugs = (filtered: SkipGroup[]) =>
     filtered.map((group) => ({ reason: group.reason, slugs: group.repos.map((r) => r.slug) }));
   type FilteredSlugs = ReturnType<typeof filteredSlugs>;
   const hidden = markPrivate;
@@ -260,6 +261,8 @@ describe("formatSkipNotice", () => {
     visibility === "public" ? { slug, visibility } : { slug: markPrivate(slug), visibility };
   const forks = (...repos: FilteredRepoRef[]) => ({ reason: "forks=exclude", repos });
   const archived = (...repos: FilteredRepoRef[]) => ({ reason: "archived", repos });
+  const SEALED = "exclude pattern #3 (hidden)";
+  const excluded = { reason: 'exclude pattern "o/vault"', sealedReason: SEALED };
   const ARCHIVED_PROSE =
     "because settings writes fail on archived repositories; unarchive them to manage them";
   const twentyTwoPublic = Array.from({ length: 22 }, (_, i) => ref(`o/pub${i}`));
@@ -268,7 +271,7 @@ describe("formatSkipNotice", () => {
     .map((repo) => repo.slug)
     .join(", ");
 
-  test.each<[string, { reason: string; repos: FilteredRepoRef[] }, boolean, string]>([
+  test.each<[string, SkipGroup, boolean, string]>([
     [
       "without redaction, every slug is listed regardless of visibility",
       forks(ref("o/a"), ref("o/b", "private"), ref("o/c", "internal")),
@@ -311,6 +314,31 @@ describe("formatSkipNotice", () => {
       archived(ref("o/b", "private"), ref("o/c", "internal")),
       true,
       `repos: "*" discovery skipped 2 private or internal repositories ${ARCHIVED_PROSE}`,
+    ],
+    // An exclude pattern can spell a hidden name it skipped or kept, so redaction tells every pattern by position.
+    [
+      "redaction states the sealed reason when the group hides a repository",
+      { ...excluded, repos: [ref("o/a"), ref("o/vault", "private")] },
+      true,
+      `repos: "*" discovery skipped 2 repositories by ${SEALED}: o/a, and 1 private or internal repository`,
+    ],
+    [
+      "redaction states the sealed reason in a count-only notice",
+      { ...excluded, repos: [ref("o/vault", "internal")] },
+      true,
+      `repos: "*" discovery skipped 1 private or internal repository by ${SEALED}`,
+    ],
+    [
+      "redaction states the sealed reason when every skipped repository is public",
+      { ...excluded, repos: [ref("o/a")] },
+      true,
+      `repos: "*" discovery skipped 1 repository by ${SEALED}: o/a`,
+    ],
+    [
+      "without redaction the pattern is quoted beside every slug",
+      { ...excluded, repos: [ref("o/vault", "private")] },
+      false,
+      'repos: "*" discovery skipped 1 repository by exclude pattern "o/vault": o/vault',
     ],
     [
       "redaction caps the public list at 20 before counting the hidden",

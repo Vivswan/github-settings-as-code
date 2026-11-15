@@ -7,7 +7,7 @@
  * here does.
  */
 
-import { InvalidArgumentError, Option } from "commander";
+import { type Command, Option } from "commander";
 import type { InputReader } from "../index.js";
 import {
   INPUT_DECLS,
@@ -78,6 +78,9 @@ export const INIT_INPUTS: readonly InputName[] = INPUT_NAMES.filter((name) =>
 /** init's one reworded flag: the declaration describes the file apply and check READ, and init WRITES it; every other init flag keeps its declared text. */
 export const INIT_SETTINGS_FILE_DESCRIPTION =
   "Where the settings document is written: the file apply and check read. One path; an existing file is kept unless --force is passed.";
+
+/** The error code of a refusal this program words itself, from names it declares: the one parse error whose message the program prints as written. */
+export const OWN_REFUSAL = "gsac.refusal";
 
 /** Every input some subcommand or the program exposes; the mode is the subcommand itself. */
 export function exposedInputs(): InputName[] {
@@ -166,15 +169,17 @@ function accumulate(value: string, previous?: string): string {
   return previous === undefined ? value : `${previous}\n${value}`;
 }
 
-/** A repeated single-value flag is refused: joined, it would form a value the action cannot receive. */
-export function once(flag: string): (value: string, previous?: string) => string {
-  return (value, previous) => {
-    if (previous !== undefined) {
-      // biome-ignore lint/plugin: commander's argParser can only refuse a value by throwing InvalidArgumentError
-      throw new InvalidArgumentError(`--${flag} takes one value and was given more than once`);
-    }
-    return value;
-  };
+/**
+ * A repeated single-value flag is refused: joined, it would form a value the action cannot receive. The refusal is
+ * `command`'s own error exit and names the flag alone, since either value may name a private repository.
+ */
+export function once(flag: string, command: Command): (value: string, previous?: string) => string {
+  return (value, previous) =>
+    previous === undefined
+      ? value
+      : command.error(`--${flag} takes one value and was given more than once`, {
+          code: OWN_REFUSAL,
+        });
 }
 
 /**
@@ -185,10 +190,11 @@ export function once(flag: string): (value: string, previous?: string) => string
 export function inputOption(
   name: InputName,
   subcommand: Subcommand,
+  command: Command,
   description = inputDescription(name, subcommand),
 ): Option {
-  const parse = isList(name) ? accumulate : once(name);
-  return new Option(`--${name} <value>`, description).argParser(parse);
+  const option = new Option(`--${name} <value>`, description);
+  return isList(name) ? option.argParser(accumulate) : option.argParser(once(name, command));
 }
 
 /** Commander's attribute for each flag (camelCase of the name), read from commander itself. */

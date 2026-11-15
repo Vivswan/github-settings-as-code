@@ -316,7 +316,9 @@ describe("argv -> config equals env -> config", () => {
     if (unknownFlag === undefined) {
       expect(actual.stderr).toBe(`error: ${describeProblem(expected.error)}\n`);
     } else {
-      expect(actual.stderr).toStartWith(`error: unknown option '--${unknownFlag}'`);
+      expect(actual.stderr).toBe(
+        "error: an option is not one the command takes; run it with --help for its options\n",
+      );
     }
   });
 });
@@ -523,18 +525,15 @@ describe("the per-mode flag split", () => {
     });
   }
 
-  /** A single-value flag given twice is refused by commander, naming the flag and the second value. */
+  /** A single-value flag given twice is refused naming the flag alone: neither value is printed. */
   async function expectRepeatRefused(name: InputName): Promise<void> {
-    // Long values: a token value is masked, and a one-letter mask would eat the message.
     const actual = await throughArgv(
       [...argvWithout(name), `--${name}`, "first-value", `--${name}`, "second-value"],
       {},
     );
-    // The token's echoed value is masked (registered before the parse); the rest print as given.
-    const echoed = name === "token" ? "***" : "second-value";
     expect(actual.code, name).toBe(1);
     expect(actual.stderr, name).toBe(
-      `error: option '--${name} <value>' argument '${echoed}' is invalid. --${name} takes one value and was given more than once\n`,
+      `error: --${name} takes one value and was given more than once\n`,
     );
   }
 

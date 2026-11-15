@@ -35,6 +35,37 @@ Redaction hides values, not the shape of the outcome. The public surfaces still 
 
 These are closed enumerations and numeric codes, safe to show, and enough to tell whether the fleet is healthy and which section broke. What they never carry is the slug, a live setting, a desired setting, or an API error message.
 
+A repository that a `repos: "*"` discovery filter drops is not a target, so it gets no placeholder: the skip notice counts it. The notice also says which filter dropped it. An `exclude` pattern can spell a private name, so one rule covers every pattern:
+
+| Policy                  | Every `exclude` pattern is named by                                                       |
+| ----------------------- | ----------------------------------------------------------------------------------------- |
+| `private-repos: redact` | its place in the `exclude` list, counted from 1: `exclude pattern #2`. Its text is hidden |
+| `private-repos: show`   | its text: `exclude pattern "tmp-*"`                                                       |
+
+The rule does not judge the pattern or what it skipped. A pattern can name a repository it skips, and a negated one (`!secret-repo`) names the repository it keeps, so a notice listing only public repositories could still spell a private name. The public repositories a pattern skipped are still listed.
+
+The other filters are named in full, in either policy:
+
+| Filter                            | What the notice prints                                                |
+| --------------------------------- | --------------------------------------------------------------------- |
+| `visibility`, `archived`, `forks` | one of a fixed set of values                                          |
+| `topics`                          | the topics you supplied, lowercased: `topics (has none of: platform)` |
+
+A `topics` value is your input and reaches the log unredacted, so keep a private identifier, such as a private repository's name, out of the topic filter.
+
+An input that takes one of a fixed set of words (`visibility`, `archived`, `forks`, `affiliation`, `private-repos`, `undeclared`, and the like) quotes a value it refuses, in either policy. A private identifier does not belong there either.
+
+A refused input that can hold a repository name (`exclude`, `repos`, `repository`) follows the exclude rule. The refusal is printed before any repository is listed, so the run cannot know whether the text names a private repository. Under `private-repos: redact` it hides the text and still says the flaw and the fix, in words that quote no character of the input:
+
+| Refused input                     | The refusal names it as                   |
+| --------------------------------- | ----------------------------------------- |
+| a malformed `exclude` pattern     | `pattern #2`, its place in the list       |
+| a malformed `repos` entry         | `entry #2`, at every place it holds       |
+| a valid `repos` entry given again | `entry #3`, at each place after its first |
+| a malformed `repository` value    | the `repository` input, without its text  |
+
+Under `private-repos: show` each refusal quotes the text. A missing `repository` falls back to the workflow's own repository, which is never hidden.
+
 ## One seal, every mode
 
 Every target ends the same way, whichever mode ran it: its lines and its end state go through one channel, which closes open for a shown target and sealed for a hidden one. Only the seal's projections open it, and they render the public view alone. No mode has a redaction path of its own.

@@ -6,9 +6,9 @@
 
 import { err, ok, type Result, safeTry } from "neverthrow";
 import type { DiscoveryFilters } from "../discovery/discover.js";
-import { LIST_SEPARATOR, parseReposInput } from "../discovery/repos-input.js";
+import { LIST_SEPARATOR, parseReposInputUnder } from "../discovery/repos-input.js";
 import { LAYERINGS } from "../engine/layers.js";
-import type { Problem } from "../problem.js";
+import { type Problem, type RefusalText, refusalText } from "../problem.js";
 import { PRIVATE_REPORT_CHANNELS } from "../report/delivery.js";
 import type { RunFlowConfig } from "./deliver.js";
 import {
@@ -107,12 +107,14 @@ export type SnapshotFileConfig = Extract<RunConfig, { kind: "snapshot"; form: "f
 type SnapshotDirConfig = Extract<RunConfig, { kind: "snapshot"; form: "dir" }>;
 
 /** What both snapshot forms read before the destination picks the arm. */
-function readSnapshotBase(input: Inputs, env: ConfigEnv) {
+function readSnapshotBase(input: Inputs, env: ConfigEnv, revealable: boolean) {
   return safeTry(function* () {
     const token = yield* readToken(input, env);
     const policies = yield* readPolicies(input);
-    const filters = yield* readDiscoveryFilters(input);
+    const refusals = refusalText(policies.privateRepos === "redact", revealable);
+    const filters = yield* readDiscoveryFilters(input, refusals);
     return ok({
+      refusals,
       base: {
         kind: "snapshot" as const,
         token,
@@ -136,6 +138,7 @@ function readSnapshotBase(input: Inputs, env: ConfigEnv) {
 function refuseTargetInputs(
   reposInput: string,
   discoveryFiltersSet: readonly string[],
+  refusals: RefusalText,
 ): Result<void, Problem> {
   const filtersWithout = (targets: "explicit-repos" | "repos-dir"): Result<void, Problem> =>
     discoveryFiltersSet.length > 0
@@ -144,7 +147,7 @@ function refuseTargetInputs(
   if (!reposInput) {
     return filtersWithout("repos-dir");
   }
-  return parseReposInput(reposInput).andThen((parsed) =>
+  return parseReposInputUnder(reposInput, refusals).andThen((parsed) =>
     parsed.discover ? ok(undefined) : filtersWithout("explicit-repos"),
   );
 }
@@ -154,9 +157,10 @@ function parseSnapshotFileArm(
   input: Inputs,
   env: ConfigEnv,
   snapshotFile: string,
+  revealable: boolean,
 ): Result<SnapshotFileConfig, Problem> {
   return safeTry(function* () {
-    const { base, filters } = yield* readSnapshotBase(input, env);
+    const { base, filters, refusals } = yield* readSnapshotBase(input, env, revealable);
     if (input.value("repos") || input.value("repos-dir")) {
       return err({ code: "input-snapshot-file-with-multi" });
     }
@@ -167,7 +171,7 @@ function parseSnapshotFileArm(
         targets: "snapshot-file",
       });
     }
-    const repo = yield* readSingleTarget(input, base.selfSlug);
+    const repo = yield* readSingleTarget(input, base.selfSlug, refusals);
     return ok({ ...base, form: "file" as const, repo, snapshotFile });
   });
 }
@@ -192,7 +196,8 @@ export function parseSnapshotFileConfig(
   if (LIST_SEPARATOR.test(path)) {
     return err({ code: "input-settings-file-is-list", value: path, mode: "init" });
   }
-  return parseSnapshotFileArm(inputs(read), env, path);
+  // init exposes no private-repos flag, so its refusals hide text without pointing at one.
+  return parseSnapshotFileArm(inputs(read), env, path, false);
 }
 
 /** The dir arm: the fleet inputs, the single-repo one refused. */
@@ -202,7 +207,7 @@ function parseSnapshotDirArm(
   snapshotDir: string,
 ): Result<SnapshotDirConfig, Problem> {
   return safeTry(function* () {
-    const { base, filters } = yield* readSnapshotBase(input, env);
+    const { base, filters, refusals } = yield* readSnapshotBase(input, env, true);
     if (input.value("repository")) {
       return err({ code: "input-repository-with-snapshot-dir" });
     }
@@ -213,7 +218,7 @@ function parseSnapshotDirArm(
       return err({ code: "input-snapshot-dir-without-targets" });
     }
 
-    yield* refuseTargetInputs(reposInput, filters.discoveryFiltersSet);
+    yield* refuseTargetInputs(reposInput, filters.discoveryFiltersSet, refusals);
     return ok({
       ...base,
       form: "dir" as const,
@@ -246,7 +251,7 @@ function parseSnapshotConfig(
     return err({ code: "input-snapshot-destination-missing" });
   }
   if (snapshotFile) {
-    return parseSnapshotFileArm(input, env, snapshotFile);
+    return parseSnapshotFileArm(input, env, snapshotFile, true);
   }
 
   return parseSnapshotDirArm(input, env, snapshotDir);
@@ -332,7 +337,11 @@ function parseMultiArm(
     return err({ code: "input-settings-file-with-multi" });
   }
 
-  return refuseTargetInputs(targets.reposInput, filters.discoveryFiltersSet).map(() => ({
+  return refuseTargetInputs(
+    targets.reposInput,
+    filters.discoveryFiltersSet,
+    refusalText(common.privateRepos === "redact", true),
+  ).map(() => ({
     ...common,
     kind: "multi" as const,
     reposDir: targets.reposDir,
@@ -370,7 +379,11 @@ function parseSingleArm(
     });
   }
 
-  return readSingleTarget(input, common.selfSlug).map((repo) => ({
+  return readSingleTarget(
+    input,
+    common.selfSlug,
+    refusalText(common.privateRepos === "redact", true),
+  ).map((repo) => ({
     ...common,
     kind: "single" as const,
     repo,
@@ -405,7 +418,10 @@ export function parseConfig(
     }
 
     const common = yield* readCommon(input, env, mode, capabilities);
-    const filters = yield* readDiscoveryFilters(input);
+    const filters = yield* readDiscoveryFilters(
+      input,
+      refusalText(common.privateRepos === "redact", true),
+    );
     const targets: TargetInputs = {
       reposInput: input.value("repos"),
       reposDir: input.value("repos-dir"),

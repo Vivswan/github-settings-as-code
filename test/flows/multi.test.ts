@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Decrypter, generateX25519Identity, identityToRecipient } from "age-encryption";
 import { DEFAULT_DISCOVERY_FILTERS } from "../../src/discovery/discover.js";
+import { compileExcludePattern } from "../../src/discovery/exclude-pattern.js";
 import { SectionSelection } from "../../src/engine/section-selection.js";
 import { runMulti } from "../../src/flows/multi.js";
 import { REDACTED_NOTE, type TargetOutcome } from "../../src/flows/redact.js";
@@ -518,6 +519,58 @@ describe("runMulti redaction (private-repos: redact)", () => {
     ]);
     // Pinned whole: two clean targets print no line, hidden or shown, so a sweep for the slug would have no control.
     expect(annotations).toEqual([]);
+  });
+
+  // Without it, a pattern's text names a private repository: one it skipped, or one a negated pattern kept.
+  test("a redacted run names every exclude pattern by its place, never by its text", async () => {
+    const api = () =>
+      new MockApi({
+        "GET /user/repos?affiliation=owner&per_page=100&page=1": {
+          data: [
+            { full_name: "o/vault", private: true },
+            { full_name: "o/old-tool", private: false },
+            { full_name: "o/tool", private: false },
+            { full_name: "o/secret-repo", private: true },
+          ],
+        },
+        "GET /repos/o/secret-repo": { data: { has_wiki: false, private: true } },
+        "GET /repos/o/secret-repo/contents/.github/settings.yml": {
+          data: "repository:\n  has_wiki: false\n",
+        },
+      });
+    const run = (privateRepos: "redact" | "show") =>
+      cfg({
+        reposInput: "*",
+        mode: "check",
+        privateRepos,
+        discoveryFilters: {
+          ...DEFAULT_DISCOVERY_FILTERS,
+          exclude: ["o/vault", "old-*", "!SECRET-REPO"].map((pattern) =>
+            compileExcludePattern(pattern)._unsafeUnwrap(),
+          ),
+        },
+        discoveryFiltersSet: ["exclude"],
+      });
+    const hidden = captureIo();
+    const targets = await runTargets(api(), run("redact"), hidden.io);
+    const by = (place: number) =>
+      `by exclude pattern #${place} (its text is hidden under private-repos: redact)`;
+    expect(hidden.annotations).toEqual([
+      `notice: repos: "*" discovery skipped 1 private or internal repository ${by(1)}`,
+      `notice: repos: "*" discovery skipped 1 repository ${by(2)}: o/old-tool`,
+      `notice: repos: "*" discovery skipped 1 repository ${by(3)}: o/tool`,
+    ]);
+    // The ordered log holds a hidden slug only where a runner needs it: the mask registration.
+    expect(
+      hidden.events.filter((e) => /vault|secret-repo/i.test(e) && !e.startsWith("mask: ")),
+    ).toEqual([]);
+    const shown = captureIo();
+    const shownTargets = await runTargets(api(), run("show"), shown.io);
+    expectSealed(
+      { ...publicSurfaces(hidden), "returned targets": JSON.stringify(targets) },
+      { ...publicSurfaces(shown), "returned targets": JSON.stringify(shownTargets) },
+      ["o/vault", "old-*", "!SECRET-REPO", "o/secret-repo"],
+    );
   });
 
   test("a probe error fails closed: an unknown-visibility target is redacted", async () => {
