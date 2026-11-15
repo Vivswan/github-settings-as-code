@@ -8,7 +8,6 @@
  *                      tableFault() before rendering, tableBody() when the committed page is read back
  */
 
-import { decodeHTMLStrict } from "entities";
 import {
   gfmAutolinkLiteralFromMarkdown,
   gfmAutolinkLiteralToMarkdown,
@@ -21,16 +20,9 @@ import { err, ok, type Result } from "neverthrow";
 /** The autolink extension's own rules for what the serializer must escape so text is not linked by accident. */
 const AUTOLINK = gfmAutolinkLiteralToMarkdown();
 
-/** Its colon rule covers a colon after `p` or `s` and before `/`; GitHub also links an uppercase scheme, so the same rule is repeated for any letter before the colon. */
-const ANY_SCHEME = {
-  unsafe: (AUTOLINK.unsafe ?? [])
-    .filter((pattern) => pattern.character === ":")
-    .map((pattern) => ({ ...pattern, before: "[A-Za-z]" })),
-};
-
 /** The GFM constructs GitHub reads beyond CommonMark that free text could open: a table cell boundary, a strikethrough, and a bare URL or address. */
 const GFM = {
-  extensions: [gfmTableToMarkdown(), gfmStrikethroughToMarkdown(), AUTOLINK, ANY_SCHEME],
+  extensions: [gfmTableToMarkdown(), gfmStrikethroughToMarkdown(), AUTOLINK],
 };
 
 /** The same, with every link in the `[text](target)` form: a table escapes a pipe as `\|`, which an angle autolink would show percent-encoded in its text. */
@@ -42,11 +34,7 @@ const LINK_BARE_URLS = gfmAutolinkLiteralFromMarkdown().transforms?.[0];
 /** The content of one line of running text, as the serializer takes it. */
 type Phrasing = Extract<Parameters<typeof toMarkdown>[0], { type: "paragraph" }>["children"];
 
-/**
- * `value` as text and links: each bare URL the grammar finds is a link to itself. One holding a character
- * reference (`&amp;`) stays text, since GitHub decodes a reference inside a link target and the link would
- * point at another URL than the one written.
- */
+/** `value` as text and links: each bare URL the grammar finds is a link to itself. */
 function linked(value: string): Phrasing {
   if (LINK_BARE_URLS === undefined) {
     throw new Error(
@@ -56,9 +44,7 @@ function linked(value: string): Phrasing {
 
   const children: Phrasing = [{ type: "text", value }];
   LINK_BARE_URLS({ type: "root", children: [{ type: "paragraph", children }] });
-  return children.flatMap((node) =>
-    node.type === "link" && decodeHTMLStrict(node.url) !== node.url ? node.children : [node],
-  );
+  return children;
 }
 
 /** The serializer ends a non-empty node with one line feed; a line break in the text becomes a space first, so the text stays on its row or its line. */

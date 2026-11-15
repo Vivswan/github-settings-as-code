@@ -1,7 +1,6 @@
 /**
  * A reader for Markdown the report writer produced, the step summary and the report tables, shared by the tests.
- * It reads the GFM constructs the writer escapes for. The grammar is micromark's, and markdown.test.ts names the two
- * points where it differs from GitHub's.
+ * It reads the GFM constructs the writer escapes for.
  */
 
 import { fromMarkdown } from "mdast-util-from-markdown";
