@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { err, ok } from "neverthrow";
 import { resolveCentralTargets } from "../../src/discovery/central.js";
@@ -69,6 +69,39 @@ describe("resolveCentralTargets", () => {
       }),
     );
   });
+
+  test("a symbolic link is followed, and one whose target is gone is ignored with a warning: a stale link left by a rename would otherwise end the whole run as an unreadable repos-dir", () =>
+    withTempDir("central-links-", (dir) => {
+      mkdirSync(join(dir, "octo"));
+      writeFileSync(join(dir, "octo", "web.yml"), "");
+      symlinkSync("gone.yml", join(dir, "old.yml"));
+      symlinkSync("gone", join(dir, "octo", "stale.yml"));
+      symlinkSync(join("octo", "web.yml"), join(dir, "site.yml"));
+      symlinkSync("octo", join(dir, "team"));
+      const target = (owner: string, name: string, filePath: string) => ({
+        repo: { owner, name, slug: `${owner}/${name}` },
+        source: "central" as const,
+        origin: filePath,
+        filePath,
+      });
+      const broken = (path: string) =>
+        `ignoring ${path}: a symbolic link whose target cannot be read, so it defines no target repository. Repair the link or remove it`;
+
+      expect(resolveCentralTargets(dir, "example-org")).toEqual(
+        ok({
+          targets: [
+            target("octo", "web", join(dir, "octo", "web.yml")),
+            target("example-org", "site", join(dir, "site.yml")),
+            target("team", "web", join(dir, "team", "web.yml")),
+          ],
+          warnings: [
+            broken(join(dir, "octo", "stale.yml")),
+            broken(join(dir, "old.yml")),
+            broken(join(dir, "team", "stale.yml")),
+          ],
+        }),
+      );
+    }));
 
   test("a missing dir is its own problem", () => {
     expect(resolveCentralTargets("test/fixtures/nope", "example-org")).toEqual(
