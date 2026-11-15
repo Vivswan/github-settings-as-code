@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { ok } from "neverthrow";
 import { validateSectionShapes } from "../../../src/engine/validate.js";
-import { WEBHOOK_EVENTS_REFERENCE } from "../../../src/sections/webhooks/events.js";
+import { WEBHOOK_EVENTS_REFERENCE } from "../../../src/generated/spec-webhooks.js";
 
 /** The issue lines the run prints before exiting 1, or null when the document parses. */
 function problems(webhooks: unknown): string[] | null {

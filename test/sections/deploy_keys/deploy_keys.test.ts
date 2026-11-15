@@ -36,7 +36,7 @@ const STALE_KEY =
 
 /** An RSA key, the material of the undeclared retired-service entry. */
 const RETIRED_KEY =
-  "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCRetiredRetiredRetiredRetiredRetiredRetir=";
+  "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCRetiredRetiredRetiredRetiredRetiredRetio=";
 
 // The REAL OpenSSH private-key framing, assembled at runtime so no source line carries the string a secret scanner flags.
 const PRIVATE_KEY_HEADER = ["-----BEGIN", "OPENSSH PRIVATE", "KEY-----"].join(" ");

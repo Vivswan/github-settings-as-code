@@ -1,9 +1,9 @@
 /**
- * The descriptor-derived files against the installed @octokit/openapi: a bump that moves an enum, adds a rule type,
- * or reshapes a rule's parameters changes the fresh render while the committed copy stays, and nothing else reads
- * the two side by side. The nightly runs this file after installing the descriptor at @latest, so a release GitHub
- * makes fails the night before Dependabot's bump PR does. The generator's own refusals are pinned on hand-written
- * descriptors.
+ * The descriptor-derived files against the installed @octokit/openapi and @octokit/openapi-webhooks: a bump moves a
+ * fresh render while the committed copy stays, and nothing else reads the two side by side. The nightly runs this
+ * file after installing @octokit/openapi at @latest, so a release GitHub makes fails the night before Dependabot's
+ * bump PR does; the webhooks descriptor stays at its pin there. The generator's own refusals are pinned on
+ * hand-written descriptors.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -14,11 +14,13 @@ import {
   type Descriptor,
   descriptionLiteral,
   enumAt,
-  loadDescriptor,
+  loadDescriptors,
   OUTPUTS,
   render,
   renderRules,
+  repositoryWebhookVocabulary,
   type SchemaNode,
+  type WebhooksDescriptor,
 } from "../../.github/scripts/gen-openapi.js";
 import { ROOT } from "../root.js";
 
@@ -26,11 +28,11 @@ import { ROOT } from "../root.js";
 const DESCRIPTION_WIDTH = 80;
 
 describe("the committed descriptor-derived files", () => {
-  const descriptor = loadDescriptor();
+  const descriptors = loadDescriptors();
   test.each(OUTPUTS.map((output) => [output.path, output] as const))(
     "%s is a fresh render from the installed descriptor",
     (path, output) => {
-      expect(readFileSync(join(ROOT, path), "utf8")).toBe(render(output, descriptor));
+      expect(readFileSync(join(ROOT, path), "utf8")).toBe(render(output, descriptors));
     },
   );
 });
@@ -423,6 +425,68 @@ describe("the rule emitter refuses what the hand-written rows could not have sai
         ' }).nullable().describe("The parameters, or null.").optional()',
       ].join(""),
     );
+  });
+});
+
+describe("the repository webhook events", () => {
+  const REFERENCE = "https://docs.github.com/webhooks/webhook-events-and-payloads";
+  type Hook = WebhooksDescriptor["webhooks"][string];
+  const hook = (
+    slug: string,
+    scopes: readonly string[],
+    overrides: Partial<NonNullable<Hook["post"]>> = {},
+  ): Hook => ({
+    post: {
+      externalDocs: { url: `${REFERENCE}#${slug}` },
+      "x-github": { subcategory: slug, "supported-webhook-types": scopes },
+      ...overrides,
+    },
+  });
+
+  test("are kept once each across their actions, sorted, in wire spelling, and every other scope is dropped", () => {
+    const doc: WebhooksDescriptor = {
+      webhooks: {
+        "sub-issues-parent-issue-added": hook("sub-issues", ["repository", "organization", "app"]),
+        "sub-issues-parent-issue-removed": hook("sub-issues", ["repository", "app"]),
+        // Every hyphen becomes an underscore, not the first alone.
+        "custom-property-values-updated": hook("custom-property-values", ["repository"]),
+        push: hook("push", ["repository", "organization", "app"]),
+        "installation-created": hook("installation", ["app"]),
+        "projects-v2-created": hook("projects_v2", ["organization"]),
+        sponsorship: hook("sponsorship", ["sponsors_listing"]),
+      },
+    };
+    expect(repositoryWebhookVocabulary(doc)).toEqual({
+      events: ["custom_property_values", "push", "sub_issues"],
+      reference: REFERENCE,
+    });
+  });
+
+  // A skipped entry would drop an event GitHub still delivers, and the parser would refuse a valid file unseen.
+  test.each<[what: string, webhooks: WebhooksDescriptor["webhooks"], refusal: string]>([
+    [
+      "entries lacking a field the derivation reads, each named",
+      {
+        push: hook("push", ["repository"], { "x-github": { subcategory: "push" } }),
+        fork: hook("fork", ["repository"], { externalDocs: {} }),
+      },
+      "webhooks.push.post.x-github.supported-webhook-types, webhooks.fork.post.externalDocs.url missing from the webhooks descriptor",
+    ],
+    [
+      "a scope list that is not a list, which would otherwise drop the event unseen",
+      {
+        push: hook("push", ["repository"], {
+          "x-github": {
+            subcategory: "push",
+            "supported-webhook-types": "repo" as unknown as readonly string[],
+          },
+        }),
+        fork: hook("fork", ["repository"]),
+      },
+      "webhooks.push.post.x-github.supported-webhook-types missing from the webhooks descriptor",
+    ],
+  ])("the render refuses %s", (_what, webhooks, refusal) => {
+    expect(() => repositoryWebhookVocabulary({ webhooks })).toThrow(refusal);
   });
 });
 

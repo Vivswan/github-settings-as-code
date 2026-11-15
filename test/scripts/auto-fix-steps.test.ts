@@ -297,7 +297,7 @@ describe("push", () => {
           "docs/reference/coverage.md, docs/reference/undeclared-policy.md, docs/reference/permissions.md,",
           "docs/operate/check-mode.md, docs/reference/sections.md, docs/reference/inputs.md,",
           "docs/reference/architecture.md, docs/start/getting-started.md, src/generated/spec-enums.ts,",
-          "src/generated/spec-roles.ts, src/generated/spec-rules.ts, src/generated/upstream-gaps.ts), and",
+          "src/generated/spec-roles.ts, src/generated/spec-rules.ts, src/generated/spec-webhooks.ts, src/generated/upstream-gaps.ts), and",
           "src/upstream-gaps/; refusing to push\n",
         ].join(" "),
       );

@@ -36,6 +36,7 @@ const GENERATED_FILES = [
   "src/generated/spec-enums.ts",
   "src/generated/spec-roles.ts",
   "src/generated/spec-rules.ts",
+  "src/generated/spec-webhooks.ts",
   "src/generated/upstream-gaps.ts",
 ] as const;
 

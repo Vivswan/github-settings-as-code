@@ -5,6 +5,7 @@
  *   src/generated/spec-roles.ts -> the invitation role enums (the PATCH body's, the GET listing's)
  *   src/generated/spec-rules.ts -> one zod row per ruleset rule type, parameters typed as the spec types them
  *   src/generated/spec-enums.ts -> the vocabularies, bounds, and small bodies the sections send to GitHub verbatim
+ *   src/generated/spec-webhooks.ts -> the events GitHub delivers to repository webhooks, from @octokit/openapi-webhooks
  *
  * A path the descriptor no longer carries, or a shape the emitter does not know, ends the run naming it: a
  * descriptor that outgrows the emitter fails the build instead of rendering less than the spec says. The rows call
@@ -808,26 +809,136 @@ ${shapes.join("\n\n")}
 `;
 }
 
+// --- Webhook events -----------------------------------------------------------------------------------------------
+
+const WEBHOOKS_PATH = "src/generated/spec-webhooks.ts";
+
+const WEBHOOKS_DESCRIPTOR_PATH = fileURLToPath(
+  import.meta.resolve("@octokit/openapi-webhooks/generated/api.github.com.json"),
+);
+
+/** The slice of the webhooks descriptor the derivation reads; the rest of each entry is its payload schema. */
+export interface WebhooksDescriptor {
+  readonly webhooks: Readonly<
+    Record<
+      string,
+      {
+        readonly post?: {
+          readonly externalDocs?: { readonly url?: string };
+          readonly "x-github"?: {
+            readonly subcategory?: string;
+            readonly "supported-webhook-types"?: readonly string[];
+          };
+        };
+      }
+    >
+  >;
+}
+
+export function loadWebhooksDescriptor(): WebhooksDescriptor {
+  return JSON.parse(readFileSync(WEBHOOKS_DESCRIPTOR_PATH, "utf8")) as WebhooksDescriptor;
+}
+
+/** The three fields the derivation reads from one entry; an absent one is undefined. */
+function hookFields(entry: WebhooksDescriptor["webhooks"][string]) {
+  const github = entry.post?.["x-github"];
+  // A scope list of another type reads as absent: `"repo".includes("repository")` is false, which would drop the event unseen.
+  const scopes: unknown = github?.["supported-webhook-types"];
+  return {
+    "post.x-github.supported-webhook-types": Array.isArray(scopes)
+      ? (scopes as readonly string[])
+      : undefined,
+    "post.x-github.subcategory": github?.subcategory,
+    "post.externalDocs.url": entry.post?.externalDocs?.url,
+  };
+}
+
+/**
+ * The wire names of the events whose supported-webhook-types names "repository", sorted, without the "*" wildcard
+ * (the schema adds it), and the one reference page their externalDocs point at, minus the anchors. An entry lacking
+ * a field read here ends the run naming it: skipped, it would drop an event GitHub still delivers, and the parser
+ * would start refusing a valid file.
+ */
+export function repositoryWebhookVocabulary(doc: WebhooksDescriptor): {
+  events: string[];
+  reference: string;
+} {
+  const events = new Set<string>();
+  const references = new Set<string>();
+  const missing: string[] = [];
+  for (const [hook, entry] of Object.entries(doc.webhooks)) {
+    const fields = hookFields(entry);
+    const scopes = fields["post.x-github.supported-webhook-types"];
+    const slug = fields["post.x-github.subcategory"];
+    const url = fields["post.externalDocs.url"];
+    if (scopes === undefined || slug === undefined || url === undefined) {
+      const absent = Object.entries(fields).filter(([, value]) => value === undefined);
+      missing.push(...absent.map(([path]) => `webhooks.${hook}.${path}`));
+      continue;
+    }
+    if (!scopes.includes("repository")) {
+      continue;
+    }
+    // The subcategory is the docs slug (custom-property-values, issue-dependencies, sub-issues); the wire name GitHub
+    // accepts on a hook and sends in X-GitHub-Event is snake_case, the same rewrite @octokit/webhooks applies.
+    events.add(slug.replaceAll("-", "_"));
+    references.add(url.split("#")[0] as string);
+  }
+  if (missing.length > 0) {
+    throw new Error(`${missing.join(", ")} missing from the webhooks descriptor`);
+  }
+  const [reference, ...others] = [...references].sort();
+  // One page is what the refusal message links; none means no repository event, which would refuse every hook.
+  if (reference === undefined || others.length > 0) {
+    throw new Error(
+      `the repository webhook events point at ${references.size} reference pages (${[...references].sort().join(", ")}); the render names exactly one`,
+    );
+  }
+  return { events: [...events].sort(), reference };
+}
+
+export function renderWebhooks(doc: WebhooksDescriptor): string {
+  const { events, reference } = repositoryWebhookVocabulary(doc);
+  return `${header("The repository webhook events of GitHub's webhooks OpenAPI")}
+/** GitHub's reference page for the events, the externalDocs url the descriptor's entries point at. */
+export const WEBHOOK_EVENTS_REFERENCE = ${JSON.stringify(reference)};
+
+/** The wire event names, sorted, without the "*" wildcard, which the schema adds. */
+export const REPOSITORY_WEBHOOK_EVENTS = [${stringList(events)}] as const;
+`;
+}
+
 // --- Outputs ------------------------------------------------------------------------------------------------------
+
+/** What the renders read: each installed descriptor, parsed once. */
+export interface Descriptors {
+  readonly rest: Descriptor;
+  readonly webhooks: WebhooksDescriptor;
+}
+
+export function loadDescriptors(): Descriptors {
+  return { rest: loadDescriptor(), webhooks: loadWebhooksDescriptor() };
+}
 
 export const OUTPUTS: ReadonlyArray<{
   readonly path: string;
-  readonly render: (descriptor: Descriptor) => string;
+  readonly render: (descriptors: Descriptors) => string;
 }> = [
-  { path: ROLES_PATH, render: renderRoles },
-  { path: RULES_PATH, render: renderRules },
-  { path: ENUMS_PATH, render: renderEnums },
+  { path: ROLES_PATH, render: ({ rest }) => renderRoles(rest) },
+  { path: RULES_PATH, render: ({ rest }) => renderRules(rest) },
+  { path: ENUMS_PATH, render: ({ rest }) => renderEnums(rest) },
+  { path: WEBHOOKS_PATH, render: ({ webhooks }) => renderWebhooks(webhooks) },
 ];
 
-export function render(output: (typeof OUTPUTS)[number], descriptor: Descriptor): string {
-  return formatted(output.path, output.render(descriptor));
+export function render(output: (typeof OUTPUTS)[number], descriptors: Descriptors): string {
+  return formatted(output.path, output.render(descriptors));
 }
 
 if (import.meta.main) {
   await runMain("gen-openapi", () => {
-    const descriptor = loadDescriptor();
+    const descriptors = loadDescriptors();
     for (const output of OUTPUTS) {
-      writeFileSync(join(ROOT, output.path), render(output, descriptor));
+      writeFileSync(join(ROOT, output.path), render(output, descriptors));
       console.log(`wrote ${output.path}`);
     }
   });
