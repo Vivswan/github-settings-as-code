@@ -20,19 +20,13 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
-import { fromMarkdown } from "mdast-util-from-markdown";
-import { gfmAutolinkLiteralFromMarkdown } from "mdast-util-gfm-autolink-literal";
-import { gfmStrikethroughFromMarkdown } from "mdast-util-gfm-strikethrough";
-import { gfmTableFromMarkdown } from "mdast-util-gfm-table";
 import { toString as nodeText } from "mdast-util-to-string";
-import { gfmAutolinkLiteral } from "micromark-extension-gfm-autolink-literal";
-import { gfmStrikethrough } from "micromark-extension-gfm-strikethrough";
-import { gfmTable } from "micromark-extension-gfm-table";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { parseRepoSlug } from "../../../src/discovery/targets.js";
 import { type OutputName, redactRanges } from "../../../src/io.js";
 import { tableRow } from "../../../src/report/markdown.js";
 import { tableRows } from "../../docs/markdown.js";
+import { reportTree } from "../../report/report-tree.js";
 import { ROOT } from "../../root.js";
 import {
   ARTIFACTS_DIR,
@@ -702,16 +696,8 @@ export function stripDebugLines(text: string): string {
  * `<br>` inside a cell stays, since raw HTML is its own text.
  */
 function renderedSummary(summary: string): string {
-  const tree = fromMarkdown(summary, {
-    extensions: [gfmTable(), gfmStrikethrough(), gfmAutolinkLiteral()],
-    mdastExtensions: [
-      gfmTableFromMarkdown(),
-      gfmStrikethroughFromMarkdown(),
-      gfmAutolinkLiteralFromMarkdown(),
-    ],
-  });
-  return tree.children
-    .map((block) =>
+  return reportTree(summary)
+    .children.map((block) =>
       block.type === "table"
         ? block.children
             .map((row) => tableRow(row.children.map((cell) => nodeText(cell))))

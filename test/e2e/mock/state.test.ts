@@ -18,6 +18,7 @@ import { TEAM_REPOSITORY_MEDIA_TYPE, teamsMockHandlers } from "../../sections/te
 import orgFixture from "../fixtures/org.json" with { type: "json" };
 import repoFixture from "../fixtures/repo.json" with { type: "json" };
 import { Rng } from "../generators/prng.js";
+import { forEachSeed, seedsBelow } from "../generators/seed-property.js";
 import { genScenario } from "../generators/single-scenario.js";
 import { handlerTestContext } from "./handler-test-ctx.js";
 import { decodeNodeId, mintAppNodeId, mintNodeId } from "./node-id.js";
@@ -163,14 +164,14 @@ describe("buildState overlay semantics", () => {
       ...state.invitations,
       ...state.pull_bypass_list,
     ];
-    for (let seed = 0; seed < 25; seed++) {
+    forEachSeed(seedsBelow(25), (seed) => {
       const { scenario } = genScenario(new Rng(seed));
       const state = buildState(scenario.live_state, scenario.owner_kind ?? "org");
       const ids = mintingFamilies(state).map((item) => item.id as number);
       expect(ids.every((id) => typeof id === "number")).toBe(true);
-      expect(new Set(ids).size, `seed ${seed}`).toBe(ids.length);
+      expect(new Set(ids).size).toBe(ids.length);
       expect(state.nextId).toBeGreaterThan(Math.max(0, ...ids));
-    }
+    });
   });
 
   test("every section built on the list factory has a completion spec, and nothing else does", () => {

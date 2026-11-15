@@ -6,31 +6,14 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { fromMarkdown } from "mdast-util-from-markdown";
-import { gfmAutolinkLiteralFromMarkdown } from "mdast-util-gfm-autolink-literal";
-import { gfmStrikethroughFromMarkdown } from "mdast-util-gfm-strikethrough";
-import { gfmTableFromMarkdown } from "mdast-util-gfm-table";
 import { toString as nodeText } from "mdast-util-to-string";
-import { gfmAutolinkLiteral } from "micromark-extension-gfm-autolink-literal";
-import { gfmStrikethrough } from "micromark-extension-gfm-strikethrough";
-import { gfmTable } from "micromark-extension-gfm-table";
 import { visitParents } from "unist-util-visit-parents";
 import { markdownCell, markdownText, renderTable } from "../../src/report/markdown.js";
+import { reportTree } from "./report-tree.js";
 
 /** The content of a parsed node as type and value pairs: what the GFM grammar reads, positions aside. */
 function content(node: { children: ReadonlyArray<{ type: string; value?: string }> }): unknown[] {
   return node.children.map((child) => [child.type, child.value]);
-}
-
-function parse(markdown: string) {
-  return fromMarkdown(markdown, {
-    extensions: [gfmTable(), gfmStrikethrough(), gfmAutolinkLiteral()],
-    mdastExtensions: [
-      gfmTableFromMarkdown(),
-      gfmStrikethroughFromMarkdown(),
-      gfmAutolinkLiteralFromMarkdown(),
-    ],
-  });
 }
 
 /** What a parsed node renders as: its text, and every kind of child that is neither text nor a link (a link shows its own text). */
@@ -42,7 +25,7 @@ function rendered(node: { children: ReadonlyArray<{ type: string }> }): unknown 
 }
 
 /** Every link target under a tree, in order. */
-function hrefs(tree: ReturnType<typeof parse>): string[] {
+function hrefs(tree: ReturnType<typeof reportTree>): string[] {
   const found: string[] = [];
   visitParents(tree, "link", (link) => {
     found.push(link.url);
@@ -68,8 +51,9 @@ describe("free text in a summary renders literally under the GFM grammar", () =>
   test.each(HOSTILE)(
     "%s in a table cell stays one cell of plain text: GitHub reads the summary with this grammar, so an unescaped character changes the rendered row",
     (_what, text) => {
-      const table = parse(renderTable("| Key | Detail |\n|---|---|", [["k", markdownCell(text)]]))
-        .children[0];
+      const table = reportTree(
+        renderTable("| Key | Detail |\n|---|---|", [["k", markdownCell(text)]]),
+      ).children[0];
       const rows = table?.type === "table" ? table.children : [];
 
       expect(rows.map((row) => row.children.map(rendered))).toEqual([
@@ -90,8 +74,9 @@ describe("free text in a summary renders literally under the GFM grammar", () =>
       "branches[release/*].protection: missing live",
       "branches[feature/*].protection: missing live",
     ];
-    const table = parse(renderTable("| Detail |\n|---|", [[lines.map(markdownCell).join("<br>")]]))
-      .children[0];
+    const table = reportTree(
+      renderTable("| Detail |\n|---|", [[lines.map(markdownCell).join("<br>")]]),
+    ).children[0];
     const cell = table?.type === "table" ? table.children[1]?.children[0] : undefined;
 
     expect(cell === undefined ? [] : content(cell)).toEqual([
@@ -110,7 +95,7 @@ describe("free text in a summary renders literally under the GFM grammar", () =>
     "%s on a line of its own stays one paragraph of plain text: a note is free text, and a leading marker would turn it into a list or a heading",
     (_what, text) => {
       expect(
-        parse(markdownText(text)).children.map((node) => [node.type, rendered(node as never)]),
+        reportTree(markdownText(text)).children.map((node) => [node.type, rendered(node as never)]),
       ).toEqual([["paragraph", { text, marks: [] }]]);
     },
   );
@@ -131,8 +116,10 @@ describe("free text in a summary renders literally under the GFM grammar", () =>
   ])(
     "a bare URL with %s links to exactly itself: GitHub's autolink keeps a backslash escape inside a URL, so an escaped one shows the backslash and points elsewhere",
     (_what, text, href) => {
-      const cell = parse(renderTable("| Detail |\n|---|", [[markdownCell(`see ${text} now`)]]));
-      const line = parse(markdownText(`see ${text} now`));
+      const cell = reportTree(
+        renderTable("| Detail |\n|---|", [[markdownCell(`see ${text} now`)]]),
+      );
+      const line = reportTree(markdownText(`see ${text} now`));
 
       expect([hrefs(cell), nodeText(cell.children[0]), hrefs(line), nodeText(line)]).toEqual([
         [href],
