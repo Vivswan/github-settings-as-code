@@ -9,10 +9,10 @@
  * Run: `bun .github/scripts/autofix-subject.ts`; writes `subject=` to GITHUB_OUTPUT.
  */
 
+import * as core from "@actions/core";
 import { GENERATED_OUTPUTS } from "./generated.js";
 import { output } from "./lib/command.js";
 import { runMain } from "./lib/entry.js";
-import { setOutput } from "./lib/workflow-step.js";
 
 const GAPS_DIR = "src/upstream-gaps/";
 
@@ -42,6 +42,6 @@ function changedPaths(): string[] {
 
 if (import.meta.main) {
   await runMain("autofix-subject", () => {
-    setOutput("subject", subjectFor(changedPaths()));
+    core.setOutput("subject", subjectFor(changedPaths()));
   });
 }
