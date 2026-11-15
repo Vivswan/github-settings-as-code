@@ -153,6 +153,9 @@ export function renderActionOutputs(
   }));
 }
 
+/** "a", "a and b", "a, b, and c": the list as English prose writes it. */
+const PROSE_LIST = new Intl.ListFormat("en", { style: "long", type: "conjunction" });
+
 /** Why `item` cannot be one item of a prose list: a comma or the word "and" would read back as a joiner. */
 function proseItemFault(item: string): string | undefined {
   return /,|(^|\s)and(\s|$)/.test(item) ? 'holds a comma or the word "and"' : undefined;
@@ -163,10 +166,7 @@ function proseList(items: readonly string[]): string {
   if (faulty !== undefined) {
     throw new Error(`"${faulty}" ${proseItemFault(faulty)}, which an item of a prose list cannot`);
   }
-  if (items.length <= 2) {
-    return items.join(" and ");
-  }
-  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
+  return PROSE_LIST.format(items);
 }
 
 export interface KnobbedSection {
