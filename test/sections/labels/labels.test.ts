@@ -6,7 +6,7 @@ import { planContext } from "../../../src/sections/contract/plan.js";
 import { labelsSection } from "../../../src/sections/labels/index.js";
 import { sectionModule } from "../../../src/sections/registry.js";
 import { MockApi } from "../../mock-api.js";
-import { REPO, unwrap } from "../section-run.js";
+import { NO_SECRETS, REPO, unwrap } from "../section-run.js";
 import { validatedInput } from "../validated-input.js";
 
 const LIST = "GET /repos/o/r/labels?per_page=100&page=1";
@@ -152,6 +152,43 @@ describe("labels", () => {
       }),
       [],
     ]);
+  });
+
+  test('apply never sends the DELETE of a live label named "..", whatever built the plan: the request guard is the second layer under the plan-time refusal', async () => {
+    const api = new MockApi({
+      [LIST]: { data: [{ name: "..", color: "ededed", description: null }] },
+    }).allowMutations("DELETE /repos/o/r/*");
+    const execution = await executePlan(await plan(api, []), labelsSection, api, REPO, NO_SECRETS);
+
+    expect([execution, api.mutations()]).toEqual([
+      {
+        status: "failed",
+        failure: {
+          kind: "refused",
+          message:
+            'labels: DELETE /repos/{owner}/{repo}/labels/{name} cannot be sent for name "..": as a URL path segment "." and ".." resolve to another API route. Rename or remove it on GitHub',
+        },
+        changes: [],
+        notes: [],
+        landed: 0,
+        unattempted: [],
+      },
+      [],
+    ]);
+  });
+
+  test('under the keep policy a live label named ".." is noted with the one remedy that works: the settings file can neither declare nor delete it', async () => {
+    const api = new MockApi({
+      [LIST]: { data: [{ name: "..", color: "ededed", description: null }] },
+    });
+
+    expect(await plan(api, { _undeclared: "keep", entries: [] })).toEqual({
+      ops: [],
+      notes: [
+        'label ".." exists on the repo but is not declared in the settings file; kept under "_undeclared: keep" - a name of "." or ".." can be neither declared nor deleted from the settings file, so rename or delete it on GitHub',
+      ],
+      drift: [],
+    });
   });
 
   test("two entries resolving to the same label through their rename targets are a validate issue at the later new_name, so the document fails before any API call", () => {

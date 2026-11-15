@@ -214,14 +214,15 @@ export type SectionGraphqlKey<K extends SectionKey = SectionKey> = {
 const byKeyErased: { [K in SectionKey]: SectionModule<K> } = byKey;
 
 /**
- * The runtime twin of PlanContext's key brand, for a JavaScript consumer and the erased roster (SECTIONS
- * is homogeneous, so the brand cannot tell two of its members apart): a handler given another section's
- * context would otherwise fail on its first read with an undefined port.
+ * The two refusals every handler passes at the registry door. A foreign context: the runtime twin of PlanContext's
+ * key brand, for a JavaScript consumer and the erased roster (SECTIONS is homogeneous, so the brand cannot tell two
+ * members apart); a handler given another section's context would fail on its first read with an undefined port.
+ * A plan holding a write whose path cannot be built (plannedPathRefusal), so the section is refused whole.
  *
  *   refusal as a rejection         -> a synchronous throw would escape a consumer's `.catch()`
  *   module property read per call  -> handlers read `this`, and a test stubs the module while the engine holds this
  */
-function refusingForeignContexts<K extends SectionKey>(module: SectionModule<K>): SectionModule<K> {
+function refusingAtTheDoor<K extends SectionKey>(module: SectionModule<K>): SectionModule<K> {
   const foreign = (ctx: PlanContext, handler: "plan" | "snapshot"): string | null =>
     ctx.section === module.key
       ? null
@@ -261,11 +262,12 @@ function hasSnapshot<K extends SectionKey>(
   return module.snapshot !== undefined;
 }
 
-// The one door out of src/sections, so the owner gate, the foreign-context refusal, and the freeze are applied here once, not in 26 handlers: modules arrive by several routes (literals, listSection, the factories), so no definition helper sees them all.
+// The one door out of src/sections, so the owner gate, the door refusals (a foreign context, an unbuildable path), and the freeze are applied here once, not in 26 handlers:
+// modules arrive by several routes (literals, listSection, the factories), so no definition helper sees them all.
 const guarded: { [K in SectionKey]: SectionModule<K> } = Object.fromEntries(
   SECTION_KEYS.map((key) => [
     key,
-    freezeDeclarations(refusingForeignContexts(gatedByOwner(byKeyErased[key]))),
+    freezeDeclarations(refusingAtTheDoor(gatedByOwner(byKeyErased[key]))),
   ]),
 ) as { [K in SectionKey]: SectionModule<K> };
 

@@ -8,6 +8,7 @@ import { ok, type Result, safeTry } from "neverthrow";
 import { compareByCodePoint } from "../../engine/canonical.js";
 import { snapshotSecretReference } from "../../engine/secrets.js";
 import type { UndeclaredPolicyList } from "../../types.js";
+import { isDotSegment } from "../contract/endpoints.js";
 import type { SectionFailure } from "../contract/errors.js";
 import type { SectionMeta } from "../contract/module.js";
 import type { SnapshotContext } from "../contract/plan.js";
@@ -61,8 +62,12 @@ export function withPins(
   }
   if (unlistedAt >= 0) {
     const undeclared = pins.slice(unlistedAt + 1).map((name) => `"${name}"`);
+    const unlisted = pins[unlistedAt] ?? "";
+    const why = isDotSegment(unlisted)
+      ? "is left out of the snapshot"
+      : "is not in the environment listing";
     notes.push(
-      `environments: the pinned environment "${pins[unlistedAt]}" is not in the environment listing, so its pin cannot be declared` +
+      `environments: the pinned environment "${unlisted}" ${why}, so its pin cannot be declared` +
         (undeclared.length === 0
           ? ""
           : `; the pins ranked after it (${undeclared.join(", ")}) are left without the pinned key too, since declared pins must lead the live list`),

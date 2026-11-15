@@ -23,7 +23,7 @@ import {
   undeclaredNote,
   undeclaredPolicy,
 } from "../../contract/drift.js";
-import { endpointMethod } from "../../contract/endpoints.js";
+import { endpointMethod, isDotSegment } from "../../contract/endpoints.js";
 import { type SectionFailure, sectionFailure } from "../../contract/errors.js";
 import { liveByIdentity, liveIdentity, plural } from "../../contract/live.js";
 import { defaultUndeclaredPolicy, type SectionMeta } from "../../contract/module.js";
@@ -281,11 +281,12 @@ function undeclaredKeepNotes<Key extends string>(
   if (policy !== "keep") {
     return [];
   }
-  return undeclared.map(({ name }) =>
+  return undeclared.map(({ item, name }) =>
     undeclaredNote({
       subject: `${decl.noun} "${name}"`,
       action: decl.prose.undeclaredAction,
       ...decl.prose.undeclaredNote,
+      undeclarable: Object.values(decl.address(item)).some(isDotSegment),
     }),
   );
 }

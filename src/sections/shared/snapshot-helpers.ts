@@ -161,7 +161,7 @@ export function dotSegmentNote(label: string, names: readonly string[]): string 
   return names.some(isDotSegment)
     ? leftOutOfSnapshot(
         label,
-        'a name of "." or ".." cannot be a URL path segment, so the settings file cannot declare it; rename or delete it on GitHub',
+        'a name of "." or ".." cannot be a URL path segment, so the settings file cannot declare it; rename or delete it on GitHub, since apply refuses the section whenever it would have to delete the item',
       )
     : null;
 }

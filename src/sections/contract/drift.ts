@@ -68,11 +68,19 @@ export function undeclaredNote(opts: {
 
   /** What `_undeclared: delete` would make apply do, with any consequence. */
   action: string;
+
+  /** The resource's name is "." or "..": neither remedy the note usually offers works, so it names the one that does. */
+  undeclarable?: boolean;
 }): string {
   const state = opts.state ?? "exists on the repo but is not declared";
   const add = opts.add ?? "it";
   const manage = opts.manage ?? "it";
-  return `${opts.subject} ${state} in the settings file; kept under "_undeclared: keep" - add ${add} to the settings file to manage ${manage}, or set "_undeclared: delete" to have apply ${opts.action}`;
+  const kept = `${opts.subject} ${state} in the settings file; kept under "_undeclared: keep"`;
+  if (opts.undeclarable === true) {
+    return `${kept} - a name of "." or ".." can be neither declared nor deleted from the settings file, so rename or delete it on GitHub`;
+  }
+
+  return `${kept} - add ${add} to the settings file to manage ${manage}, or set "_undeclared: delete" to have apply ${opts.action}`;
 }
 
 /**

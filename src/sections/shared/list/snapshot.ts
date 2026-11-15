@@ -23,6 +23,15 @@ import type { ErasedDecl, ListEndpoints, ListSectionKey } from "./decl.js";
 import { readItem, readLive } from "./reads.js";
 import { declaredSecrets, type Fields, leafOf, nameOf, pathOf, withValueAt } from "./write.js";
 
+/** The section's value: its entries under the policy knob, or nothing when every live item was set aside for its name, so the document never declares an empty list that deletes what it could not name. */
+function declaredValue(
+  section: SectionMeta<ListSectionKey>,
+  entries: object[],
+  anyDeclarable: boolean,
+): UndeclaredPolicyList<object> | undefined {
+  return anyDeclarable ? knobbedSnapshot(section, entries) : undefined;
+}
+
 /**
  * Items are normalized as GitHub stores them before the projection onto the entry slice, so the
  * read-back compares equal to the declaration that produced it. An item a concealed field hides from
@@ -60,11 +69,14 @@ export async function snapshotList(
       (item) => item.key,
       (item) => liveIdentity(item.name, decl.address(item.item)),
     );
-    const undeclarable = (live: (typeof items)[number]): string | null =>
-      dotSegmentNote(`${key}[${live.name}]`, Object.values(decl.address(live.item)));
-    notes.push(...items.flatMap((live) => undeclarable(live) ?? []));
+    const judged = items.map((live) => ({
+      ...live,
+      undeclarable: dotSegmentNote(`${key}[${live.name}]`, Object.values(decl.address(live.item))),
+    }));
+    notes.push(...judged.flatMap((live) => live.undeclarable ?? []));
+    const declarable = judged.filter((live) => live.undeclarable === null);
     const entries: object[] = [];
-    for (const { item, name } of items.filter((live) => undeclarable(live) === null)) {
+    for (const { item, name } of declarable) {
       const label = `${key}[${name}]`;
       const body = yield* await readItem(decl, ctx, item);
       const hidden = decl.concealed?.(body) ?? [];
@@ -90,6 +102,6 @@ export async function snapshotList(
       }
       entries.push(entry);
     }
-    return ok({ value: knobbedSnapshot(section, entries), notes });
+    return ok({ value: declaredValue(section, entries, declarable.length > 0), notes });
   });
 }

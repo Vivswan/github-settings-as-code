@@ -530,7 +530,7 @@ describe("pages null body", () => {
 
 describe("a live name the settings file cannot declare is left out of the snapshot", () => {
   const LEFT_OUT =
-    'left out of the snapshot - a name of "." or ".." cannot be a URL path segment, so the settings file cannot declare it; rename or delete it on GitHub';
+    'left out of the snapshot - a name of "." or ".." cannot be a URL path segment, so the settings file cannot declare it; rename or delete it on GitHub, since apply refuses the section whenever it would have to delete the item';
 
   // The section schemas refuse "." and ".." as these names, so an emitted entry failed the snapshot's own validation and the whole run.
   test.each<
@@ -569,6 +569,16 @@ describe("a live name the settings file cannot declare is left out of the snapsh
       { _undeclared: "delete", entries: [{ username: "octocat", permission: "push" }] },
       `collaborators[..]: ${LEFT_OUT}`,
     ],
+    // A pending invitation is cancelled by its id, so its note says a delete policy still cancels it, not that apply refuses.
+    [
+      "collaborators",
+      {
+        collaborators: [{ login: "octocat", role_name: "write" }],
+        invitations: [{ id: 7, invitee: { login: ".." }, permissions: "write" }],
+      },
+      { _undeclared: "delete", entries: [{ username: "octocat", permission: "push" }] },
+      'collaborators[..]: left out of the snapshot - the settings file cannot declare a username of "." or ".."; the invitation is addressed by its id, so a delete policy still cancels it when this section is applied',
+    ],
     [
       "branches",
       { branches: ["..", "main"], branch_protection: { "..": {}, main: {} } },
@@ -587,6 +597,32 @@ describe("a live name the settings file cannot declare is left out of the snapsh
       "snapshot",
       [{ key, status: "snapshot", detail: [note] }],
       kept,
+    ]);
+  });
+});
+
+describe("a repository whose only label cannot be declared", () => {
+  test("omits the labels section, as the other sections do in that state: an empty `entries` list under the delete policy would be a document whose apply refuses the section", async () => {
+    const { io } = captureIo();
+    const result = await snapshotRepository(
+      registryFake({ labels: [{ name: "..", color: "ededed" }] }),
+      { ...opts(), sections: SectionSelection.of({ only: ["labels"] })._unsafeUnwrap() },
+      io,
+    );
+
+    expect<unknown>([result.result, result.outcomes, result.settings]).toEqual([
+      "snapshot",
+      [
+        {
+          key: "labels",
+          status: "snapshot",
+          detail: [
+            'labels[..]: left out of the snapshot - a name of "." or ".." cannot be a URL path segment, so the settings file cannot declare it; rename or delete it on GitHub, since apply refuses the section whenever it would have to delete the item',
+            OMITTED_WITH_NOTES,
+          ],
+        },
+      ],
+      {},
     ]);
   });
 });
