@@ -25,11 +25,7 @@ const HSALSA_SIGMA = new Uint32Array(new TextEncoder().encode("expand 32-byte k"
 /** crypto_box_beforenm runs hsalsa20 with an all-zero 16-byte input. */
 const ZERO_INPUT = new Uint32Array(4);
 
-/**
- * Decode canonical padded base64 (RFC 4648 section 4), as strictly as libsodium's from_base64 did.
- * Buffer's decoder skips bad characters and tolerates missing padding and nonzero padding bits;
- * @scure/base refuses all of those by throwing, which becomes the error value here.
- */
+/** Strict canonical padded base64 (RFC 4648 section 4): @scure/base throws on a bad character, missing padding, or nonzero padding bits, where Buffer would accept them, and the throw becomes the error value. */
 export const decodeBase64: (text: string) => Result<Uint8Array, "not canonical base64"> =
   Result.fromThrowable(
     (text: string) => base64.decode(text),
