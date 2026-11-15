@@ -6,9 +6,11 @@
  */
 
 import type { Result } from "neverthrow";
+import type { z } from "zod";
 import { type DeclaredSecretValue, secretValuesOf } from "../../contract/declared.js";
 import type { SectionFailure } from "../../contract/errors.js";
 import type { SectionSnapshot } from "../../contract/module.js";
+import type { Agreeing, Body, Item } from "../../contract/pin.js";
 import type { PlanContext, PlannedOp, SectionPlan } from "../../contract/plan.js";
 import { knobbed, routed } from "../schema-helpers.js";
 import type {
@@ -50,6 +52,13 @@ function secretValuesFor(
   );
 }
 
+/** What `live` parses: one item of the list, and the item's full body where the section reads it. */
+type LiveBody<Ends extends ListEndpoints> =
+  | Item<Ends["list"]>
+  | (Ends extends { readonly get: infer Get extends { readonly route: string } }
+      ? Body<Get>
+      : never);
+
 /**
  * The planner runs over the erased view while the module surface stays typed over the literal dictionary
  * and declared value the registry pins; the casts are that one boundary.
@@ -61,7 +70,13 @@ export function listSection<
   F extends string,
   Key extends string,
   M extends string = never,
->(decl: ListSectionDecl<K, Ends, Live, F, Key, M>): ListSectionModule<K, Ends, Live, F, Key, M> {
+  Wire = Live,
+>(
+  decl: ListSectionDecl<K, Ends, Live, F, Key, M> & {
+    /** Pinned to Octokit's type for the list item, and for the `get` body when the role exists. */
+    readonly live: z.ZodType<Live, Wire> & Agreeing<Wire, LiveBody<Ends>>;
+  },
+): ListSectionModule<K, Ends, Live, F, Key, M> {
   const erased = decl as unknown as ErasedDecl<Key>;
   const section: ListSectionModule<K, Ends, Live, F, Key, M> = {
     key: decl.key,

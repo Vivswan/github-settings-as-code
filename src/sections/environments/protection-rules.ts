@@ -12,8 +12,9 @@ import { missingDrift, undeclaredDrift, undeclaredNote } from "../contract/drift
 import { type SectionFailure, sectionFailure } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import type { SectionMeta } from "../contract/module.js";
+import type { Body, EnvelopedItem, Pinned } from "../contract/pin.js";
 import type { Read } from "../contract/plan.js";
-import { type EnvironmentsRestContext, unreconcilable } from "./endpoints.js";
+import { type ENDPOINTS, type EnvironmentsRestContext, unreconcilable } from "./endpoints.js";
 import type { NestedPlan } from "./nested.js";
 import type { DeploymentProtectionRuleConfig } from "./schema.js";
 
@@ -52,6 +53,11 @@ const LiveProtectionRules = z
   .looseObject({ custom_deployment_protection_rules: z.array(LiveProtectionRule).optional() })
   .nullable();
 
+type _LiveProtectionRulesPin = Pinned<
+  typeof LiveProtectionRules,
+  Body<typeof ENDPOINTS.listProtectionRules>
+>;
+
 export function listProtectionRules(
   ctx: EnvironmentsRestContext,
   envName: string,
@@ -88,6 +94,14 @@ function resolveIntegrationId(
 
 const LiveProtectionRuleApp = z.looseObject({ id: z.number(), slug: z.string() });
 type LiveProtectionRuleApp = z.infer<typeof LiveProtectionRuleApp>;
+
+type _LiveProtectionRuleAppPin = Pinned<
+  typeof LiveProtectionRuleApp,
+  EnvelopedItem<
+    typeof ENDPOINTS.listProtectionRuleApps,
+    "available_custom_deployment_protection_rule_integrations"
+  >
+>;
 
 /**
  * The Apps available to an environment, by slug, under the duplicate-live guard. An App without a

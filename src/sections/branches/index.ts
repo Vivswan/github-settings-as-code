@@ -19,6 +19,7 @@ import { identifiedBy } from "../contract/keyed-list.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import type { SectionModule } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
+import type { Body, Item, Pinned } from "../contract/pin.js";
 import type { PlainData, Read } from "../contract/plan.js";
 import { layeredList, routed, rule } from "../shared/schema-helpers.js";
 import { dotSegmentNote } from "../shared/snapshot-helpers.js";
@@ -213,6 +214,9 @@ const LiveProtection = z.looseObject({
 });
 
 const LiveBranchSummary = z.looseObject({ name: z.string() });
+
+type _LiveProtectionPin = Pinned<typeof LiveProtection, Body<typeof ENDPOINTS.getProtection>>;
+type _LiveBranchSummaryPin = Pinned<typeof LiveBranchSummary, Item<typeof ENDPOINTS.listProtected>>;
 
 /**
  * Built in the ONE place that decides whether the GraphQL run state exists, so no other site re-spells the predicate.

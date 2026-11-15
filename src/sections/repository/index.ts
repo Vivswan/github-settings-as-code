@@ -20,6 +20,7 @@ import { type GraphqlOpDecl, type GraphqlVariablesOf, graphqlOp } from "../contr
 import type { SectionMeta, SectionModule } from "../contract/module.js";
 import { sectionGrant } from "../contract/operations.js";
 import type { SectionPermission } from "../contract/permissions.js";
+import type { Body, Pinned } from "../contract/pin.js";
 import {
   type ChangeLines,
   hasDrift,
@@ -141,6 +142,8 @@ const ENDPOINTS = {
 
 // GitHub may return topics as null or omit them; the rest of the body rides into subsetDiff as passthrough.
 const LiveRepository = z.looseObject({ topics: z.array(z.string()).nullish() });
+
+type _LiveRepositoryPin = Pinned<typeof LiveRepository, Body<typeof ENDPOINTS.get>>;
 
 type LiveRepository = z.infer<typeof LiveRepository>;
 
@@ -279,6 +282,13 @@ const LiveToggleState = z.looseObject({
   enabled: z.boolean(),
   enforced_by_owner: z.boolean().optional(),
 });
+
+type _LiveToggleStatePin = Pinned<
+  typeof LiveToggleState,
+  | Body<typeof ENDPOINTS.automatedSecurityFixesGet>
+  | Body<typeof ENDPOINTS.privateVulnerabilityReportingGet>
+  | Body<typeof ENDPOINTS.immutableReleasesGet>
+>;
 
 const READABLE_TOGGLES: readonly ReadableToggle[] = [
   {

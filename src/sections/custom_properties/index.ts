@@ -28,6 +28,7 @@ import {
   type SectionSnapshot,
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
+import type { Item, Pinned } from "../contract/pin.js";
 import type { PlannedOp, SectionPlan } from "../contract/plan.js";
 import { knobbed, routed } from "../shared/schema-helpers.js";
 import { knobbedSnapshot, projectOntoSchema } from "../shared/snapshot-helpers.js";
@@ -122,6 +123,8 @@ const LiveProperty = z.looseObject({
   value: z.union([z.string(), z.array(z.string()), z.null()]),
 });
 type LiveProperty = z.infer<typeof LiveProperty>;
+
+type _LivePropertyPin = Pinned<typeof LiveProperty, Item<typeof ENDPOINTS.list>>;
 
 function propertiesByName(
   section: SectionMeta,

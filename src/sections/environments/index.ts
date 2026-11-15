@@ -22,6 +22,7 @@ import { identifiedBy, type KeyedListLayering, keyedBy } from "../contract/keyed
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import type { SectionMeta, SectionModule } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
+import type { Body, EnvelopedItem, Pinned } from "../contract/pin.js";
 import { hasDrift } from "../contract/plan.js";
 import { reportedKeyNote } from "../shared/reported-key-note.js";
 import { layeredList, routed } from "../shared/schema-helpers.js";
@@ -78,8 +79,15 @@ const LiveEnvironmentBody = z.looseObject({
 
 export type LiveEnvironmentBody = z.infer<typeof LiveEnvironmentBody>;
 
+type _LiveEnvironmentBodyPin = Pinned<typeof LiveEnvironmentBody, Body<typeof ENDPOINTS.probe>>;
+
 /** One item of the environment listing: the name plan() probes by is pinned; the id tells two same-fold names apart. */
 const LiveEnvironment = LiveEnvironmentBody.extend({ id: z.number().optional(), name: z.string() });
+
+type _LiveEnvironmentPin = Pinned<
+  typeof LiveEnvironment,
+  EnvelopedItem<typeof ENDPOINTS.list, "environments">
+>;
 
 /** The section's default grant, which an endpoint's own permission in ENDPOINTS overrides (the nested lists' do; NESTED_OVERRIDES_CAVEAT names theirs). */
 const permission: SectionPermission = { repo: ["environments"] };

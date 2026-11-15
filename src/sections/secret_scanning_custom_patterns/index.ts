@@ -31,6 +31,7 @@ import {
   type SectionSnapshot,
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
+import type { Item, Pinned } from "../contract/pin.js";
 import { hasDrift, type PlannedOp, type SectionPlan } from "../contract/plan.js";
 import { knobbed, routed } from "../shared/schema-helpers.js";
 import {
@@ -106,6 +107,8 @@ const LivePatternEntry = z.looseObject({
   name: z.string(),
   custom_pattern_version: z.string().nullish(),
 });
+
+type _LivePatternEntryPin = Pinned<typeof LivePatternEntry, Item<typeof ENDPOINTS.list>>;
 
 function liveFrom(entry: z.infer<typeof LivePatternEntry>): LivePattern {
   const fields: Partial<Record<UpdatableKey, unknown>> = {};

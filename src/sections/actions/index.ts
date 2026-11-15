@@ -19,6 +19,7 @@ import type { EndpointDecl } from "../contract/endpoints.js";
 import type { SectionFailure } from "../contract/errors.js";
 import type { SectionMeta, SectionModule } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
+import type { Agreeing, Body, Disagreements, Pinned } from "../contract/pin.js";
 import {
   hasDrift,
   type PlainData,
@@ -158,26 +159,29 @@ type ActionsPlan = SectionPlan<ActionsOp>;
 type ReadRole = keyof ActionsContext["read"];
 type WriteRole = ActionsOp["role"];
 
+type CacheLimitShape<F extends string> = { [K in F]: z.ZodOptional<z.ZodNumber> };
+
 /**
  * Named once so a limit's GET and PUT cannot be paired across limits: both roles derive from N,
  * and both must be declared roles. The GET body is the one numeric field the PUT takes back; the
  * spec marks it optional (an unset limit answers `{}`), so an absent field is drift in plan and an
  * omitted key in snapshot, never a read failure.
  */
-function cacheLimit<N extends string>(
+function cacheLimit<N extends string, F extends CacheKey>(
   name: `getCache${N}` extends ReadRole ? (`putCache${N}` extends WriteRole ? N : never) : never,
-  field: CacheKey,
+  field: F,
   label: string,
 ): {
   get: `getCache${N}` & ReadRole;
   put: `putCache${N}` & WriteRole;
-  live: z.ZodType<object>;
+  live: z.ZodObject<CacheLimitShape<F>, z.core.$loose>;
   label: string;
 } {
   return {
     get: `getCache${name}` as `getCache${N}` & ReadRole,
     put: `putCache${name}` as `putCache${N}` & WriteRole,
-    live: z.looseObject({ [field]: z.number().optional() }),
+    // A computed key infers as an index signature; the cast names the key and still checks the value's type.
+    live: z.looseObject({ [field]: z.number().optional() } as CacheLimitShape<F>),
     label,
   };
 }
@@ -195,6 +199,14 @@ const CACHE_ENDPOINT_BY_KEY = {
 type CacheKey = keyof NonNullable<ActionsConfig["cache"]>;
 type _CacheEndpointsComplete = MustBeNever<Exclude<CacheKey, keyof typeof CACHE_ENDPOINT_BY_KEY>>;
 type _CacheEndpointsSound = MustBeNever<Exclude<keyof typeof CACHE_ENDPOINT_BY_KEY, CacheKey>>;
+type _CacheLimitsPin = MustBeNever<
+  {
+    [K in CacheKey]: Disagreements<
+      z.input<(typeof CACHE_ENDPOINT_BY_KEY)[K]["live"]>,
+      Body<(typeof ENDPOINTS)[(typeof CACHE_ENDPOINT_BY_KEY)[K]["get"]]>
+    >;
+  }[CacheKey]
+>;
 
 // An unset list answers null or is omitted; both read as absent, so the snapshot's projection onto the template variants never sees a null.
 const LiveOidcSub = z.looseObject({
@@ -218,6 +230,17 @@ const LiveWorkflowPermissions = z.looseObject({
 
 /** The selected-actions allowlist: a mapping the file's own passthrough record compares against. */
 const LiveSelectedActions = z.looseObject({});
+
+type _LiveOidcSubPin = Pinned<typeof LiveOidcSub, Body<typeof ENDPOINTS.getOidcSub>>;
+type _LivePermissionsPin = Pinned<typeof LivePermissions, Body<typeof ENDPOINTS.getPermissions>>;
+type _LiveWorkflowPermissionsPin = Pinned<
+  typeof LiveWorkflowPermissions,
+  Body<typeof ENDPOINTS.getWorkflow>
+>;
+type _LiveSelectedActionsPin = Pinned<
+  typeof LiveSelectedActions,
+  Body<typeof ENDPOINTS.getSelected>
+>;
 
 /** The template's declared keys across both variants; the compare notes a passthrough key outside them that the GET never echoes. */
 const OIDC_TEMPLATE_KEYS: ReadonlySet<string> = new Set(
@@ -263,6 +286,7 @@ export function endpointRouted<
   K extends keyof ActionsConfig,
   N extends string,
   Live extends object,
+  Wire = Live,
 >(
   wiring: {
     /** The GET whose body `live` parses; `N` is inferred from it alone. */
@@ -280,8 +304,8 @@ export function endpointRouted<
     /** The operation in settings-file terms ("setting the cache retention limit"), for the failure prose. */
     describe?: string;
 
-    /** The GET body, every field `read` consumes declared, so an off-shape answer fails the read. */
-    live: z.ZodType<Live>;
+    /** The GET body, every field `read` consumes declared, so an off-shape answer fails the read; pinned to Octokit's type for the GET. */
+    live: z.ZodType<Live, Wire> & Agreeing<Wire, Body<(typeof ENDPOINTS)[`get${N}` & ReadRole]>>;
 
     /** The GET body as the settings file declares the key (the inverse of `body`). */
     read: (live: Live) => ActionsConfig[K];

@@ -5,7 +5,9 @@ import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
 import { repoVariables } from "../contract/endpoints.js";
 import { type SectionFailure, sectionFailure } from "../contract/errors.js";
+import type { Body, Pinned } from "../contract/pin.js";
 import type { ChangeLines, ExecTools, Late, Read } from "../contract/plan.js";
+import type { ENDPOINTS } from "./endpoints.js";
 import type {
   BranchesContext,
   BranchesPlan,
@@ -46,6 +48,13 @@ const TeamLookup = z.looseObject({
 
 /** The REST App body; only node_id is read, which an old App may still carry in the legacy format (endpoints.ts appLookup). */
 const AppLookup = z.looseObject({ node_id: z.string().optional() });
+
+// Octokit types this body as an App or null; a null 200 is undocumented, so failing it as malformed is intended.
+type _AppLookupPin = Pinned<
+  typeof AppLookup,
+  Body<typeof ENDPOINTS.appLookup>,
+  "(body): Octokit's type admits a body this schema refuses"
+>;
 
 /** The two protection mappings a wildcard rule carries as an on/off flag plus the named sub-keys' twins. */
 const STRUCTURED_PAIRS: Readonly<Record<string, StructuredPair>> = {

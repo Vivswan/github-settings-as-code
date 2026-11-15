@@ -13,6 +13,7 @@ import { identifiedBy } from "../contract/keyed-list.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import type { SectionMeta, SectionModule, SectionSnapshot } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
+import type { EnvelopedItem, Pinned } from "../contract/pin.js";
 import type { PlannedOp, SectionPlan } from "../contract/plan.js";
 import { layeredList, routed } from "../shared/schema-helpers.js";
 import { WorkflowsConfig } from "./schema.js";
@@ -23,6 +24,11 @@ const LiveWorkflow = z.looseObject({
   state: z.string(),
 });
 type LiveWorkflow = z.infer<typeof LiveWorkflow>;
+
+type _LiveWorkflowPin = Pinned<
+  typeof LiveWorkflow,
+  EnvelopedItem<typeof ENDPOINTS.list, "workflows">
+>;
 
 /** A declared path as GitHub lists it: a bare file name lives under .github/workflows/. */
 function workflowPath(declared: string): string {

@@ -19,6 +19,7 @@ import type { SectionFailure } from "../../contract/errors.js";
 import { type KeyedListLayering, keyedBy } from "../../contract/keyed-list.js";
 import type { GraphqlDict, SectionModule, SectionSnapshot } from "../../contract/module.js";
 import type { PatResource } from "../../contract/permissions.js";
+import type { EnvelopedItem, Pinned } from "../../contract/pin.js";
 import type {
   KeyedPlan,
   PlanMisfits,
@@ -104,6 +105,11 @@ type RepoSecretsEndpoints<P extends SecretsSegment> = {
 type SecretsTable = { readonly [F in RepoSecretsKey]: RepoSecretsEndpoints<SecretsSegment<F>> };
 
 type WideEndpoints = RepoSecretsEndpoints<SecretsSegment>;
+
+type _LiveSecretNamePin = Pinned<
+  typeof LiveSecretName,
+  EnvelopedItem<WideEndpoints["list"], "secrets">
+>;
 
 /** One family's plan(), indexed by K so the generic factory can assign its one WidePlan to it. */
 type RepoSecretsPlan<K extends RepoSecretsKey> = {

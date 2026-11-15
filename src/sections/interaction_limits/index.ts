@@ -17,6 +17,7 @@ import { cannotVerifyNote } from "../contract/drift.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import type { SectionModule } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
+import type { Body, Item, Pinned } from "../contract/pin.js";
 import {
   hasDrift,
   type PlanContext,
@@ -114,6 +115,9 @@ const LiveInteractionLimit = z.looseObject({
 
 const LiveBypassUser = z.looseObject({ login: z.string() });
 
+type _LiveCreationCapPin = Pinned<typeof LiveCreationCap, Body<typeof ENDPOINTS.capGet>>;
+type _LiveBypassUserPin = Pinned<typeof LiveBypassUser, Item<typeof ENDPOINTS.bypassList>>;
+
 type LiveLimitState =
   | { kind: "none" }
   | { kind: "repository"; limit: string; body: Record<string, unknown> }
@@ -121,6 +125,8 @@ type LiveLimitState =
 
 /** An EMPTY plain object is GitHub's "no limit set"; anything else must be a limit, so a malformed body fails at the port instead of reading as absence. */
 const LiveBaseLimit = z.union([z.strictObject({}), LiveInteractionLimit]);
+
+type _LiveBaseLimitPin = Pinned<typeof LiveBaseLimit, Body<typeof ENDPOINTS.get>>;
 
 function liveBaseLimit(ctx: InteractionLimitsContext): Read<LiveLimitState> {
   return ctx.read.get.call(LiveBaseLimit).map((parsed): LiveLimitState => {

@@ -20,6 +20,7 @@ import type { SectionFailure } from "../contract/errors.js";
 import { parseLive } from "../contract/live.js";
 import type { GraphqlDict, SectionSnapshot } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
+import type { Body, Pinned } from "../contract/pin.js";
 import {
   hasDrift,
   type KeyedPlan,
@@ -93,6 +94,8 @@ const LiveConfigurationRun = z
   .looseObject({ run_id: z.number().optional(), run_url: z.string().optional() })
   .nullish();
 
+type _LiveConfigurationRunPin = Pinned<typeof LiveConfigurationRun, Body<WideEndpoints["update"]>>;
+
 /** The module shape setupSection() mints (SectionModule<K> at the registry). */
 export interface SetupSectionModule<K extends SetupKey> {
   readonly key: K;
@@ -118,6 +121,8 @@ interface Minted {
 
 /** The GET body: the whole configuration as a mapping, which subsetDiff compares the declared keys against. */
 const LiveSetup = z.looseObject({});
+
+type _LiveSetupPin = Pinned<typeof LiveSetup, Body<WideEndpoints["get"]>>;
 
 /** The PATCH name a reported language folds onto, or null when the vocabulary has none for it. */
 function declarableName(vocabulary: SetupLanguages, name: string): string | null {
