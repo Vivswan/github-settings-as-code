@@ -1,7 +1,8 @@
 /**
  * The architecture lint (bun run lint:arch): src/ imports between layers must be exactly the edges architecture.yml
- * declares; an undeclared edge and a stale allowance both fail. dependency-cruiser was the intended tool, but it
- * needs the TypeScript compiler API, which the pinned typescript 7 no longer ships, so it resolves nothing here.
+ * declares; an undeclared edge and a stale allowance both fail. dependency-cruiser 18.7.2 was the intended tool:
+ * beside the pinned typescript 7.0.2 it cruises 0 modules, and through @swc/core it drops the `import("./x.js").T`
+ * type edges. Revisit at dependency-cruiser 18.8 stable; its beta names typescript 7.1 as the first 7 it supports.
  *   runtime loads: imports, re-exports, literal `import()` and `require()`   -> edges
  *   type-only imports and re-exports                                         -> edges too
  *   `import("./x.js").T`, `import X = require("./x.js")` in type positions   -> edges too

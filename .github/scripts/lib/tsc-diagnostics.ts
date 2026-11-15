@@ -3,6 +3,9 @@
  * indented lines under it (a chained error's causes) folded into that message. A line that is neither (a crash trace,
  * a config error without a location, a script runner's own output) comes back in `unparsed`; the caller decides
  * whether that refuses the run or is noise around the diagnostics it wanted.
+ *
+ * TypeScript 7.0.2 ships its in-process API only under `typescript/unstable/`, so the CLI's lines are read; revisit
+ * when that API leaves `unstable/`.
  */
 
 export interface Diagnostic {

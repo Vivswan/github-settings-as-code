@@ -1,7 +1,7 @@
 /**
  * Graduates upstream-gap files whose routes @octokit/types now ships: each defineGap file's tripwire type turns
- * `tsc` red with TS2344 inside that file, and this script turns the build green again. TypeScript 7 (tsgo) has no
- * in-process compiler API, so the CLI plus diagnostic-line parsing IS the design, not a stopgap.
+ * `tsc` red with TS2344 inside that file, and this script turns the build green again. TypeScript 7.0.2 ships its
+ * in-process API only under `typescript/unstable/`, so the CLI's diagnostic lines are read until it leaves there.
  *
  *   documentedInSpec: true                              -> the file is deleted
  *   documentedInSpec: false                             -> rewritten to defineSpecOnlyGap (no tripwire; the UNDOCUMENTED_ROUTES exemption stays)
