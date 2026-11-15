@@ -6,9 +6,9 @@
  * checked here and never pushed.
  */
 
-import { execFileSync } from "node:child_process";
 import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { must } from "../lib/command.js";
 import {
   assertFullHistory,
   BOT_IDENTITY,
@@ -120,11 +120,11 @@ function packagedTreeOf(
       for (const name of PREPARATION_SCRIPTS) {
         delete pkg.scripts[name];
       }
-      const blob = execFileSync("git", ["hash-object", "-w", "--stdin"], {
+      const blob = must(["git", "hash-object", "-w", "--stdin"], {
         cwd,
-        input: `${JSON.stringify(pkg, null, 2)}\n`,
-        encoding: "utf8",
-      }).trim();
+        stdin: { text: `${JSON.stringify(pkg, null, 2)}\n` },
+        stderr: "log-and-capture",
+      }).stdout.trim();
       gitWithEnv(cwd, env, "update-index", "--add", "--cacheinfo", `100644,${blob},${MANIFEST}`);
     }
     addBuild(env);

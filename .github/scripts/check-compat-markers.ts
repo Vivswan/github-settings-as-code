@@ -12,10 +12,10 @@
  * test/scripts/check-compat-markers.test.ts.
  */
 
-import { execFileSync } from "node:child_process";
 import { lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
+import { must } from "./lib/command.js";
 import { runMain } from "./lib/entry.js";
 
 /** A trailing slash skips a directory, anything else one exact path; CHANGELOG.md quotes PR titles, so a removal PR's title would outlive the marker it deleted, and the last two spell the syntax to define and test it. */
@@ -108,12 +108,11 @@ function descriptionOf(body: string, before: string): string {
  * deleted from the working tree has nothing to scan; any other reason a listed path cannot be inspected is an error,
  * never a shorter scan. */
 function listFiles(cwd: string): string[] {
-  return execFileSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], {
+  return must(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"], {
     cwd,
-    encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
+    stderr: "log-and-capture",
   })
-    .split("\0")
+    .stdout.split("\0")
     .filter((path) => path !== "" && !skipped(path))
     .filter((path) => {
       try {

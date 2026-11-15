@@ -12,12 +12,12 @@
  * directory is removed on every path, failure included.
  */
 
-import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CLI_COMMANDS } from "../../src/cli/program.js";
 import { SECTION_KEYS } from "../../src/schema.js";
+import { command, must, STREAMED } from "./lib/command.js";
 import { runMain } from "./lib/entry.js";
 import { SCHEMA_ID } from "./lib/schema-id.js";
 
@@ -95,30 +95,24 @@ const SETTINGS_FILE = "labels:\n  - name: bug\n    color: d73a4a\n";
 const INVALID_SETTINGS_FILE = "labels:\n  - color: d73a4a\n";
 
 /** Run a command to completion in `cwd`, streaming its output; a non-zero exit throws. */
-function run(command: string, args: string[], cwd: string): void {
-  console.log(`$ ${[command, ...args].join(" ")}`);
-  execFileSync(command, args, { cwd, stdio: "inherit" });
+function run(program: string, args: string[], cwd: string): void {
+  console.log(`$ ${[program, ...args].join(" ")}`);
+  must([program, ...args], { cwd, ...STREAMED });
 }
 
 /** Run a command expected to fail; any other exit code, zero included, throws. */
-function expectExit(code: number, command: string, args: string[], cwd: string): void {
-  console.log(`$ ${[command, ...args].join(" ")}  # expecting exit ${code}`);
-  const result = spawnSync(command, args, { cwd, stdio: "inherit" });
-  if (result.status !== code) {
-    throw new Error(
-      `${[command, ...args].join(" ")} exited ${result.status ?? "by signal"}, expected ${code}`,
-    );
+function expectExit(code: number, program: string, args: string[], cwd: string): void {
+  console.log(`$ ${[program, ...args].join(" ")}  # expecting exit ${code}`);
+  const { status } = command([program, ...args], { cwd, ...STREAMED });
+  if (status !== code) {
+    throw new Error(`${[program, ...args].join(" ")} exited ${status}, expected ${code}`);
   }
 }
 
 /** Run a command and return its stdout. */
-function capture(command: string, args: string[], cwd: string): string {
-  console.log(`$ ${[command, ...args].join(" ")}`);
-  return execFileSync(command, args, {
-    cwd,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "inherit"],
-  });
+function capture(program: string, args: string[], cwd: string): string {
+  console.log(`$ ${[program, ...args].join(" ")}`);
+  return must([program, ...args], { cwd, stderr: "inherit" }).stdout;
 }
 
 export interface SmokeDirs {

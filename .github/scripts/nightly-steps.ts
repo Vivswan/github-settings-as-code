@@ -22,10 +22,11 @@ import * as core from "@actions/core";
 import { countNoun } from "../../src/text.js";
 import { GENERATED_OUTPUTS } from "./generated.js";
 import { planGraduation } from "./graduate-upstream-gaps.js";
+import { command, must, output, STREAMED } from "./lib/command.js";
 import { dispatch } from "./lib/entry.js";
 import { configureBotIdentity, leasePush } from "./lib/pr-branch.js";
 import { parseDiagnostics } from "./lib/tsc-diagnostics.js";
-import { capture, requireEnv, run, status } from "./lib/workflow-step.js";
+import { requireEnv } from "./lib/workflow-step.js";
 
 /** The packages the lockstep tests read: the REST descriptor, the webhooks description, and the GraphQL schema. */
 const SCHEMA_PACKAGES = [
@@ -58,11 +59,17 @@ function installedVersion(pkg: string): string {
 /** --no-save leaves package.json and the lockfile untouched; the upgraded node_modules stays ambient for the rest
  * of the job. */
 function installLatest(packages: readonly string[]): number | undefined {
-  run(["bun", "add", "--no-save", "--ignore-scripts", ...packages.map((pkg) => `${pkg}@latest`)]);
+  const add = command(
+    ["bun", "add", "--no-save", "--ignore-scripts", ...packages.map((pkg) => `${pkg}@latest`)],
+    STREAMED,
+  );
+  if (add.status !== 0) {
+    return add.status;
+  }
   // A pinned version left in place would make a probe pass green forever without probing anything.
   for (const pkg of packages) {
     const installed = installedVersion(pkg);
-    const latest = capture(["bun", "info", pkg, "version"]);
+    const latest = output(["bun", "info", pkg, "version"], { stderr: "inherit" });
     if (installed !== latest) {
       core.error(
         `${pkg}@${installed} is installed but ${latest} is the latest; the probe is testing the pin`,
@@ -78,7 +85,7 @@ function probeSchema(): number | undefined {
   if (failed !== undefined) {
     return failed;
   }
-  run(["bun", "test", ...LOCKSTEP_TESTS]);
+  must(["bun", "test", ...LOCKSTEP_TESTS], STREAMED);
 }
 
 /** The typecheck's verdict with its stdout and stderr in arrival order, read back from the one file both went to. */
@@ -87,10 +94,11 @@ function typecheck(): { clean: boolean; log: string } {
   try {
     const file = join(scratch, "typecheck.log");
     // --pretty false keeps the one-error-per-line format parseDiagnostics reads, independent of tsc's TTY detection.
-    const code = status(["bun", "run", "typecheck", "--pretty", "false"], {
-      stdoutFile: file,
-      stderrToo: true,
-    });
+    const code = command(["bun", "run", "typecheck", "--pretty", "false"], {
+      ...STREAMED,
+      stdout: { file },
+      stderr: "stdout",
+    }).status;
     return { clean: code === 0, log: readFileSync(file, "utf8") };
   } finally {
     rmSync(scratch, { recursive: true, force: true });
@@ -188,19 +196,22 @@ function nothingToBump(pinned: string, latest: string, branch: string): boolean 
   // The PR is the postcondition, not the branch: a night whose push landed but whose gh call failed leaves the
   // branch alone, and the next night must not read that as done. --head matches a fork's branch of the same name
   // too, so only this repository's PRs count.
-  const open = capture([
-    "gh",
-    "pr",
-    "list",
-    "--head",
-    branch,
-    "--state",
-    "open",
-    "--json",
-    "isCrossRepository",
-    "--jq",
-    "[.[] | select(.isCrossRepository | not)] | length",
-  ]);
+  const open = output(
+    [
+      "gh",
+      "pr",
+      "list",
+      "--head",
+      branch,
+      "--state",
+      "open",
+      "--json",
+      "isCrossRepository",
+      "--jq",
+      "[.[] | select(.isCrossRepository | not)] | length",
+    ],
+    { stderr: "inherit" },
+  );
   if (open !== "0") {
     core.notice(`the bump PR for ${OPENAPI}@${latest} is already open from ${branch}`);
     return true;
@@ -212,15 +223,18 @@ function nothingToBump(pinned: string, latest: string, branch: string): boolean 
 function commitBump(latest: string): { subject: string; changed: string } {
   // --ignore-scripts: the install under the write token runs no lifecycle script; the checkout is the default
   // branch's, so the manifest it reads is main's own.
-  run(["bun", "add", "-d", "--exact", "--ignore-scripts", `${OPENAPI}@${latest}`]);
-  run(["bun", "run", OPENAPI_GENERATOR]);
-  run(["bun", "run", "build:schema"]);
+  must(["bun", "add", "-d", "--exact", "--ignore-scripts", `${OPENAPI}@${latest}`], STREAMED);
+  must(["bun", "run", OPENAPI_GENERATOR], STREAMED);
+  must(["bun", "run", "build:schema"], STREAMED);
   const generated = GENERATED_OUTPUTS.filter((output) => output.generator === OPENAPI_GENERATOR);
-  run(["git", "add", "--", "package.json", "bun.lock", ...generated.map((output) => output.path)]);
-  const changed = capture(["git", "diff", "--cached", "--stat"]);
+  must(
+    ["git", "add", "--", "package.json", "bun.lock", ...generated.map((output) => output.path)],
+    STREAMED,
+  );
+  const changed = output(["git", "diff", "--cached", "--stat"], { stderr: "inherit" });
   configureBotIdentity();
   const subject = `build(deps): bump ${OPENAPI} to ${latest}`;
-  run(["git", "commit", "--no-verify", "-m", subject]);
+  must(["git", "commit", "--no-verify", "-m", subject], STREAMED);
   return { subject, changed };
 }
 
@@ -235,9 +249,10 @@ function openBumpPr(
   // a branch a failed gh call stranded is never rewritten. Which of the two refused is read afresh: ls-remote
   // answers 0 for a present ref and 2 for an absent one.
   if (leasePush(branch, "", token) !== 0) {
-    const present = status(["git", "ls-remote", "--exit-code", "--heads", "origin", branch], {
-      stdoutFile: devNull,
-    });
+    const present = command(["git", "ls-remote", "--exit-code", "--heads", "origin", branch], {
+      ...STREAMED,
+      stdout: { file: devNull },
+    }).status;
     core.error(
       present === 0
         ? `${branch} exists on origin with no open PR; open the PR from it or delete the branch, and the next night retries`
@@ -245,12 +260,15 @@ function openBumpPr(
     );
     return 1;
   }
-  run(["gh", "pr", "create", "--draft", "--head", branch, "--title", subject, "--body", body]);
+  must(
+    ["gh", "pr", "create", "--draft", "--head", branch, "--title", subject, "--body", body],
+    STREAMED,
+  );
 }
 
 function refreshOpenapi(): number | undefined {
   const pinned = pinnedVersion(OPENAPI);
-  const latest = capture(["bun", "info", OPENAPI, "version"]);
+  const latest = output(["bun", "info", OPENAPI, "version"], { stderr: "inherit" });
   const branch = `nightly/openapi-${latest}`;
   if (nothingToBump(pinned, latest, branch)) {
     return;
@@ -258,7 +276,7 @@ function refreshOpenapi(): number | undefined {
   const { subject, changed } = commitBump(latest);
   // The whole gate, on the committed bump (build:check compares the generated files against the index): bump nights
   // are rare and the minutes free, so the PR arrives green and a red night names the command in the log above.
-  if (status(["bun", "run", "check"]) !== 0) {
+  if (command(["bun", "run", "check"], STREAMED).status !== 0) {
     core.error(
       `bun run check fails against ${OPENAPI}@${latest}; the log above names the failing script, and nothing was pushed`,
     );

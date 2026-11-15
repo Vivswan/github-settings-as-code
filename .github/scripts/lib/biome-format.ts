@@ -4,17 +4,18 @@
  */
 
 import { join } from "node:path";
+import { command } from "./command.js";
 
 const ROOT = join(import.meta.dir, "..", "..", "..");
 
 /** `text` as biome formats a file at `path`, which picks the language and the config's overrides; a text biome refuses throws, since a generator cannot write what the gate rejects. */
 export function formatted(path: string, text: string): string {
-  const biome = Bun.spawnSync(
+  const biome = command(
     [join(ROOT, "node_modules", ".bin", "biome"), "format", `--stdin-file-path=${path}`],
-    { cwd: ROOT, stdin: Buffer.from(text), stdout: "pipe", stderr: "pipe" },
+    { cwd: ROOT, stdin: { text } },
   );
-  if (biome.exitCode !== 0) {
-    throw new Error(`biome refused the rendered ${path}:\n${biome.stderr.toString()}`);
+  if (biome.status !== 0) {
+    throw new Error(`biome refused the rendered ${path}:\n${biome.stderr}`);
   }
-  return biome.stdout.toString();
+  return biome.stdout;
 }

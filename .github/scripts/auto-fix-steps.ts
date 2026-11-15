@@ -18,9 +18,10 @@
 
 import { statSync } from "node:fs";
 import { join } from "node:path";
+import { command, must, output, STREAMED } from "./lib/command.js";
 import { dispatch } from "./lib/entry.js";
 import { configureBotIdentity, leasePush } from "./lib/pr-branch.js";
-import { capture, requireEnv, run, setOutput, status } from "./lib/workflow-step.js";
+import { requireEnv, setOutput } from "./lib/workflow-step.js";
 
 /** In generated.ts table order, each generator after its sources: the descriptor-derived files and the gaps index are imported through src/, and the inputs table reads INPUT_DECLS from src/flows/inputs.ts. */
 export const GENERATORS = [
@@ -74,7 +75,7 @@ function outsideFixOwned(path: string): string {
 
 /** `git diff --cached --quiet` answers with its status: 0 for no change, 1 for one; anything else is git failing. */
 function stagedChange(...pathspec: string[]): boolean {
-  const code = status(["git", "diff", "--cached", "--quiet", ...pathspec]);
+  const code = command(["git", "diff", "--cached", "--quiet", ...pathspec], STREAMED).status;
   if (code !== 0 && code !== 1) {
     process.exit(code);
   }
@@ -83,21 +84,21 @@ function stagedChange(...pathspec: string[]): boolean {
 
 function rebuild(): void {
   for (const generator of GENERATORS) {
-    run(["bun", "run", generator]);
+    must(["bun", "run", generator], STREAMED);
   }
   // Anything the earlier steps left staged is not this workflow's fix: start from an empty index so the patch
   // holds exactly the fix-owned paths.
-  run(["git", "reset", "-q"]);
-  run(["git", "add", "-A", "--", ...FIX_OWNED_PATHS]);
+  must(["git", "reset", "-q"], STREAMED);
+  must(["git", "add", "-A", "--", ...FIX_OWNED_PATHS], STREAMED);
   const patch = join(requireEnv("RUNNER_TEMP"), "autofix.patch");
-  run(["git", "diff", "--cached", "--binary"], { stdoutFile: patch });
+  must(["git", "diff", "--cached", "--binary"], { ...STREAMED, stdout: { file: patch } });
   if (statSync(patch).size === 0) {
     console.log("docs and upstream gaps already fresh");
     setOutput("changed", "false");
     setOutput("pruned", "false");
     return;
   }
-  run(["git", "diff", "--cached", "--stat"]);
+  must(["git", "diff", "--cached", "--stat"], STREAMED);
   setOutput("changed", "true");
   // A patch touching a gap file means gap files graduated (the index alone is a regeneration); the push job picks
   // the commit subject from this.
@@ -118,23 +119,28 @@ function push(): number | undefined {
   const superseded = (): boolean => {
     // A failed refresh leaves origin/HEAD_REF where it was, and that stale read answers: the shell ran this fetch
     // inside an if condition, where a failure does not end the step either.
-    status(["git", "fetch", "--quiet", "origin", headRef]);
-    return capture(["git", "rev-parse", `origin/${headRef}`]) !== headSha;
+    command(["git", "fetch", "--quiet", "origin", headRef], STREAMED);
+    return output(["git", "rev-parse", `origin/${headRef}`], { stderr: "inherit" }) !== headSha;
   };
-  if (capture(["git", "rev-parse", "HEAD"]) !== headSha) {
+  if (output(["git", "rev-parse", "HEAD"], { stderr: "inherit" }) !== headSha) {
     console.log("::notice::head moved since the build; skipping the stale fix push");
     return;
   }
-  run([
-    "git",
-    "apply",
-    "--index",
-    "--binary",
-    join(requireEnv("RUNNER_TEMP"), "autofix", "autofix.patch"),
-  ]);
+  must(
+    [
+      "git",
+      "apply",
+      "--index",
+      "--binary",
+      join(requireEnv("RUNNER_TEMP"), "autofix", "autofix.patch"),
+    ],
+    STREAMED,
+  );
   // --no-renames lists a staged rename as its delete and add halves, so a rename OUT of a protected path cannot
   // hide behind an allowed destination.
-  const staged = capture(["git", "diff", "--cached", "--no-renames", "--name-only", "-z"])
+  const staged = output(["git", "diff", "--cached", "--no-renames", "--name-only", "-z"], {
+    stderr: "inherit",
+  })
     .split("\0")
     .filter((path) => path !== "");
   for (const path of staged) {
@@ -157,7 +163,7 @@ function push(): number | undefined {
   }
   // [dependabot skip] keeps Dependabot rebasing and updating the PR over this commit; without it Dependabot stops
   // touching a PR once someone else pushes to it.
-  run(["git", "commit", "--no-verify", "-m", subject, "-m", "[dependabot skip]"]);
+  must(["git", "commit", "--no-verify", "-m", subject, "-m", "[dependabot skip]"], STREAMED);
   if (leasePush(headRef, headSha, token) !== 0) {
     if (superseded()) {
       console.log("::notice::head moved during the push; skipping the stale fix push");

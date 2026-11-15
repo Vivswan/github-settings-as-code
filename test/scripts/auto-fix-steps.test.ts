@@ -207,13 +207,14 @@ describe("rebuild", () => {
     expect(patchPaths(temp)).toEqual([GAPS_INDEX]);
   });
 
-  test("a failing generator ends the step with its status before the later generators run or any output is written", () => {
+  test("a failing generator ends the step naming it before the later generators run or any output is written", () => {
     const { pr, temp } = prFixture();
     const result = rebuild(pr, temp, {
       GEN_DOCS: "exit 3",
       GEN_ACTION_DOCS: "echo ran >> README.md",
     });
-    expect(result.status).toBe(3);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toEndWith("auto-fix-steps rebuild: bun run build:docs failed\n");
     expect(result.outputs).toEqual([]);
     expect(readFileSync(join(pr, "README.md"), "utf8")).toBe("README.md\n");
   });

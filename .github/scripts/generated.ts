@@ -15,6 +15,7 @@ import { PAGES } from "./gen-docs.js";
 import { INDEX_PATH } from "./gen-gaps-index.js";
 import { INPUTS_PAGES } from "./gen-inputs-table.js";
 import { OUTPUTS as OPENAPI_OUTPUTS } from "./gen-openapi.js";
+import { command } from "./lib/command.js";
 import { runMain } from "./lib/entry.js";
 import { markerSyntaxFor, regionNames } from "./lib/generated-regions.js";
 import type { GeneratedFiles } from "./lib/region-driver.js";
@@ -88,7 +89,7 @@ function unregisteredRegions(): string[] {
 
 /** Runs `argv` at the repository root on the terminal's stdio; the exit code is the verdict. */
 function run(argv: string[]): number {
-  return Bun.spawnSync(argv, { cwd: ROOT, stdout: "inherit", stderr: "inherit" }).exitCode;
+  return command(argv, { cwd: ROOT, stdout: "inherit", stderr: "inherit" }).status;
 }
 
 if (import.meta.main) {
@@ -107,16 +108,16 @@ if (import.meta.main) {
     const paths = generatedPaths();
     // Working tree against the index: a regenerated file already staged passes, a stale one fails. git lists the
     // drifted paths itself; an untracked registered path is listed the same way.
-    const untracked = Bun.spawnSync(
+    const untracked = command(
       ["git", "ls-files", "--others", "--exclude-standard", "--", ...paths],
       { cwd: ROOT, stderr: "inherit" },
     );
-    if (untracked.exitCode !== 0) {
+    if (untracked.status !== 0) {
       console.error("build:check: git ls-files failed");
       return 1;
     }
     const drifted = run(["git", "diff", "--exit-code", "--stat", "--", ...paths]) !== 0;
-    if (drifted || untracked.stdout.length > 0) {
+    if (drifted || untracked.stdout !== "") {
       process.stdout.write(untracked.stdout);
       console.error(
         "build:check: the generated output listed above drifted from the committed tree; run bun run build and commit it",

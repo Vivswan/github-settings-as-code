@@ -77,10 +77,11 @@ describe("format", () => {
     expect(patchPaths(temp)).toEqual([".github/dependabot.yml", "src/marker.ts"]);
   });
 
-  test("a failing formatter ends the step with its status after head= is written, with no patch cut", () => {
+  test("a failing formatter ends the step naming it after head= is written, with no patch cut", () => {
     const { pr, headSha, temp } = formatFixture();
     const result = format(pr, temp, "exit 3");
-    expect(result).toMatchObject({ status: 3, outputs: [`head=${headSha}`] });
+    expect(result).toMatchObject({ status: 1, outputs: [`head=${headSha}`] });
+    expect(result.stderr).toEndWith("auto-format-steps format: bun run lint:fix failed\n");
     expect(existsSync(join(temp, "format.patch"))).toBe(false);
   });
 });
