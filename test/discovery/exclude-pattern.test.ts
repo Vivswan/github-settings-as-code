@@ -382,7 +382,7 @@ describe("compileHiddenExcludePattern", () => {
     "star-run": ["secret-repo**", ["secret-repo"]],
     "too-long": [`secret-repo${"a".repeat(65_536)}`, ["secret-repo", "65547"]],
     empty: ["", ['""']],
-    "bare-negation": ["!", ['"!"']],
+    "bare-negation": ["!", ['pattern "!"']],
     "slash-sides": ["o/secret-repo/", ["secret-repo"]],
     "dots-only": ["secret-repo/..", ["secret-repo", '".."']],
     "not-a-glob": null,
@@ -398,12 +398,13 @@ describe("compileHiddenExcludePattern", () => {
   )(
     "a %s flaw is told by its kind and its place, with no fragment of the pattern",
     (kind, pattern, needles) => {
-      const hidden = compileHiddenExcludePattern(pattern, 7)._unsafeUnwrapErr();
+      const hidden = compileHiddenExcludePattern(pattern, 7, true)._unsafeUnwrapErr();
       const shown = compileExcludePattern(pattern)._unsafeUnwrapErr();
       expect(hidden).toEqual({
         code: "input-exclude-pattern-invalid-hidden",
         position: 7,
         reason: HIDDEN_FLAW[kind],
+        revealable: true,
       });
       expectSealed(
         { refusal: describeProblem(hidden) },
@@ -415,7 +416,7 @@ describe("compileHiddenExcludePattern", () => {
 
   // The reported input: two flaws in one class, where the shown refusal quotes the class twice and both suggested rewrites.
   test("a class with two flaws is told by both kinds, quoting neither the class nor a rewrite of it", () => {
-    const hidden = compileHiddenExcludePattern("[secret-repo?]", 1)._unsafeUnwrapErr();
+    const hidden = compileHiddenExcludePattern("[secret-repo?]", 1, true)._unsafeUnwrapErr();
     const shown = compileExcludePattern("[secret-repo?]")._unsafeUnwrapErr();
     expect(hidden.reason).toBe(
       `${HIDDEN_FLAW["class-operators"]}, and ${HIDDEN_FLAW["class-backwards"]}`,

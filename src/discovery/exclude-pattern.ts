@@ -450,15 +450,18 @@ export function compileExcludePattern(
 
 /**
  * The refusal for a run that hides private repositories: the pattern is named by its 1-based `position` in the
- * list and each kind of flaw by a sentence with no character of the pattern in it.
+ * list and each kind of flaw by a sentence with no character of the pattern in it. `revealable` is the caller's:
+ * whether its face accepts `private-repos: show`.
  */
 export function compileHiddenExcludePattern(
   pattern: string,
   position: number,
+  revealable: boolean,
 ): Result<ExcludePattern, ProblemOf<"input-exclude-pattern-invalid-hidden">> {
   return compile(pattern).mapErr((flaws) => ({
     code: "input-exclude-pattern-invalid-hidden",
     position,
+    revealable,
     reason: [...new Set(flaws.map((flaw) => HIDDEN_FLAW[flaw.kind]))].join(", and "),
   }));
 }

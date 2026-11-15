@@ -6,7 +6,7 @@
 
 import { err, ok, type Result } from "neverthrow";
 import { type SlugKey, slugKey } from "../github/slug.js";
-import type { ProblemOf } from "../problem.js";
+import type { ProblemOf, RefusalText } from "../problem.js";
 import { parseRepoSlug, type RepoRef } from "./targets.js";
 
 /** What separates the entries of a list input; a single path can never contain one. */
@@ -19,11 +19,11 @@ export function splitList(value: string): string[] {
     .filter(Boolean);
 }
 
-/** What a `repos` list resolves to, and every way it is refused: the offenders by text, each with its first 1-based place. */
+/** What a `repos` list resolves to, and every way it is refused: the offenders by text, each with every 1-based place it holds (a repeat's places are those after its first). */
 type ReposList = Result<
   { repos: RepoRef[]; discover: boolean },
   | ProblemOf<"repos-input-wildcard-mixed">
-  | { code: "offenders"; invalid: Map<string, number>; duplicated: Map<string, number> }
+  | { code: "offenders"; invalid: Map<string, number[]>; duplicated: Map<string, number[]> }
 >;
 
 /** The refusal quotes each offending entry: the form for a run that hides nothing. */
@@ -44,9 +44,10 @@ export function parseReposInput(
   );
 }
 
-/** The refusal for a run that hides private repositories: each offending entry is named by its place, never its text. */
+/** The refusal for a run that hides private repositories: each offending entry is named by every place it holds, never its text. */
 function parseHiddenReposInput(
   raw: string,
+  revealable: boolean,
 ): Result<
   { repos: RepoRef[]; discover: boolean },
   ProblemOf<"repos-input-wildcard-mixed" | "repos-input-invalid-entries-hidden">
@@ -55,17 +56,18 @@ function parseHiddenReposInput(
     refused.code === "offenders"
       ? {
           code: "repos-input-invalid-entries-hidden",
-          invalid: [...refused.invalid.values()],
-          duplicated: [...refused.duplicated.values()],
+          invalid: [...refused.invalid.values()].flat().sort((a, b) => a - b),
+          duplicated: [...refused.duplicated.values()].flat().sort((a, b) => a - b),
+          revealable,
         }
       : refused,
   );
 }
 
-/** parseReposInput under the run's policy: `hide` picks the refusal that names offenders by place. */
+/** parseReposInput under the run's policy: a hidden `refusals` picks the refusal that names offenders by place. */
 export function parseReposInputUnder(
   raw: string,
-  hide: boolean,
+  refusals: RefusalText,
 ): Result<
   { repos: RepoRef[]; discover: boolean },
   ProblemOf<
@@ -74,7 +76,9 @@ export function parseReposInputUnder(
     | "repos-input-invalid-entries-hidden"
   >
 > {
-  return hide ? parseHiddenReposInput(raw) : parseReposInput(raw);
+  return refusals.text === "hidden"
+    ? parseHiddenReposInput(raw, refusals.revealable)
+    : parseReposInput(raw);
 }
 
 function readReposList(raw: string): ReposList {
@@ -86,20 +90,20 @@ function readReposList(raw: string): ReposList {
     return ok({ repos: [], discover: true });
   }
   // Malformed and repeated entries are collected across the whole list, so N bad entries cost one run to discover, not
-  // N; the pools are keyed by the entry's text, so a bad entry pasted twice is one offender, at its first place.
+  // N; the pools are keyed by the entry's text, so a bad entry pasted twice is one offender, at both its places.
   const seen = new Set<SlugKey>();
-  const invalid = new Map<string, number>();
-  const duplicated = new Map<string, number>();
+  const invalid = new Map<string, number[]>();
+  const duplicated = new Map<string, number[]>();
   const repos: RepoRef[] = [];
   for (const [index, item] of items.entries()) {
     const parsed = parseRepoSlug(item);
     if (parsed.isErr()) {
-      invalid.set(item, invalid.get(item) ?? index + 1);
+      invalid.set(item, [...(invalid.get(item) ?? []), index + 1]);
       continue;
     }
     const key = slugKey(item);
     if (seen.has(key)) {
-      duplicated.set(item, duplicated.get(item) ?? index + 1);
+      duplicated.set(item, [...(duplicated.get(item) ?? []), index + 1]);
     }
     seen.add(key);
     repos.push(parsed.value);

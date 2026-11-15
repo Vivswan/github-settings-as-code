@@ -7,7 +7,7 @@
  * here does.
  */
 
-import { InvalidArgumentError, Option } from "commander";
+import { type Command, Option } from "commander";
 import type { InputReader } from "../index.js";
 import {
   INPUT_DECLS,
@@ -166,15 +166,15 @@ function accumulate(value: string, previous?: string): string {
   return previous === undefined ? value : `${previous}\n${value}`;
 }
 
-/** A repeated single-value flag is refused: joined, it would form a value the action cannot receive. */
-export function once(flag: string): (value: string, previous?: string) => string {
-  return (value, previous) => {
-    if (previous !== undefined) {
-      // biome-ignore lint/plugin: commander's argParser can only refuse a value by throwing InvalidArgumentError
-      throw new InvalidArgumentError(`--${flag} takes one value and was given more than once`);
-    }
-    return value;
-  };
+/**
+ * A repeated single-value flag is refused: joined, it would form a value the action cannot receive. The refusal is
+ * `command`'s own error exit and names the flag alone, since either value may name a private repository.
+ */
+export function once(flag: string, command: Command): (value: string, previous?: string) => string {
+  return (value, previous) =>
+    previous === undefined
+      ? value
+      : command.error(`error: --${flag} takes one value and was given more than once`);
 }
 
 /**
@@ -185,10 +185,11 @@ export function once(flag: string): (value: string, previous?: string) => string
 export function inputOption(
   name: InputName,
   subcommand: Subcommand,
+  command: Command,
   description = inputDescription(name, subcommand),
 ): Option {
-  const parse = isList(name) ? accumulate : once(name);
-  return new Option(`--${name} <value>`, description).argParser(parse);
+  const option = new Option(`--${name} <value>`, description);
+  return isList(name) ? option.argParser(accumulate) : option.argParser(once(name, command));
 }
 
 /** Commander's attribute for each flag (camelCase of the name), read from commander itself. */

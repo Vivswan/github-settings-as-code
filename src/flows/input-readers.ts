@@ -21,7 +21,7 @@ import { splitList } from "../discovery/repos-input.js";
 import { parseRepoSlug, type RepoRef } from "../discovery/targets.js";
 import { UNDECLARED_POLICIES } from "../engine/layers.js";
 import { SectionSelection } from "../engine/section-selection.js";
-import type { Problem } from "../problem.js";
+import type { Problem, RefusalText } from "../problem.js";
 import { parseRecipient } from "../report/artifact-report.js";
 import type { PrivateReportChannel } from "../report/delivery.js";
 import { SECTION_KEYS, type SectionKey } from "../schema.js";
@@ -164,7 +164,7 @@ export function readPolicies(input: Inputs): Result<
 /** The validated filters plus the names the workflow set explicitly, which the misuse rejections name. */
 export function readDiscoveryFilters(
   input: Inputs,
-  privateRepos: PrivateReposPolicy,
+  refusals: RefusalText,
 ): Result<{ discoveryFilters: DiscoveryFilters; discoveryFiltersSet: string[] }, Problem> {
   return safeTry(function* () {
     const discoveryFiltersSet = FILTER_INPUTS.filter((name) => input.value(name) !== "");
@@ -203,8 +203,8 @@ export function readDiscoveryFilters(
     const exclude: ExcludePattern[] = [];
     for (const [index, pattern] of input.list("exclude").entries()) {
       exclude.push(
-        yield* privateRepos === "redact"
-          ? compileHiddenExcludePattern(pattern, index + 1)
+        yield* refusals.text === "hidden"
+          ? compileHiddenExcludePattern(pattern, index + 1, refusals.revealable)
           : compileExcludePattern(pattern),
       );
     }
@@ -222,19 +222,19 @@ export function readDiscoveryFilters(
 
 /**
  * The single-repo target: the repository input, else the workflow's own repository. A refused `repository` input is
- * not quoted under private-repos: redact; the workflow's own repository is never hidden, so its text is.
+ * not quoted where `refusals` hides text; the workflow's own repository is never hidden, so its text is.
  */
 export function readSingleTarget(
   input: Inputs,
   githubRepository: string,
-  privateRepos: PrivateReposPolicy,
+  refusals: RefusalText,
 ): Result<RepoRef, Problem> {
   const named = input.value("repository");
   const rawRepo = named || githubRepository;
   return parseRepoSlug(rawRepo).mapErr(
     (): Problem =>
-      named !== "" && privateRepos === "redact"
-        ? { code: "input-repository-not-slug-hidden" }
+      named !== "" && refusals.text === "hidden"
+        ? { code: "input-repository-not-slug-hidden", revealable: refusals.revealable }
         : { code: "input-repository-not-slug", value: rawRepo },
   );
 }

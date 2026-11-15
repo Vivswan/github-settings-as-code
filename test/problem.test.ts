@@ -25,12 +25,8 @@ type FieldlessCode = {
   [C in Problem["code"]]: keyof ProblemOf<C> extends "code" ? C : never;
 }[Problem["code"]];
 
-const HIDDEN_TEXT =
-  "its text is hidden under private-repos: redact, since it may name a private repository; set private-repos: show to print it";
-
 /** Every code whose problem is the code alone, so its specimen needs no field. */
 const FIELDLESS: Record<FieldlessCode, true> = {
-  "input-repository-not-slug-hidden": true,
   "input-report-key-missing": true,
   "input-rendered-file-missing": true,
   "input-snapshot-destination-missing": true,
@@ -161,15 +157,31 @@ const SPECIMENS = {
       code: "input-exclude-pattern-invalid-hidden",
       position: 2,
       reason: "it takes at most one slash, with a glob on each side of it",
+      revealable: true,
     },
     'the "exclude" input pattern #2 is not a usable glob: it takes at most one slash, with a glob on each side ' +
-      `of it. The pattern is named by its place in the list, counted from 1: ${HIDDEN_TEXT}`,
+      'of it. Write "<name-glob>" or "<owner-glob>/<name-glob>", where a glob is letters, digits, ".", "-", "_", ' +
+      '"*", "?", and the classes "[abc]", "[!abc]", or "[^abc]" over those characters, with one optional leading ' +
+      '"!" negating the whole pattern. The pattern is named by its place in the list, counted from 1: its text is ' +
+      "hidden under private-repos: redact, since it may name a private repository; set private-repos: show to print it",
   ],
   "repos-input-invalid-entries-hidden": [
-    { code: "repos-input-invalid-entries-hidden", invalid: [3], duplicated: [] },
-    'the "repos" input has 1 invalid entry: entry #3 is not an owner/name slug (use values like ' +
-      '"octocat/hello-world", comma- or newline-separated). An entry is named by its place in the list, counted ' +
-      `from 1: ${HIDDEN_TEXT}. Or use "*" alone to discover repositories`,
+    {
+      code: "repos-input-invalid-entries-hidden",
+      invalid: [1, 3, 5],
+      duplicated: [4],
+      revealable: true,
+    },
+    'the "repos" input has 4 invalid entries: entries #1, #3 and #5 are not owner/name slugs (use values like ' +
+      '"octocat/hello-world", comma- or newline-separated); entry #4 is listed more than once (keep exactly one ' +
+      "entry per repository). An entry is named by its place in the list, counted from 1: its text is hidden " +
+      "under private-repos: redact, since it may name a private repository; set private-repos: show to print it. " +
+      'Or use "*" alone to discover repositories',
+  ],
+  "input-repository-not-slug-hidden": [
+    { code: "input-repository-not-slug-hidden", revealable: false },
+    'cannot target a repository: the "repository" input is not an owner/name slug (its text is hidden, since it ' +
+      'may name a private repository). Set it (--repository on the command line) to a value like "octocat/hello-world"',
   ],
   "input-repository-not-slug": [
     { code: "input-repository-not-slug", value: "nope" },
@@ -296,11 +308,7 @@ const SPECIMENS = {
     '"nope" is not an owner/name repository slug (use a value like "octocat/hello-world")',
   ],
   "repos-input-invalid-entries": [
-    {
-      code: "repos-input-invalid-entries",
-      invalid: ["bad", "worse"],
-      duplicated: ["O/A"],
-    },
+    { code: "repos-input-invalid-entries", invalid: ["bad", "worse"], duplicated: ["O/A"] },
     'the "repos" input has 3 invalid entries: "bad", "worse" are not owner/name slugs (use values ' +
       'like "octocat/hello-world", comma- or newline-separated); "O/A" is listed more than once ' +
       '(keep exactly one entry per repository). Or use "*" alone to discover repositories',
@@ -461,31 +469,14 @@ describe("describeProblem", () => {
       { code: "no-targets", filteredOut: 1 },
       'multi-repo mode found no targets: repos: "*" discovery found 1 repository, but the discovery filters removed all of them (see the notices above). Relax the filter inputs, or add per-repo files to the repos-dir',
     ],
-    // A hidden refusal names an input by its place and carries no text, so only its plural and its places can drift.
-    [
-      "hidden repos entries are named by their places",
-      { code: "repos-input-invalid-entries-hidden", invalid: [2, 5], duplicated: [4] },
-      'the "repos" input has 3 invalid entries: entries #2, #5 are not owner/name slugs (use values like ' +
-        '"octocat/hello-world", comma- or newline-separated); entry #4 is listed more than once (keep exactly ' +
-        `one entry per repository). An entry is named by its place in the list, counted from 1: ${HIDDEN_TEXT}. ` +
-        'Or use "*" alone to discover repositories',
-    ],
     [
       "one invalid repos entry reads in the singular",
-      {
-        code: "repos-input-invalid-entries",
-        invalid: ["not-a-slug"],
-        duplicated: [],
-      },
+      { code: "repos-input-invalid-entries", invalid: ["not-a-slug"], duplicated: [] },
       'the "repos" input has 1 invalid entry: "not-a-slug" is not an owner/name slug (use values like "octocat/hello-world", comma- or newline-separated). Or use "*" alone to discover repositories',
     ],
     [
       "two duplicated repos entries read in the plural",
-      {
-        code: "repos-input-invalid-entries",
-        invalid: [],
-        duplicated: ["o/a", "o/b"],
-      },
+      { code: "repos-input-invalid-entries", invalid: [], duplicated: ["o/a", "o/b"] },
       'the "repos" input has 2 invalid entries: "o/a", "o/b" are listed more than once (keep exactly one entry per repository). Or use "*" alone to discover repositories',
     ],
     [

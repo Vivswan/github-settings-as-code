@@ -36,7 +36,7 @@ import { createVisibilityResolver, type RepoVisibility } from "../github/repo-vi
 import { type SlugKey, slugKey } from "../github/slug.js";
 import type { Io } from "../io.js";
 import type { Private } from "../private.js";
-import { describeProblem, type Problem, RERUN_ADVICE } from "../problem.js";
+import { describeProblem, type Problem, RERUN_ADVICE, refusalText } from "../problem.js";
 import type { ArtifactUploader } from "../report/artifact-report.js";
 import { applyMarkerInjection } from "../report/delivery.js";
 import {
@@ -391,7 +391,10 @@ function remoteFleet(api: GitHubClient, cfg: TargetsConfig): ResultAsync<RemoteF
       return ok(none);
     }
 
-    const parsed = yield* parseReposInputUnder(cfg.reposInput, cfg.privateRepos === "redact");
+    const parsed = yield* parseReposInputUnder(
+      cfg.reposInput,
+      refusalText(cfg.privateRepos === "redact", true),
+    );
     if (parsed.discover) {
       const discovered = yield* discoverRepos(api, cfg.discoveryFilters);
       return ok(discoveredFleet(discovered));

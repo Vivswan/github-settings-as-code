@@ -80,6 +80,53 @@ describe("check and apply", () => {
     );
   });
 
+  // commander wraps an argument parser's refusal with the value it refused, which under the default policy may name a private repository.
+  test.each<[string, string[]]>([
+    ["on stderr", []],
+    ["in the --json problem", ["--json"]],
+    ["ahead of a --help that would end the parse without a refusal", ["--help"]],
+  ])(
+    "a repeated single-value flag is refused without its value, %s",
+    async (_where, extraFlags) => {
+      const api = new MockApi({});
+      const result = await cli(
+        [
+          "check",
+          "--repository",
+          "o/public",
+          "--repository",
+          "o/zq-secret-zq",
+          "--token",
+          TOKEN,
+          ...extraFlags,
+        ],
+        api,
+      );
+      expect(result.code).toBe(1);
+      expect(api.calls).toHaveLength(0);
+      expect(result.stderr).toBe(
+        "error: --repository takes one value and was given more than once\n",
+      );
+      expect(result.stdout).toBe(
+        extraFlags[0] === "--json"
+          ? '{"result":"failed","problem":"--repository takes one value and was given more than once"}\n'
+          : "",
+      );
+    },
+  );
+
+  // init has no --private-repos flag, so a refusal that tells its reader to set one sends them to an unknown option.
+  test("init hides a refused --repository and names no flag it does not accept", async () => {
+    const result = await cli(
+      ["init", "--repository", "zq-secret-zq", "--token", TOKEN],
+      new MockApi({}),
+    );
+    expect(result.code).toBe(1);
+    expect(result.stderr).toBe(
+      'error: cannot target a repository: the "repository" input is not an owner/name slug (its text is hidden, since it may name a private repository). Set it (--repository on the command line) to a value like "octocat/hello-world"\n',
+    );
+  });
+
   test.each<[string, string[], ConfigEnv]>([
     ["the parser's unknown-option message", ["check", `--tokn=${TOKEN}`], { GITHUB_TOKEN: TOKEN }],
     [

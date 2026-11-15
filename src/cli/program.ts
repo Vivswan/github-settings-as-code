@@ -134,7 +134,8 @@ const CLI_CAPABILITIES = { artifactUpload: false } as const;
 
 /** The root command with the four global flags, every line it prints going through the masked streams. */
 function rootProgram(streams: MaskedStreams): Command {
-  return new Command()
+  const program = new Command();
+  return program
     .name("github-settings-as-code")
     .description(
       "Apply, check, render, and validate declarative GitHub repository settings (also installed as gsac)",
@@ -143,14 +144,14 @@ function rootProgram(streams: MaskedStreams): Command {
       new Option(
         "--token <value>",
         `${INPUT_DECLS.token.description} Falls back to GITHUB_TOKEN.`,
-      ).argParser(once("token")),
+      ).argParser(once("token", program)),
     )
     .option("--json", "Print the outputs as one JSON object on stdout; log lines move to stderr")
     .addOption(
       new Option(
         "--summary <file>",
         "Append the run's markdown summary to this file (under GitHub Actions, the step summary when absent)",
-      ).argParser(once("summary")),
+      ).argParser(once("summary", program)),
     )
     .option("--verbose", "Show the debug trace on stderr")
     .exitOverride()
@@ -178,7 +179,7 @@ function addModeCommands(program: Command, wiring: Wiring): void {
     const command = program.command(name).description(DESCRIPTION[name]);
     const subcommand = modeSubcommand(mode);
     for (const input of subcommand.flags) {
-      command.addOption(inputOption(input, subcommand));
+      command.addOption(inputOption(input, subcommand, command));
     }
 
     command.action(async function (this: Command) {
@@ -224,8 +225,8 @@ function addInitCommand(program: Command, wiring: Wiring): void {
   for (const input of INIT_INPUTS) {
     init.addOption(
       input === "settings-file"
-        ? inputOption(input, INIT_SUBCOMMAND, INIT_SETTINGS_FILE_DESCRIPTION)
-        : inputOption(input, INIT_SUBCOMMAND),
+        ? inputOption(input, INIT_SUBCOMMAND, init, INIT_SETTINGS_FILE_DESCRIPTION)
+        : inputOption(input, INIT_SUBCOMMAND, init),
     );
   }
 

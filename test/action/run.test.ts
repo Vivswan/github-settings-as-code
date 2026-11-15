@@ -158,6 +158,7 @@ describe("run in multi-repo mode (env glue)", () => {
     code: "input-exclude-pattern-invalid-hidden",
     position: 1,
     reason: "it takes at most one slash, with a glob on each side of it",
+    revealable: true,
   };
   // A row names the whole Problem where that is the rule, and a message fragment where the whole message would restate
   // the input's option list or a library's own wording.
