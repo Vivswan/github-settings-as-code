@@ -12,7 +12,10 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, posix } from "node:path";
 import { unescape as percentDecoded } from "node:querystring";
 import { DecodingMode, decodeHTML } from "entities";
+import GithubSlugger from "github-slugger";
+import { toString as headingText } from "mdast-util-to-string";
 import { ok } from "neverthrow";
+import { visitParents } from "unist-util-visit-parents";
 import { parse as parseYaml } from "yaml";
 import { type Layer, mergeLayers, standaloneView } from "../../src/engine/layers.js";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
@@ -27,7 +30,7 @@ import { listLayering, SECTIONS } from "../../src/sections/registry.js";
 import { STALE_VERSION_HINT } from "../../src/sections/secret_scanning_custom_patterns/index.js";
 import { ROOT } from "../root.js";
 import { deleteEnumerationProblems } from "./claims.js";
-import { fencedBlocks, sectionLines, tableRows } from "./markdown.js";
+import { fencedBlocks, markdownTree, sectionLines, tableRows } from "./markdown.js";
 import { assertValidSettingsExample } from "./settings-examples.js";
 import { stalePins } from "./version-pins.js";
 
@@ -133,47 +136,6 @@ function fenceViolations(markdown: string, allowed: ReadonlySet<string>): string
     problems.push("unclosed fence at end of document");
   }
   return problems;
-}
-
-/**
- * GitHub's heading slugger: punctuation (backticks, $, parentheses, slashes, dots, quotes) is STRIPPED rather than hyphenated; underscores and
- * hyphens survive.
- */
-function githubSlug(heading: string): string {
-  return heading
-    .trim()
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s_-]/gu, "")
-    .replace(/\s/g, "-");
-}
-
-/**
- * The lines outside fenced code blocks. Indented fences count here (the README nests them in list items), unlike the guides' column-zero policy, so
- * every scanned markdown file is safe.
- */
-function linesOutsideFences(markdown: string, source: string): string[] {
-  const lines: string[] = [];
-  let opener: string | null = null;
-  for (const line of markdown.split("\n")) {
-    if (opener === null) {
-      const open = line.match(/^[ \t]*(`{3,}|~{3,})/);
-      if (open) {
-        opener = open[1] ?? "";
-      } else {
-        lines.push(line);
-      }
-      continue;
-    }
-    const close = line.match(/^[ \t]*(`{3,}|~{3,})[ \t]*$/);
-    if (close && close[1]?.[0] === opener[0] && (close[1]?.length ?? 0) >= opener.length) {
-      opener = null;
-    }
-  }
-  if (opener !== null) {
-    // The root files in the scan set have no fence-policy test, so an unclosed fence swallowing every later heading and link fails here.
-    throw new Error(`unclosed ${opener} fence in ${source} swallows the rest of the document`);
-  }
-  return lines;
 }
 
 /**
@@ -285,23 +247,16 @@ async function linksLeavingDocs(markdown: string, page: string): Promise<string[
   return problems;
 }
 
-/** Every fragment a file's headings answer to, duplicate suffixes included. */
-function headingSlugs(markdown: string, source: string): Set<string> {
+/**
+ * Every fragment a file's headings answer to, duplicate suffixes included. The headings are the syntax tree's and the
+ * slug is github-slugger's over each heading's text, the rule GitHub and the docs site both render anchors with.
+ */
+function headingSlugs(markdown: string): Set<string> {
+  const slugger = new GithubSlugger();
   const slugs = new Set<string>();
-  for (const line of linesOutsideFences(markdown, source)) {
-    // A closing hash run ("## Setup ##") is not part of the text GitHub slugs.
-    const heading = line.match(/^#{1,6}\s+(.*?)(?:\s+#+)?\s*$/);
-    if (!heading) {
-      continue;
-    }
-    // GitHub probes -1, -2, ... until the slug is free, so an explicit "Setup-1" heading pushes a later duplicate "Setup" to setup-2.
-    const base = githubSlug(heading[1] ?? "");
-    let slug = base;
-    for (let n = 1; slugs.has(slug); n++) {
-      slug = `${base}-${n}`;
-    }
-    slugs.add(slug);
-  }
+  visitParents(markdownTree(markdown), "heading", (heading) => {
+    slugs.add(slugger.slug(headingText(heading, { includeHtml: false, includeImageAlt: false })));
+  });
   return slugs;
 }
 
@@ -503,7 +458,7 @@ describe("docs/ guide pages", () => {
     const slugsOf = (path: string): Set<string> => {
       let slugs = slugCache.get(path);
       if (!slugs) {
-        slugs = headingSlugs(readFileSync(path, "utf8"), path);
+        slugs = headingSlugs(readFileSync(path, "utf8"));
         slugCache.set(path, slugs);
       }
       return slugs;
@@ -518,20 +473,6 @@ describe("docs/ guide pages", () => {
       }
     }
     expect(broken).toEqual([]);
-  });
-
-  test("headings in scanned files carry no markdown links, HTML, or brackets", () => {
-    // githubSlug slugs RAW heading text, so a link, tag, or entity in a heading slugs to garbage the anchor test then trusts.
-    const offenders: string[] = [];
-    for (const file of linkScanFiles()) {
-      for (const line of linesOutsideFences(readFileSync(file.path, "utf8"), file.label)) {
-        const heading = line.match(/^#{1,6}\s+(.*?)(?:\s+#+)?\s*$/);
-        if (heading && /[[\]<>&]/.test(heading[1] ?? "")) {
-          offenders.push(`${file.label}: ${line.trim()}`);
-        }
-      }
-    }
-    expect(offenders).toEqual([]);
   });
 
   /**
@@ -1180,25 +1121,7 @@ describe("fence policy guard (mutation checks)", () => {
 });
 
 describe("github heading slugger", () => {
-  // Real headings from this repo's pages; a wrong slugging rule fails here rather than as a false anchor break in the link test.
-  const CASES: Record<string, string> = {
-    "The `$NAME` pattern": "the-name-pattern",
-    "Behavior does not match src/ (missing or stale bundle)":
-      "behavior-does-not-match-src-missing-or-stale-bundle",
-    "Example settings.yml": "example-settingsyml",
-    'What a "cannot verify" note means': "what-a-cannot-verify-note-means",
-    "Compared to the Probot Settings app": "compared-to-the-probot-settings-app",
-    "1. Create the token": "1-create-the-token",
-    "null as an opt-out": "null-as-an-opt-out",
-    "The nested variables, secrets, and deployment knobs":
-      "the-nested-variables-secrets-and-deployment-knobs",
-  };
-  for (const [heading, slug] of Object.entries(CASES)) {
-    test(`slugs "${heading}" to "${slug}"`, () => {
-      expect(githubSlug(heading)).toBe(slug);
-    });
-  }
-
+  // Without these, a heading the tree reader misses or mis-slugs would show up only as a false broken-anchor report.
   test.each<[string, string, string[]]>([
     [
       "duplicate headings get -1/-2 suffixes",
@@ -1233,7 +1156,29 @@ describe("github heading slugger", () => {
       ["   ```yaml", "   # a comment", "   ```", "# Title"].join("\n"),
       ["title"],
     ],
+    [
+      "a heading inside an HTML comment renders nothing, so no link lands on it",
+      "<!--\n## Hidden\n-->\n\n## Shown\n",
+      ["shown"],
+    ],
+    ["a setext heading is a heading", "Setup\n=====\n\nDetails\n-------\n", ["setup", "details"]],
+    ["a heading indented up to three spaces is a heading", "   ## Indented\n", ["indented"]],
+    [
+      "a heading inside a blockquote or a list item is a heading",
+      "> ## Quoted\n\n- ## Listed\n",
+      ["quoted", "listed"],
+    ],
+    [
+      "emphasis, code, and link markup are not part of the text GitHub slugs",
+      "## _Important_ note\n\n## The `$NAME` [pattern](x.md)\n",
+      ["important-note", "the-name-pattern"],
+    ],
+    [
+      "an image's alt text is not part of the text GitHub slugs",
+      "## ![Badge](badge.png) Title\n",
+      ["-title"],
+    ],
   ])("%s", (_case, markdown, slugs) => {
-    expect(headingSlugs(markdown, "(inline)")).toEqual(new Set(slugs));
+    expect(headingSlugs(markdown)).toEqual(new Set(slugs));
   });
 });

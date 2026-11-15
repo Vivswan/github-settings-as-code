@@ -3,6 +3,14 @@ import { gfmTableFromMarkdown } from "mdast-util-gfm-table";
 import { gfmTable } from "micromark-extension-gfm-table";
 import { visitParents } from "unist-util-visit-parents";
 
+/** The syntax tree of a CommonMark document with GFM tables, every node carrying its source position. */
+export function markdownTree(markdown: string): ReturnType<typeof fromMarkdown> {
+  return fromMarkdown(markdown, {
+    extensions: [gfmTable()],
+    mdastExtensions: [gfmTableFromMarkdown()],
+  });
+}
+
 /** The contents of every fenced code block whose info string is exactly `info`. */
 export function fencedBlocks(markdown: string, info: string): string[] {
   const blocks: string[] = [];
@@ -45,10 +53,7 @@ export function sectionLines(markdown: string, heading: string, source: string):
  * trimmed source (code spans and links kept) whatever padding the formatter gave it.
  */
 export function tableRows(markdown: string): string[][] {
-  const tree = fromMarkdown(markdown, {
-    extensions: [gfmTable()],
-    mdastExtensions: [gfmTableFromMarkdown()],
-  });
+  const tree = markdownTree(markdown);
   const rows: string[][] = [];
   visitParents(tree, "tableRow", (row) => {
     rows.push(
