@@ -112,7 +112,14 @@
       "linter": {
         "rules": {
           "style": {
-            "noRestrictedImports": "off"
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@actions/core": "Only src/action/ implements the Io port over @actions/core; every other layer takes an Io."
+                }
+              }
+            }
           }
         }
       }
