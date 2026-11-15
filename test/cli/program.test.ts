@@ -136,7 +136,7 @@ describe("check and apply", () => {
       ],
       [
         "an unknown option carrying a value",
-        ["check", "--repositry=o/zq-secret-zq"],
+        ["check", "--target=o/zq-secret-zq"],
         "an option is not one the command takes; run it with --help for its options",
       ],
       [
