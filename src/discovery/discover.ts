@@ -72,9 +72,9 @@ export const DEFAULT_DISCOVERY_FILTERS: DiscoveryFilters = {
 };
 
 /**
- * The repositories one filter dropped. `reason` quotes the operator's filter; `sealedReason` is its form for a notice
- * that hides a repository, set only where the quoted text could name one: an exclude pattern, told by its 1-based
- * position in the `exclude` list.
+ * The repositories one filter dropped. `reason` quotes the operator's filter; `sealedReason` is its form for a run that
+ * hides private repositories, set only where the quoted text could name one: an exclude pattern, told by its 1-based
+ * position in the `exclude` list. A pattern names a repository it skipped, or one a negated pattern kept.
  */
 export interface SkipGroup {
   reason: string;
@@ -199,7 +199,7 @@ function applyFilters(
         ? null
         : {
             reason: `exclude pattern "${hit.pattern}"`,
-            sealedReason: `exclude pattern #${at + 1} (its text is hidden: it matches a private or internal repository)`,
+            sealedReason: `exclude pattern #${at + 1} (its text is hidden under private-repos: redact)`,
           };
     },
   ];
@@ -233,9 +233,9 @@ function applyFilters(
 
 /**
  * One aggregate notice per filter reason: per-repo notices for a "*" fleet would flood the annotations UI (GitHub caps
- * annotations per step). Under `redactPrivate` only public slugs are listed and hidden ones become a count, and a
- * notice that hides one states the sealed reason, so a pattern spelling a hidden name is not quoted beside the count;
- * under `show` the operator opted into naming them, so the seal opens here.
+ * annotations per step). Under `redactPrivate` only public slugs are listed, hidden ones become a count, and every
+ * notice states the sealed reason, so no pattern's text is printed; under `show` the operator opted into naming them,
+ * so the seal opens here.
  */
 export function formatSkipNotice(group: SkipGroup, redactPrivate: boolean): string {
   const named: string[] = redactPrivate
@@ -258,6 +258,6 @@ export function formatSkipNotice(group: SkipGroup, redactPrivate: boolean): stri
   if (group.reason === ARCHIVED_REASON) {
     return `repos: "*" discovery skipped ${count} because settings writes fail on archived repositories; unarchive them to manage them${names}`;
   }
-  const reason = hidden > 0 ? (group.sealedReason ?? group.reason) : group.reason;
+  const reason = redactPrivate ? (group.sealedReason ?? group.reason) : group.reason;
   return `repos: "*" discovery skipped ${count} by ${reason}${names}`;
 }

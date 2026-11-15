@@ -521,19 +521,20 @@ describe("runMulti redaction (private-repos: redact)", () => {
     expect(annotations).toEqual([]);
   });
 
-  // Without it, an exclude pattern spelling a private repository's name is quoted beside the count that hides it.
-  test("an exclude pattern that skips a private repository is echoed by its position, never by its text", async () => {
+  // Without it, a pattern's text names a private repository: one it skipped, or one a negated pattern kept.
+  test("a redacted run names every exclude pattern by its place, never by its text", async () => {
     const api = () =>
       new MockApi({
         "GET /user/repos?affiliation=owner&per_page=100&page=1": {
           data: [
-            { full_name: "e2e-owner/keep", private: false },
-            { full_name: "e2e-owner/old-tool", private: false },
-            { full_name: "e2e-owner/secret-repo", private: true },
+            { full_name: "o/vault", private: true },
+            { full_name: "o/old-tool", private: false },
+            { full_name: "o/tool", private: false },
+            { full_name: "o/secret-repo", private: true },
           ],
         },
-        "GET /repos/e2e-owner/keep": { data: { has_wiki: false, private: false } },
-        "GET /repos/e2e-owner/keep/contents/.github/settings.yml": {
+        "GET /repos/o/secret-repo": { data: { has_wiki: false, private: true } },
+        "GET /repos/o/secret-repo/contents/.github/settings.yml": {
           data: "repository:\n  has_wiki: false\n",
         },
       });
@@ -544,7 +545,7 @@ describe("runMulti redaction (private-repos: redact)", () => {
         privateRepos,
         discoveryFilters: {
           ...DEFAULT_DISCOVERY_FILTERS,
-          exclude: ["old-*", "e2e-owner/secret-repo"].map((pattern) =>
+          exclude: ["o/vault", "old-*", "!SECRET-REPO"].map((pattern) =>
             compileExcludePattern(pattern)._unsafeUnwrap(),
           ),
         },
@@ -552,21 +553,23 @@ describe("runMulti redaction (private-repos: redact)", () => {
       });
     const hidden = captureIo();
     const targets = await runTargets(api(), run("redact"), hidden.io);
+    const by = (place: number) =>
+      `by exclude pattern #${place} (its text is hidden under private-repos: redact)`;
     expect(hidden.annotations).toEqual([
-      'notice: repos: "*" discovery skipped 1 repository by exclude pattern "old-*": e2e-owner/old-tool',
-      'notice: repos: "*" discovery skipped 1 private or internal repository by exclude pattern #2 ' +
-        "(its text is hidden: it matches a private or internal repository)",
+      `notice: repos: "*" discovery skipped 1 private or internal repository ${by(1)}`,
+      `notice: repos: "*" discovery skipped 1 repository ${by(2)}: o/old-tool`,
+      `notice: repos: "*" discovery skipped 1 repository ${by(3)}: o/tool`,
     ]);
-    // The ordered log holds the name only where a runner needs it: the mask registration.
+    // The ordered log holds a hidden slug only where a runner needs it: the mask registration.
     expect(
-      hidden.events.filter((e) => e.includes("secret-repo") && !e.startsWith("mask: ")),
+      hidden.events.filter((e) => /vault|secret-repo/i.test(e) && !e.startsWith("mask: ")),
     ).toEqual([]);
     const shown = captureIo();
     const shownTargets = await runTargets(api(), run("show"), shown.io);
     expectSealed(
       { ...publicSurfaces(hidden), "returned targets": JSON.stringify(targets) },
       { ...publicSurfaces(shown), "returned targets": JSON.stringify(shownTargets) },
-      ["secret-repo"],
+      ["o/vault", "old-*", "!SECRET-REPO", "o/secret-repo"],
     );
   });
 

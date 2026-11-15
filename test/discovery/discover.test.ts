@@ -315,7 +315,7 @@ describe("formatSkipNotice", () => {
       true,
       `repos: "*" discovery skipped 2 private or internal repositories ${ARCHIVED_PROSE}`,
     ],
-    // An exclude pattern can spell a hidden name, so a notice hiding a repository tells the pattern by position.
+    // An exclude pattern can spell a hidden name it skipped or kept, so redaction tells every pattern by position.
     [
       "redaction states the sealed reason when the group hides a repository",
       { ...excluded, repos: [ref("o/a"), ref("o/vault", "private")] },
@@ -329,10 +329,10 @@ describe("formatSkipNotice", () => {
       `repos: "*" discovery skipped 1 private or internal repository by ${SEALED}`,
     ],
     [
-      "redaction quotes the pattern when every skipped repository is public",
+      "redaction states the sealed reason when every skipped repository is public",
       { ...excluded, repos: [ref("o/a")] },
       true,
-      'repos: "*" discovery skipped 1 repository by exclude pattern "o/vault": o/a',
+      `repos: "*" discovery skipped 1 repository by ${SEALED}: o/a`,
     ],
     [
       "without redaction the pattern is quoted beside every slug",

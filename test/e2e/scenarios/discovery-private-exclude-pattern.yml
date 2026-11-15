@@ -1,16 +1,18 @@
-# Exclude-pattern redaction. repos: "*" enumerates a pool holding a PRIVATE
-# repository, and the second exclude pattern spells that repository's whole
-# slug. Quoting the pattern beside "1 private or internal repository" would name
-# the repository, so the notice echoes the pattern by its position in the
-# exclude list. The first pattern skips only a public repository and is still
-# quoted. The private name must appear on no public surface.
+# Exclude-pattern redaction. repos: "*" enumerates a pool holding two PRIVATE
+# repositories. A pattern's text can name one: the second pattern spells the
+# whole slug of a repository it skips, and the third, negated, spells the name
+# of the one it keeps. A redacted run therefore prints no pattern's text: each
+# notice names its pattern by its place in the exclude list, the wildcard that
+# skipped only a public repository included. No private name, in either case,
+# may appear on a public surface.
 name: discovery-private-exclude-pattern
 settings: {}
 discovery:
   inputs:
-    exclude: "tmp-*,e2e-owner/disc-vault"
+    exclude: "tmp-*,e2e-owner/disc-vault,!DISC-K*"
   pool:
-    - { slug: e2e-owner/disc-keep, visibility: public }
+    - { slug: e2e-owner/disc-keep, visibility: private }
+    - { slug: e2e-owner/svc-open, visibility: public }
     - { slug: e2e-owner/tmp-1, visibility: public }
     - { slug: e2e-owner/disc-vault, visibility: private }
 repos:
@@ -19,8 +21,6 @@ repos:
       labels:
         - name: managed
           color: "00ff00"
-    expect:
-      result: applied
 token_permissions:
   issues: write
   contents: read
@@ -28,12 +28,16 @@ expect:
   exit_code: 0
   result: applied
   repos_result:
-    e2e-owner/disc-keep: applied
+    "private repository #1": applied
   stdout_contains:
-    - 'skipped 1 repository by exclude pattern "tmp-*": e2e-owner/tmp-1'
-    - "skipped 1 private or internal repository by exclude pattern #2 (its text is hidden: it matches a private or internal repository)"
+    - "skipped 1 repository by exclude pattern #1 (its text is hidden under private-repos: redact): e2e-owner/tmp-1"
+    - "skipped 1 private or internal repository by exclude pattern #2 (its text is hidden under private-repos: redact)"
+    - "skipped 1 repository by exclude pattern #3 (its text is hidden under private-repos: redact): e2e-owner/svc-open"
   leaks_nowhere:
     - disc-vault
+    - disc-keep
+    - DISC-K
+    - "tmp-*"
   never:
     - "GET /repos/e2e-owner/tmp-1"
     - "GET /repos/e2e-owner/disc-vault"
