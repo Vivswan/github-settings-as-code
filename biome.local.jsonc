@@ -108,17 +108,8 @@
       }
     },
     {
-      "includes": ["src/flows/redact.ts"],
-      "linter": {
-        "rules": {
-          "style": {
-            "noRestrictedImports": "off"
-          }
-        }
-      }
-    },
-    {
       "includes": [
+        "src/flows/redact.ts",
         "src/private.ts",
         "src/discovery/discover.ts",
         "src/report/delivery.ts",

@@ -13,6 +13,7 @@ import { join, resolve } from "node:path";
 import { ROOT } from "../root.js";
 import { SETTINGS_SCHEMA_PATH } from "../settings-schema.js";
 import { withTempDir } from "../temp-dir.js";
+import { codeFences } from "./markdown.js";
 
 // The tsc spawn per test times out bun's 5s default under parallel machine load.
 setDefaultTimeout(60_000);
@@ -32,29 +33,11 @@ interface Fence {
   readonly body: string;
 }
 
-/**
- * The `ts` fences of a page, in order. Fences are column-zero triple backticks
- * (guides.test.ts enforces that) and its policy reads the info string with
- * trailing whitespace trimmed, so "```ts " is a ts fence here too.
- */
+/** The `ts` fences of a page, in order. */
 export function tsFences(markdown: string): Fence[] {
-  const fences: Fence[] = [];
-  let open: { info: string; line: number; lines: string[] } | null = null;
-  for (const [index, text] of markdown.split("\n").entries()) {
-    if (open === null) {
-      if (text.startsWith("```")) {
-        open = { info: text.slice(3).trimEnd(), line: index + 2, lines: [] };
-      }
-    } else if (text === "```") {
-      if (open.info === "ts") {
-        fences.push({ line: open.line, body: open.lines.join("\n") });
-      }
-      open = null;
-    } else {
-      open.lines.push(text);
-    }
-  }
-  return fences;
+  return codeFences(markdown)
+    .filter((fence) => fence.info === "ts")
+    .map((fence) => ({ line: fence.line + 1, body: fence.body }));
 }
 
 /**

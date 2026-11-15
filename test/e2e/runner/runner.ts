@@ -232,16 +232,13 @@ export function parseGithubOutput(text: string): Record<string, string> {
   return outputs;
 }
 
-/** Each managed section renders as `| <key> | :<icon>: <status> | <detail> |`. */
+/** The status each managed section's row carries; a section renders as `| <key> | :<icon>: <status> | <detail> |`. */
 export function parseSummaryOutcomes(summary: string): Record<string, string> {
   const outcomes: Record<string, string> = {};
-  for (const line of summary.split("\n")) {
-    const row = line.match(/^\|\s*([a-z_]+)\s*\|\s*:[a-z_]+:\s*([a-z]+)\s*\|/);
-    if (row) {
-      const [, key, status] = row;
-      if (key && status) {
-        outcomes[key] = status;
-      }
+  for (const [key = "", cell = ""] of tableRows(summary)) {
+    const status = cell.match(/^:[a-z_]+:\s*(.+)$/)?.[1];
+    if (/^[a-z_]+$/.test(key) && status !== undefined) {
+      outcomes[key] = status;
     }
   }
   return outcomes;

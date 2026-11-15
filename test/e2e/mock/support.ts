@@ -97,8 +97,14 @@ export type SectionGraphqlHandlers<K extends SectionKey> = Readonly<
 
 // --- Pagination -----------------------------------------------------------
 
+/** The page size GitHub serves a list request that names none. */
+const DEFAULT_PER_PAGE = 30;
+
+/** The page size GitHub clamps every list's per_page to, where the endpoint documents no smaller one. */
+const MAX_PER_PAGE = 100;
+
 /**
- * Slices the way the client's list walk asks: per_page (100, or the endpoint's declared smaller pageSize)
+ * Slices the way GitHub does: per_page (30 when absent, clamped to 100 or the endpoint's declared smaller pageSize)
  * and page=N. `cap` is the endpoint's documented maximum: GitHub clamps an oversized per_page rather than
  * honoring it, so a capped endpoint never serves more per page.
  */
@@ -132,9 +138,9 @@ function pageWindow(
   query: Record<string, string>,
   cap?: number,
 ): { perPage: number; page: number } {
-  const requested = clampInt(query.per_page, 100);
+  const requested = clampInt(query.per_page, DEFAULT_PER_PAGE);
   return {
-    perPage: cap === undefined ? requested : Math.min(requested, cap),
+    perPage: Math.min(requested, cap ?? MAX_PER_PAGE),
     page: clampInt(query.page, 1),
   };
 }
@@ -318,8 +324,13 @@ export function repoVariablesRestHandlers<K extends VariablesFamilyKey>(section:
     create: ({ state, body }) => {
       const payload = asObject(body);
       // GitHub stores variable names uppercased however they are entered.
+      const name = variableName(payload);
+      if (list(state).some((existing) => variableName(existing) === name)) {
+        // Status not in GitHub's docs; the message is GitHub's observed answer.
+        return { status: 409, body: { message: "Already exists - Variable already exists" } };
+      }
       const variable: Json = {
-        name: variableName(payload),
+        name,
         value: payload.value ?? "",
         created_at: "2026-01-01T00:00:00Z",
         updated_at: "2026-01-01T00:00:00Z",

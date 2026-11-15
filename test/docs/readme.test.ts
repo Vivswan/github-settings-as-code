@@ -24,7 +24,7 @@ import { schemaNode } from "../../src/sections/shared/schema-node.js";
 import { ROOT } from "../root.js";
 import { readSettingsSchema } from "../settings-schema.js";
 import { defaultClaimProblems, deleteEnumerationProblems } from "./claims.js";
-import { fencedBlocks, sectionLines, tableRows } from "./markdown.js";
+import { codeFences, fencedBlocks, sectionText, tableRows } from "./markdown.js";
 import { assertValidSettingsExample } from "./settings-examples.js";
 import { stalePins } from "./version-pins.js";
 
@@ -46,7 +46,9 @@ describe("README example settings.yml blocks", () => {
   test("every settings.yml example validates and its repository keys are known", () => {
     const known = new Set<string>(SECTION_KEYS);
     let validated = 0;
-    for (const block of fencedBlocks(readme, "yaml")) {
+    // Every YAML fence, whatever follows the language word: an example tagged `yml` or `yaml title="..."` is still an example.
+    const yamlBlocks = codeFences(readme).filter((fence) => ["yaml", "yml"].includes(fence.lang));
+    for (const { body: block } of yamlBlocks) {
       let doc: unknown;
       try {
         doc = parseYaml(block);
@@ -70,7 +72,7 @@ describe("README example settings.yml blocks", () => {
 describe("README quick-start mode", () => {
   test("the workflow step runs in the mode the prose beside it names", () => {
     // The input defaults to apply, so a dropped `mode:` line turns the copied first run into the apply the prose says it is not.
-    const prose = sectionLines(readme, "Quick start", "README.md").join("\n");
+    const prose = sectionText(readme, "Quick start", "README.md");
     const named = prose.match(/Keep `mode: ([a-z]+)` for the first run/)?.[1];
     expect(
       named,
@@ -180,11 +182,11 @@ describe("schema $schema hints", () => {
 
 describe("migration guide parity paragraph", () => {
   test("lists exactly the Probot-parity sections", () => {
-    const paragraph = sectionLines(
+    const paragraph = sectionText(
       readFileSync(join(ROOT, "docs", "start", "migrating-from-probot.md"), "utf8"),
       "What carries over as-is",
       "docs/start/migrating-from-probot.md",
-    ).join(" ");
+    ).replaceAll("\n", " ");
     // The clause runs from "keeps working for" to its "their original Probot shapes remain compatible" marker, so later mentions of non-parity
     // sections cannot leak in.
     const clause = paragraph.match(
@@ -214,7 +216,7 @@ describe("migration guide parity paragraph", () => {
 });
 
 describe("private repositories guide", () => {
-  // The page's title is a single `#`, so it is read whole-document rather than via sectionLines().
+  // The page's title is a single `#`, so it is read whole-document rather than via sectionText().
   const section = readFileSync(join(ROOT, "docs", "operate", "private-repositories.md"), "utf8");
 
   test("names every private-report channel the code accepts", () => {
@@ -343,9 +345,7 @@ describe("forward-compatibility closed-shapes claims", () => {
   test("the nested-shapes table names exactly the outermost strict mappings below a section's root, so one a slice adds never stays off the page", () => {
     const { nested } = closedShapes();
     expect(nested.length).toBeGreaterThan(0);
-    const [, ...rows] = tableRows(
-      sectionLines(page, "The closed nested shapes", source).join("\n"),
-    );
+    const [, ...rows] = tableRows(sectionText(page, "The closed nested shapes", source));
     expect(rows.map(([shape]) => shape).sort()).toEqual(nested.map((path) => `\`${path}\``).sort());
   });
 });

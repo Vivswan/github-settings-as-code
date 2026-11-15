@@ -8,10 +8,13 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { parseSync } from "oxc-parser";
+import { visitParents } from "unist-util-visit-parents";
 import { ROOT } from "../root.js";
-import { fencedBlocks } from "./markdown.js";
+import { withTempDir } from "../temp-dir.js";
+import { type CodeFence, codeFences, markdownTree } from "./markdown.js";
 
 /** The tree whose every page is under test. */
 const DOCS = join(ROOT, "docs");
@@ -25,13 +28,16 @@ const PATH_TOKEN = /^(?:src|test|docs|lib|\.github)\/[\w./-]*$/;
 /** An exported symbol as a label token spells it: an identifier, with `()` allowed after a function's. */
 const SYMBOL_TOKEN = /^[A-Za-z_]\w*(?:\(\))?$/;
 
-/** Whether `file` exports `name` at its top level, under any declaration keyword. */
+/** Whether `file` exports `name`: a declaration, an `export { }` list, or a re-export, as the parser's export record lists them. */
 function exportsSymbol(file: string, name: string): boolean {
-  const text = readFileSync(file, "utf8");
-  return new RegExp(
-    String.raw`^export\s+(?:async\s+)?(?:function|const|let|class|interface|type|enum)\s+${name}\b`,
-    "m",
-  ).test(text);
+  const { module, errors } = parseSync(file, readFileSync(file, "utf8"));
+  if (errors.length > 0) {
+    // A file the parser gave up on has an incomplete export record, which would read as "exports no such name".
+    throw new Error(`${file} does not parse: ${errors.map((error) => error.message).join("; ")}`);
+  }
+  return module.staticExports.some((statement) =>
+    statement.entries.some((entry) => entry.exportName.name === name),
+  );
 }
 
 const NODE_DEFINITION = /(?<![\w"-])([A-Za-z_][\w-]*)([[({>]+)(?![-|])/g;
@@ -159,49 +165,81 @@ function insideGeneratedRegion(lines: readonly string[], line: number): boolean 
   return open;
 }
 
-/** The problems of the "Demonstrated by:" line the concept diagram opening at `index` needs before the next heading. */
-function demonstrationProblems(lines: readonly string[], index: number, root: string): string[] {
-  const fenceEnd = lines.indexOf("```", index + 1);
-  const close = fenceEnd === -1 ? lines.length : fenceEnd;
-  const after = lines.slice(close + 1);
-  const nextHeading = after.findIndex((text) => /^#{1,6}\s/.test(text));
-  const section = nextHeading === -1 ? after : after.slice(0, nextHeading);
-  const demo = section.find((text) => text.startsWith("Demonstrated by:"));
+/** A rendered "Demonstrated by:" paragraph: the line it opens on and the destinations it links. */
+interface Demonstration {
+  readonly line: number;
+  readonly links: readonly string[];
+}
+
+/** The headings' lines and the demonstration paragraphs of a page, read from its syntax tree: text inside a code block or an HTML comment is neither. */
+function pageLandmarks(markdown: string): { headings: number[]; demonstrations: Demonstration[] } {
+  const headings: number[] = [];
+  const demonstrations: Demonstration[] = [];
+  visitParents(markdownTree(markdown), (node) => {
+    const line = node.position?.start.line ?? 0;
+    if (node.type === "heading") {
+      headings.push(line);
+    }
+    if (node.type !== "paragraph") {
+      return;
+    }
+    const [lead] = node.children;
+    if (lead?.type === "text" && lead.value.startsWith("Demonstrated by:")) {
+      const links: string[] = [];
+      visitParents(node, "link", (link) => {
+        links.push(link.url);
+      });
+      demonstrations.push({ line, links });
+    }
+  });
+  return { headings, demonstrations };
+}
+
+/** The problems of the "Demonstrated by:" paragraph the concept diagram `fence` needs before the next heading. */
+function demonstrationProblems(
+  fence: CodeFence,
+  { headings, demonstrations }: ReturnType<typeof pageLandmarks>,
+  root: string,
+): string[] {
+  const nextHeading = headings.find((line) => line > fence.endLine) ?? Number.POSITIVE_INFINITY;
+  const demo = demonstrations.find(
+    (found) => found.line > fence.endLine && found.line < nextHeading,
+  );
   if (demo === undefined) {
     return [
-      `line ${index + 1}: the diagram has no "Demonstrated by:" line before the next heading`,
+      `line ${fence.line}: the diagram has no "Demonstrated by:" line before the next heading`,
     ];
   }
-  const links = [...demo.matchAll(/\]\(([^)]+)\)/g)].map((m) => m[1] ?? "");
-  if (links.length === 0) {
-    return [`line ${index + 1}: the "Demonstrated by:" line links nothing`];
+  if (demo.links.length === 0) {
+    return [`line ${fence.line}: the "Demonstrated by:" line links nothing`];
   }
   const problems: string[] = [];
-  for (const link of links) {
+  for (const link of demo.links) {
     if (!link.startsWith(REPO_FILE_URL)) {
-      problems.push(`line ${index + 1}: "${link}" is not a ${REPO_FILE_URL} link`);
+      problems.push(`line ${fence.line}: "${link}" is not a ${REPO_FILE_URL} link`);
     } else if (!existsSync(join(root, link.slice(REPO_FILE_URL.length)))) {
-      problems.push(`line ${index + 1}: "${link}" names a file that does not exist`);
+      problems.push(`line ${fence.line}: "${link}" names a file that does not exist`);
     }
   }
   return problems;
 }
 
 export function diagramProblems(markdown: string, root: string): string[] {
+  const lines = markdown.split("\n");
+  const landmarks = pageLandmarks(markdown);
   const problems: string[] = [];
-  for (const block of fencedBlocks(markdown, "mermaid")) {
-    const nodes = nodeLabels(block);
+  for (const fence of codeFences(markdown)) {
+    if (fence.info !== "mermaid") {
+      continue;
+    }
+    const nodes = nodeLabels(fence.body);
     problems.push(...nodes.problems);
     for (const label of nodes.labels) {
       problems.push(...labelProblems(label, root));
     }
-  }
-  const lines = markdown.split("\n");
-  for (const [index, line] of lines.entries()) {
-    if (line !== "```mermaid" || insideGeneratedRegion(lines, index)) {
-      continue;
+    if (!insideGeneratedRegion(lines, fence.line - 1)) {
+      problems.push(...demonstrationProblems(fence, landmarks, root));
     }
-    problems.push(...demonstrationProblems(lines, index, root));
   }
   return problems;
 }
@@ -367,11 +405,60 @@ describe("diagram guard (mutation checks)", () => {
       [`line 3: "${REPO_FILE_URL}test/engine/nowhere.test.ts" names a file that does not exist`],
     ],
     [
+      "a concept diagram whose demonstration line sits in a code block, where it links nothing",
+      page("src/engine/layers.ts", `\`\`\`text\n${demo}\n\`\`\``),
+      ['line 3: the diagram has no "Demonstrated by:" line before the next heading'],
+    ],
+    [
+      "a concept diagram whose demonstration link holds a parenthesis",
+      page(
+        "src/engine/layers.ts",
+        `Demonstrated by: [x](${REPO_FILE_URL}test/(x)/nowhere.test.ts).`,
+      ),
+      [`line 3: "${REPO_FILE_URL}test/(x)/nowhere.test.ts" names a file that does not exist`],
+    ],
+    [
+      "a concept diagram whose demonstration link sits inside emphasis",
+      page(
+        "src/engine/layers.ts",
+        `Demonstrated by: **[x](${REPO_FILE_URL}test/engine/nowhere.test.ts)**.`,
+      ),
+      [`line 3: "${REPO_FILE_URL}test/engine/nowhere.test.ts" names a file that does not exist`],
+    ],
+    [
       "a concept diagram with a demonstration line linking nothing",
       page("src/engine/layers.ts", "Demonstrated by: the layers test."),
       ['line 3: the "Demonstrated by:" line links nothing'],
     ],
   ])("%s", (_name, markdown, problems) => {
     expect(diagramProblems(markdown, ROOT)).toEqual(problems);
+  });
+});
+
+describe("a label's symbols are the module's exports", () => {
+  /** A module whose exports are spelled every way but `export const`, and whose one template literal shows a declaration it never makes. */
+  const MODULE = [
+    "const shown = `",
+    "export function ghost() {}",
+    "`;",
+    "const listed = 1;",
+    "export { listed, shown };",
+    'export { inner as renamed } from "./inner.js";',
+    "export function* walk() {}",
+    "export abstract class Base {}",
+    "",
+  ].join("\n");
+
+  // A regex over the source took the shown declaration for an export and missed every form below it, so a diagram could name a symbol the module never exports.
+  test("read from the syntax tree: a list, a re-export, a generator, an abstract class, and nothing a string shows", async () => {
+    await withTempDir("gsac-diagram-exports-", async (root) => {
+      mkdirSync(join(root, "src"));
+      writeFileSync(join(root, "src", "forms.ts"), MODULE);
+      const label = "src/forms.ts<br>listed, shown, renamed, walk(), Base, ghost()";
+      const markdown = `\`\`\`mermaid\nflowchart LR\n  a["${label}"]\n\`\`\`\n\nDemonstrated by: [x](${REPO_FILE_URL}src/forms.ts).\n`;
+      expect(diagramProblems(markdown, root)).toEqual([
+        `"${label}": src/forms.ts exports no ghost`,
+      ]);
+    });
   });
 });

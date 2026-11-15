@@ -22,6 +22,7 @@ import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
 import { endpointPath } from "../../src/sections/contract/endpoints.js";
 import { sectionModule } from "../../src/sections/registry.js";
 import { quote } from "../../src/text.js";
+import { iterationSummary, runIterations } from "./fuzz-iterations.js";
 import {
   type DiscoveryScenarioMeta,
   genDiscoveryScenario,
@@ -763,9 +764,14 @@ function multiIdempotenceEligible(meta: MultiScenarioMeta): boolean {
   );
 }
 
+/** The slugs the run keeps: none when an exclude pattern is refused, since the action stops at its inputs before it lists a repository. */
+function predictedKept(meta: DiscoveryScenarioMeta): string[] {
+  return meta.excludeRefused ? [] : predictDiscovery(meta.pool, meta.filters);
+}
+
 /** Shared by the gate and the battery draw so they cannot diverge; an empty kept set exits 1 by design. */
 function discoveryConvergeEligible(meta: DiscoveryScenarioMeta): boolean {
-  return predictDiscovery(meta.pool, meta.filters).length > 0;
+  return predictedKept(meta).length > 0;
 }
 
 /** Compared on displayKey: a redacted target is keyed "private repository #N", never its slug; a real slug where a placeholder was expected shows up as an unpredicted key. */
@@ -1142,7 +1148,7 @@ async function runDiscoveryPredicted(
   meta: DiscoveryScenarioMeta,
   opts: { fault?: InjectedFault } = {},
 ): Promise<IterationResult> {
-  const kept = predictDiscovery(meta.pool, meta.filters);
+  const kept = predictedKept(meta);
   // An empty kept set exits 1 by design. The discovery scenario pins fully-granted labels in apply
   // mode, so a fault-free non-empty run must converge.
   const proof =
@@ -1161,6 +1167,14 @@ async function runDiscoveryPredicted(
   problems.push(
     ...discoveryKeyProblems(expectedDiscoveryKeys(kept, meta), new Set(Object.keys(results))),
   );
+  if (
+    meta.excludeRefused &&
+    report.requests.some((request) => request.pathname === "/user/repos")
+  ) {
+    problems.push(
+      `exclude "${meta.filters.exclude}" holds a refused pattern, yet the run listed repositories`,
+    );
+  }
   problems.push(...discoveryLeakProblems(meta, report));
   problems.push(...reposResultFoldProblems(report, false));
   return iterationResult(
@@ -1557,7 +1571,7 @@ function injectContentsFault(
 
 /** A fatal listing fault must exit 1 before any target runs: a silent empty pool instead of a loud failure is the bug this hunts. */
 async function discoveryFaultIteration(seed: number): Promise<IterationResult> {
-  const { scenario, meta } = genDiscoveryScenario(new Rng(seed));
+  const { scenario, meta } = genDiscoveryScenario(new Rng(seed), "lists");
   const roll = new Rng(seed ^ 0x2545f491);
   const kind = roll.pick([...FAULT_KINDS]);
   const exhausting = roll.bool();
@@ -1610,7 +1624,7 @@ async function fatalDiscoveryRun(
 }
 
 function discoveryFaultBatteryRun(seed: number): Promise<IterationResult> {
-  const { scenario, meta } = genDiscoveryScenario(new Rng(seed));
+  const { scenario, meta } = genDiscoveryScenario(new Rng(seed), "lists");
   scenario.faults = [{ endpoint: "core.discoveryList", kind: "server_error", times: RETRY_BUDGET }];
   return fatalDiscoveryRun(
     scenario,
@@ -2148,28 +2162,26 @@ async function main(): Promise<number> {
 
   const tally = newTally();
   const failingSeeds: number[] = [];
-  let failures = 0;
-  for (let i = 0; i < flags.iterations; i++) {
+  const counts = await runIterations(flags.iterations, FAILURE_CAP, async (i) => {
     const seed = replayOne ? master : iterationSeed(master, i);
     const { mode, result } = await runIteration(seed, flags);
     recordIteration(tally, result, mode);
     if (result.ok) {
       console.log(`  iter ${i} [${mode}] seed ${seed} ok`);
-      continue;
+      return true;
     }
-    failures++;
     failingSeeds.push(seed);
     reportIterationFailure(i, mode, seed, result, flags);
-    if (failures >= FAILURE_CAP) {
-      console.log(`\nfailure cap (${FAILURE_CAP}) reached; stopping`);
-      break;
-    }
+    return false;
+  });
+  if (counts.failed >= FAILURE_CAP) {
+    console.log(`\nfailure cap (${FAILURE_CAP}) reached; stopping`);
   }
 
   const batteryFailures = replayOne ? 0 : await runBatteries(tally, master);
   const coverageFailures = printCoverage(tally, replayOne);
 
-  console.log(`\n${flags.iterations - failures}/${flags.iterations} iterations ok`);
+  console.log(`\n${iterationSummary(counts)}`);
   if (batteryFailures > 0) {
     console.log(
       `directed battery failures (witness + input + fault + fixpoint + merge): ${batteryFailures}`,
@@ -2181,7 +2193,7 @@ async function main(): Promise<number> {
       "replay one with the per-failure `replay:` line above (it carries --sections when set)",
     );
   }
-  return failures + batteryFailures + coverageFailures > 0 ? 1 : 0;
+  return counts.failed + batteryFailures + coverageFailures > 0 ? 1 : 0;
 }
 
 try {

@@ -1,54 +1,8 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { actionsIo } from "../../src/action/io.js";
-import { ROOT } from "../root.js";
 import { withTempDir } from "../temp-dir.js";
-
-/** A static import, a re-export, a dynamic import(), or a require() all quote the specifier; a comment mentioning it bare does not. */
-function namesActionsCore(source: string): boolean {
-  return /["']@actions\/core["']/.test(source);
-}
-
-describe("the Io port boundary", () => {
-  // The detector's controls: every way a module can name the package, and the two mentions that must not count.
-  test.each([
-    ['import * as core from "@actions/core";', true],
-    ["import { debug } from '@actions/core';", true],
-    ['export { setSecret } from "@actions/core";', true],
-    ['const core = await import("@actions/core");', true],
-    ['const core = require("@actions/core");', true],
-    ["// the action layer implements it over @actions/core", false],
-    ['import { retry } from "@octokit/plugin-retry";', false],
-  ])("the specifier check classifies %j as %p", (source, named) => {
-    expect(namesActionsCore(source)).toBe(named);
-  });
-
-  test("only src/action/ names @actions/core", () => {
-    // Every other layer reaches the runner through the Io port, so redaction and capture have one place to stand.
-    const srcDir = join(ROOT, "src");
-    const files = readdirSync(srcDir, { recursive: true }) as string[];
-    const offenders: string[] = [];
-    let scanned = 0;
-    for (const file of files) {
-      if (!file.endsWith(".ts") || file.split(/[\\/]/)[0] === "action") {
-        continue;
-      }
-      scanned += 1;
-      if (namesActionsCore(readFileSync(join(srcDir, file), "utf8"))) {
-        offenders.push(`src/${file}`);
-      }
-    }
-    expect(offenders).toEqual([]);
-    // The scan saw the tree (a wrong root would pass vacuously), and the check tells an import from a mention:
-    // the action's Io imports the package, the CLI's runner face only names it in its header.
-    expect(scanned).toBeGreaterThan(50);
-    expect(namesActionsCore(readFileSync(join(srcDir, "action", "io.ts"), "utf8"))).toBe(true);
-    const cliRunner = readFileSync(join(srcDir, "cli", "actions.ts"), "utf8");
-    expect(cliRunner).toContain("@actions/core");
-    expect(namesActionsCore(cliRunner)).toBe(false);
-  });
-});
 
 describe("actionsIo", () => {
   const saved = {

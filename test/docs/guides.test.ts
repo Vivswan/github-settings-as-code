@@ -12,7 +12,10 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, posix } from "node:path";
 import { unescape as percentDecoded } from "node:querystring";
 import { DecodingMode, decodeHTML } from "entities";
+import GithubSlugger from "github-slugger";
+import { toString as headingText } from "mdast-util-to-string";
 import { ok } from "neverthrow";
+import { visitParents } from "unist-util-visit-parents";
 import { parse as parseYaml } from "yaml";
 import { type Layer, mergeLayers, standaloneView } from "../../src/engine/layers.js";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
@@ -27,7 +30,14 @@ import { listLayering, SECTIONS } from "../../src/sections/registry.js";
 import { STALE_VERSION_HINT } from "../../src/sections/secret_scanning_custom_patterns/index.js";
 import { ROOT } from "../root.js";
 import { deleteEnumerationProblems } from "./claims.js";
-import { fencedBlocks, sectionLines, tableRows } from "./markdown.js";
+import {
+  codeFences,
+  fencedBlocks,
+  indentedFences,
+  markdownTree,
+  sectionText,
+  tableRows,
+} from "./markdown.js";
 import { assertValidSettingsExample } from "./settings-examples.js";
 import { stalePins } from "./version-pins.js";
 
@@ -97,83 +107,30 @@ function isSettingsShaped(doc: unknown): boolean {
 }
 
 /**
- * Fence-policy violations for one document. fencedBlocks (markdown.ts) needs the exact info string on a backtick fence preceded only by indent,
- * so a wrong tag, a tilde fence, or a blockquoted fence hides an example from it; column zero and exactly three backticks are the guides' own
- * convention.
+ * Fence-policy violations for one document: the guides write every fence at column zero with exactly three backticks,
+ * outside any list item or blockquote, under an info string from the closed vocabulary.
  */
 function fenceViolations(markdown: string, allowed: ReadonlySet<string>): string[] {
-  const problems: string[] = [];
-  let open = false;
-  for (const [index, line] of markdown.split("\n").entries()) {
-    if (open) {
-      // Fence-like body lines (a guide showing markdown) are content, so a malformed closer surfaces as the unclosed-fence problem at the end.
-      if (line === "```") {
-        open = false;
-      }
+  const malformed = (line: number, fence: string): string =>
+    `line ${line}: fence "${fence.trim()}" must start at column zero with exactly three backticks (no indent, no blockquote)`;
+  const problems = indentedFences(markdown).map((shown) => malformed(shown.line, shown.opener));
+  for (const fence of codeFences(markdown)) {
+    if (fence.nested || !/^`{3}(?!`)/.test(fence.opener)) {
+      problems.push(malformed(fence.line, fence.opener));
       continue;
     }
-    if (/^[\s>]*(`{3,}|~{3,})/.test(line)) {
-      if (!/^`{3}(?!`)/.test(line)) {
-        problems.push(
-          `line ${index + 1}: fence "${line.trim()}" must start at column zero with exactly three backticks (no indent, no blockquote)`,
-        );
-        continue;
-      }
-      // No leading trim: "``` yaml settings" would pass a trimmed check while fencedBlocks cannot see it.
-      const info = line.slice(3).trimEnd();
-      if (!allowed.has(info)) {
-        problems.push(
-          `line ${index + 1}: fence info "${info}" is not in the allowed list (${[...allowed].join(", ")})`,
-        );
-      }
-      open = true;
+    if (!allowed.has(fence.info)) {
+      problems.push(
+        `line ${fence.line}: fence info "${fence.info}" is not in the allowed list (${[...allowed].join(", ")})`,
+      );
     }
-  }
-  if (open) {
-    problems.push("unclosed fence at end of document");
+    if (fence.closer === null) {
+      problems.push(`line ${fence.line}: the fence is never closed`);
+    } else if (fence.closer !== "```") {
+      problems.push(malformed(fence.endLine, fence.closer));
+    }
   }
   return problems;
-}
-
-/**
- * GitHub's heading slugger: punctuation (backticks, $, parentheses, slashes, dots, quotes) is STRIPPED rather than hyphenated; underscores and
- * hyphens survive.
- */
-function githubSlug(heading: string): string {
-  return heading
-    .trim()
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s_-]/gu, "")
-    .replace(/\s/g, "-");
-}
-
-/**
- * The lines outside fenced code blocks. Indented fences count here (the README nests them in list items), unlike the guides' column-zero policy, so
- * every scanned markdown file is safe.
- */
-function linesOutsideFences(markdown: string, source: string): string[] {
-  const lines: string[] = [];
-  let opener: string | null = null;
-  for (const line of markdown.split("\n")) {
-    if (opener === null) {
-      const open = line.match(/^[ \t]*(`{3,}|~{3,})/);
-      if (open) {
-        opener = open[1] ?? "";
-      } else {
-        lines.push(line);
-      }
-      continue;
-    }
-    const close = line.match(/^[ \t]*(`{3,}|~{3,})[ \t]*$/);
-    if (close && close[1]?.[0] === opener[0] && (close[1]?.length ?? 0) >= opener.length) {
-      opener = null;
-    }
-  }
-  if (opener !== null) {
-    // The root files in the scan set have no fence-policy test, so an unclosed fence swallowing every later heading and link fails here.
-    throw new Error(`unclosed ${opener} fence in ${source} swallows the rest of the document`);
-  }
-  return lines;
 }
 
 /**
@@ -285,23 +242,16 @@ async function linksLeavingDocs(markdown: string, page: string): Promise<string[
   return problems;
 }
 
-/** Every fragment a file's headings answer to, duplicate suffixes included. */
-function headingSlugs(markdown: string, source: string): Set<string> {
+/**
+ * Every fragment a file's headings answer to, duplicate suffixes included. The headings are the syntax tree's and the
+ * slug is github-slugger's over each heading's text, the rule GitHub and the docs site both render anchors with.
+ */
+function headingSlugs(markdown: string): Set<string> {
+  const slugger = new GithubSlugger();
   const slugs = new Set<string>();
-  for (const line of linesOutsideFences(markdown, source)) {
-    // A closing hash run ("## Setup ##") is not part of the text GitHub slugs.
-    const heading = line.match(/^#{1,6}\s+(.*?)(?:\s+#+)?\s*$/);
-    if (!heading) {
-      continue;
-    }
-    // GitHub probes -1, -2, ... until the slug is free, so an explicit "Setup-1" heading pushes a later duplicate "Setup" to setup-2.
-    const base = githubSlug(heading[1] ?? "");
-    let slug = base;
-    for (let n = 1; slugs.has(slug); n++) {
-      slug = `${base}-${n}`;
-    }
-    slugs.add(slug);
-  }
+  visitParents(markdownTree(markdown), "heading", (heading) => {
+    slugs.add(slugger.slug(headingText(heading, { includeHtml: false, includeImageAlt: false })));
+  });
   return slugs;
 }
 
@@ -503,7 +453,7 @@ describe("docs/ guide pages", () => {
     const slugsOf = (path: string): Set<string> => {
       let slugs = slugCache.get(path);
       if (!slugs) {
-        slugs = headingSlugs(readFileSync(path, "utf8"), path);
+        slugs = headingSlugs(readFileSync(path, "utf8"));
         slugCache.set(path, slugs);
       }
       return slugs;
@@ -520,18 +470,14 @@ describe("docs/ guide pages", () => {
     expect(broken).toEqual([]);
   });
 
-  test("headings in scanned files carry no markdown links, HTML, or brackets", () => {
-    // githubSlug slugs RAW heading text, so a link, tag, or entity in a heading slugs to garbage the anchor test then trusts.
-    const offenders: string[] = [];
-    for (const file of linkScanFiles()) {
-      for (const line of linesOutsideFences(readFileSync(file.path, "utf8"), file.label)) {
-        const heading = line.match(/^#{1,6}\s+(.*?)(?:\s+#+)?\s*$/);
-        if (heading && /[[\]<>&]/.test(heading[1] ?? "")) {
-          offenders.push(`${file.label}: ${line.trim()}`);
-        }
-      }
-    }
-    expect(offenders).toEqual([]);
+  test("no scanned file leaves a fence unclosed", () => {
+    // An unclosed fence turns the rest of its page into code, so every later link and heading would leave the link checks unseen.
+    const unclosed = linkScanFiles().flatMap((file) =>
+      codeFences(readFileSync(file.path, "utf8"))
+        .filter((fence) => fence.closer === null)
+        .map((fence) => `${file.label}:${fence.line}`),
+    );
+    expect(unclosed).toEqual([]);
   });
 
   /**
@@ -557,7 +503,7 @@ describe("docs/ guide pages", () => {
       .concat(templates);
   }
 
-  type ExtraFile = string | { type: string; path: string; jsonpath?: string };
+  type ExtraFile = string | { type: string; path: string; jsonpath?: string; glob?: boolean };
 
   function releaseExtraFiles(): ExtraFile[] {
     const config = JSON.parse(readFileSync(join(ROOT, "release-please-config.json"), "utf8")) as {
@@ -566,14 +512,24 @@ describe("docs/ guide pages", () => {
     return config.packages["."]?.["extra-files"] ?? [];
   }
 
-  test("marker-bearing files equal the release-please extra-files set", () => {
-    // release-please rewrites pins only in files listed under extra-files, so a page moved without a config update keeps a stale pin silently.
-    // An extra-files entry outside markerScanFiles() (action.yml, a workflow) fails here too and means the scan set needs widening.
-    const extraFiles = releaseExtraFiles().filter((entry) => typeof entry === "string");
+  test("every marker-bearing file is matched by a release-please extra-files entry", () => {
+    // release-please rewrites pins only in files an extra-files entry names, by path or by glob, so a marked file no entry matches keeps a stale pin silently.
+    const matchers = releaseExtraFiles().map((entry) => {
+      if (typeof entry === "string") {
+        return (label: string) => label === entry;
+      }
+      const glob = new Bun.Glob(entry.path);
+      return (label: string) => (entry.glob === true ? glob.match(label) : label === entry.path);
+    });
     const marked = markerScanFiles()
       .filter((file) => readFileSync(file.path, "utf8").includes("x-release-please-"))
       .map((file) => file.label);
-    expect(marked.sort()).toEqual([...extraFiles].sort());
+    expect(marked.filter((label) => !matchers.some((matches) => matches(label)))).toEqual([]);
+    // release-please's matcher skips a dot path that Bun.Glob matches, so a marked page under one would pass here and be skipped there.
+    expect(marked.filter((label) => label.startsWith("docs/") && label.includes("/."))).toEqual([]);
+    // The other direction, for the entries named by path: one naming a file with no marker, or no file, is stale.
+    const literal = releaseExtraFiles().filter((entry) => typeof entry === "string");
+    expect(literal.filter((path) => !marked.includes(path))).toEqual([]);
   });
 
   /** The example with every `_remove: true` turned into the plain entry it names: the lower layer every removal in it matches. */
@@ -681,7 +637,7 @@ describe("docs/ guide pages", () => {
     'the layering guide\'s "%s" folds to the merged document it shows',
     (heading, count, notices) => {
       const markdown = readFileSync(join(DOCS, "operate", "layering.md"), "utf8");
-      const section = sectionLines(markdown, heading, "docs/operate/layering.md").join("\n");
+      const section = sectionText(markdown, heading, "docs/operate/layering.md");
       const layers: Layer[] = fencedBlocks(section, "yaml layer").map((block, index) => ({
         name: `layer-${index}`,
         doc: parseYaml(block),
@@ -701,12 +657,13 @@ describe("docs/ guide pages", () => {
   ])('%s: the "%s" table names every input the mode rejects', (page, heading, rejected) => {
     // The rejected set grows with the input declarations, so the table must name each one or the page under-reports the refusal.
     const markdown = readFileSync(join(ROOT, page), "utf8");
-    const section = sectionLines(markdown, heading, page);
-    const rejectedRow = section.find((line) => line.includes("| Rejected"));
+    const rows = tableRows(sectionText(markdown, heading, page));
+    const rejectedRow = rows.find(([, meaning = ""]) => meaning.startsWith("Rejected"));
     if (rejectedRow === undefined) {
       throw new Error(`${page} has no "Rejected" row in its inputs table`);
     }
-    const named = [...rejectedRow.matchAll(/`([a-z-]+)`/g)].map((match) => match[1]);
+    const [inputs = ""] = rejectedRow;
+    const named = [...inputs.matchAll(/`([a-z-]+)`/g)].map((match) => match[1]);
     expect(new Set(named)).toEqual(new Set(rejected));
   });
 
@@ -714,8 +671,8 @@ describe("docs/ guide pages", () => {
     // The roster and the key fields live in sixteen module declarations; a section added or rekeyed without its row
     // would leave the page claiming a fold the engine no longer performs.
     const markdown = readFileSync(join(DOCS, "operate", "layering.md"), "utf8");
-    const section = sectionLines(markdown, "The rules", "docs/operate/layering.md");
-    const rows = tableRows(section.join("\n")).filter(
+    const section = sectionText(markdown, "The rules", "docs/operate/layering.md");
+    const rows = tableRows(section).filter(
       ([sections = "", keyCell = ""]) =>
         /^`[a-z_]+`(, `[a-z_]+`)*$/.test(sections) && keyCell.startsWith("`"),
     );
@@ -735,19 +692,19 @@ describe("docs/ guide pages", () => {
     // The quoted message is compared against the whole error its layer raises (wrapped in that layer's prefix), so no row can quote a message its
     // own layer does not raise.
     const PAGE = "docs/operate/layering.md";
-    const section = sectionLines(
+    const section = sectionText(
       readFileSync(join(DOCS, "operate", "layering.md"), "utf8"),
       "Refusals",
       PAGE,
     );
-    const prefix = section.join("\n").match(/`layer "([^"`]+)": \.\.\.`/);
+    const prefix = section.match(/`layer "([^"`]+)": \.\.\.`/);
     if (!prefix) {
       throw new Error(
         `${PAGE}'s Refusals section no longer quotes the fold's \`layer "<name>": ...\` prefix`,
       );
     }
     const layerName = prefix[1] ?? "";
-    const rows = refusalRows(section, PAGE);
+    const rows = refusalRows(section.split("\n"), PAGE);
     // The rows drive test.each, which runs nothing over an empty table, so a table that lost its rows fails here instead.
     for (const gate of ["validation", "fold"] as const) {
       if (!rows.some((row) => row.gate === gate)) {
@@ -1139,7 +1096,7 @@ describe("refusal table parser (mutation checks)", () => {
 });
 
 describe("fence policy guard (mutation checks)", () => {
-  // Every mutation but the indented and four-backtick fences hides the example from fencedBlocks; those two break only the guides' one fence form.
+  // The reader sees every fence form, so the policy is what keeps the guides to one; a form it lets through is a second spelling of a fence tag.
   const notAllowed = (line: number, info: string): string =>
     `line ${line}: fence info "${info}" is not in the allowed list (${[...ALLOWED_FENCE_INFO].join(", ")})`;
   const malformed = (line: number, fence: string): string =>
@@ -1148,28 +1105,40 @@ describe("fence policy guard (mutation checks)", () => {
     "the canonical form": ["```yaml settings\nlabels: []\n```\n", []],
     "a missing tag": ["```\nlabels: []\n```\n", [notAllowed(1, "")]],
     "a misspelled tag": ["```yml settings\nlabels: []\n```\n", [notAllowed(1, "yml settings")]],
-    "a space before the tag": [
-      "``` yaml settings\nlabels: []\n```\n",
-      [notAllowed(1, " yaml settings")],
+    "a tag with an attribute": [
+      '```yaml title="x"\nlabels: []\n```\n',
+      [notAllowed(1, 'yaml title="x"')],
     ],
-    // A malformed opener never opens a block, so its closer is reported too.
     "an indented fence": [
       "  ```yaml settings\nlabels: []\n  ```\n",
-      [malformed(1, "```yaml settings"), malformed(3, "```")],
+      [malformed(1, "```yaml settings")],
+    ],
+    "a fence indented into a code block": [
+      "    ```yaml settings\n    labels: []\n    ```\n",
+      [malformed(1, "```yaml settings")],
+    ],
+    "a fence indented past a code block's four spaces": [
+      "      ```yaml settings\n      labels: []\n      ```\n",
+      [malformed(1, "```yaml settings")],
+    ],
+    "a fence in a list item": [
+      "- item\n\n  ```yaml settings\n  labels: []\n  ```\n",
+      [malformed(3, "```yaml settings")],
     ],
     "a blockquoted fence": [
-      "> ```yaml settings\nlabels: []\n> ```\n",
-      [malformed(1, "> ```yaml settings"), malformed(3, "> ```")],
+      "> ```yaml settings\n> labels: []\n> ```\n",
+      [malformed(1, "> ```yaml settings")],
     ],
-    "a tilde fence": [
-      "~~~yaml settings\nlabels: []\n~~~\n",
-      [malformed(1, "~~~yaml settings"), malformed(3, "~~~")],
-    ],
+    "a tilde fence": ["~~~yaml settings\nlabels: []\n~~~\n", [malformed(1, "~~~yaml settings")]],
     "a four-backtick fence": [
       "````yaml settings\nlabels: []\n````\n",
-      [malformed(1, "````yaml settings"), malformed(3, "````")],
+      [malformed(1, "````yaml settings")],
     ],
-    "an unclosed fence": ["```yaml settings\nlabels: []\n", ["unclosed fence at end of document"]],
+    "a closing fence that is not three bare backticks": [
+      "```yaml settings\nlabels: []\n````\n",
+      [malformed(3, "````")],
+    ],
+    "an unclosed fence": ["```yaml settings\nlabels: []\n", ["line 1: the fence is never closed"]],
   };
   test.each(Object.entries(FORMS))(
     "%s yields exactly the pinned violations",
@@ -1179,26 +1148,79 @@ describe("fence policy guard (mutation checks)", () => {
   );
 });
 
-describe("github heading slugger", () => {
-  // Real headings from this repo's pages; a wrong slugging rule fails here rather than as a false anchor break in the link test.
-  const CASES: Record<string, string> = {
-    "The `$NAME` pattern": "the-name-pattern",
-    "Behavior does not match src/ (missing or stale bundle)":
-      "behavior-does-not-match-src-missing-or-stale-bundle",
-    "Example settings.yml": "example-settingsyml",
-    'What a "cannot verify" note means': "what-a-cannot-verify-note-means",
-    "Compared to the Probot Settings app": "compared-to-the-probot-settings-app",
-    "1. Create the token": "1-create-the-token",
-    "null as an opt-out": "null-as-an-opt-out",
-    "The nested variables, secrets, and deployment knobs":
-      "the-nested-variables-secrets-and-deployment-knobs",
-  };
-  for (const [heading, slug] of Object.entries(CASES)) {
-    test(`slugs "${heading}" to "${slug}"`, () => {
-      expect(githubSlug(heading)).toBe(slug);
-    });
-  }
+describe("section reader", () => {
+  // The section tests read a claim out of one section, so a cut that ends early or runs on reads the wrong claim.
+  test.each<[string, string, string]>([
+    [
+      "a heading-looking line inside a code block does not end the section",
+      "## A\n\nfirst\n\n```text\n## not a heading\n```\n\nlast\n\n## B\n\nother\n",
+      "first\n\n```text\n## not a heading\n```\n\nlast",
+    ],
+    [
+      "a deeper heading stays inside the section",
+      "## A\n\n### Sub\n\nbody\n\n## B\n",
+      "### Sub\n\nbody",
+    ],
+    ["the last section runs to the document's end", "## Z\n\n## A\n\nbody\n", "body"],
+    ["a setext heading names its section", "A\n---\n\nbody\n\n## B\n", "body"],
+    ["a closing hash run is not part of the heading's text", "## A ##\n\nbody\n", "body"],
+    [
+      "an indented first line keeps its indent, so an indented code block stays one",
+      "## A\n\n    ```yaml\n    a: 1\n    ```\n\n## B\n",
+      "    ```yaml\n    a: 1\n    ```",
+    ],
+  ])("%s", (_case, markdown, section) => {
+    expect(sectionText(markdown, "A", "(inline)")).toBe(section);
+  });
+});
 
+describe("code fence reader", () => {
+  // The example validators check what this reader returns, so a fence form it cannot see is an example nothing validates.
+  test.each<[string, string, string[]]>([
+    ["a tilde fence is read", "~~~yaml\na: 1\n~~~\n", ["a: 1"]],
+    ["a blockquoted fence is read without its markers", "> ```yaml\n> a: 1\n> ```\n", ["a: 1"]],
+    [
+      "a fence nested in a list item is read without its indent",
+      "1. Step\n\n   ```yaml\n   a:\n     b: 1\n   ```\n",
+      ["a:\n  b: 1"],
+    ],
+    [
+      "a fence shown inside a longer fence is that fence's text",
+      "````text\n```yaml\na: 1\n```\n````\n",
+      [],
+    ],
+    ["a fence inside an HTML comment renders nothing", "<!--\n```yaml\na: 1\n```\n-->\n", []],
+  ])("%s", (_case, markdown, blocks) => {
+    expect(fencedBlocks(markdown, "yaml")).toEqual(blocks);
+  });
+
+  test.each<[string, string, Array<string | null>]>([
+    [
+      "a closing fence is the parser's, so a code line that ends in backticks is not one",
+      "```text\nx\ntext```",
+      [null],
+    ],
+    [
+      "a CRLF document's fences read without the carriage return",
+      "```text\r\nx\r\n```\r\n",
+      ["```"],
+    ],
+    ["a fence the document ends before closing has no closer", "```text\nx\n", [null]],
+  ])("%s", (_case, markdown, closers) => {
+    expect(codeFences(markdown).map((fence) => fence.closer)).toEqual(closers);
+  });
+
+  test("the language is the info string's first word, whatever follows it", () => {
+    const markdown = '```yml\na: 1\n```\n\n```yaml title="x"\nb: 2\n```\n';
+    expect(codeFences(markdown).map((fence) => [fence.lang, fence.info])).toEqual([
+      ["yml", "yml"],
+      ["yaml", 'yaml title="x"'],
+    ]);
+  });
+});
+
+describe("github heading slugger", () => {
+  // Without these, a heading the tree reader misses or mis-slugs would show up only as a false broken-anchor report.
   test.each<[string, string, string[]]>([
     [
       "duplicate headings get -1/-2 suffixes",
@@ -1233,7 +1255,34 @@ describe("github heading slugger", () => {
       ["   ```yaml", "   # a comment", "   ```", "# Title"].join("\n"),
       ["title"],
     ],
+    [
+      "a heading inside an HTML comment renders nothing, so no link lands on it",
+      "<!--\n## Hidden\n-->\n\n## Shown\n",
+      ["shown"],
+    ],
+    [
+      "front matter is not a heading, though its last line and the closing rule read as a setext one",
+      "---\norder: 110\n---\n\n# Title\n",
+      ["title"],
+    ],
+    ["a setext heading is a heading", "Setup\n=====\n\nDetails\n-------\n", ["setup", "details"]],
+    ["a heading indented up to three spaces is a heading", "   ## Indented\n", ["indented"]],
+    [
+      "a heading inside a blockquote or a list item is a heading",
+      "> ## Quoted\n\n- ## Listed\n",
+      ["quoted", "listed"],
+    ],
+    [
+      "emphasis, code, and link markup are not part of the text GitHub slugs",
+      "## _Important_ note\n\n## The `$NAME` [pattern](x.md)\n",
+      ["important-note", "the-name-pattern"],
+    ],
+    [
+      "an image's alt text is not part of the text GitHub slugs",
+      "## ![Badge](badge.png) Title\n",
+      ["-title"],
+    ],
   ])("%s", (_case, markdown, slugs) => {
-    expect(headingSlugs(markdown, "(inline)")).toEqual(new Set(slugs));
+    expect(headingSlugs(markdown)).toEqual(new Set(slugs));
   });
 });

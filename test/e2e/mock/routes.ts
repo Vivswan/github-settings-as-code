@@ -10,16 +10,13 @@
  */
 
 import type { GraphQLFormattedError } from "graphql";
+import { slugKey } from "../../../src/github/slug.js";
 import { isPlainObject } from "../../../src/plain-data.js";
 import type { SectionKey } from "../../../src/schema.js";
 import { endpointPath, toleratedStatuses } from "../../../src/sections/contract/endpoints.js";
 import { toleratedGraphqlErrors } from "../../../src/sections/contract/graphql.js";
 import { denialPosture, endpointPermission } from "../../../src/sections/contract/operations.js";
-import {
-  allGraphqlOps,
-  type TaggedEndpoint,
-  type TaggedGraphqlOp,
-} from "../../../src/sections/registry.js";
+import { allGraphqlOps, type TaggedGraphqlOp } from "../../../src/sections/registry.js";
 import type { PermissionMask } from "../scenario.js";
 import { applyFault, type CoreFaultKey, takeCorruption, takeFault } from "./chaos.js";
 import {
@@ -618,6 +615,22 @@ function serveCoreRoute(request: PipelineRequest, run: Run): PipelineResult | nu
 }
 
 /**
+ * A single-repo run serves its one repository, in whatever case the path spells it; a route whose {owner}/{repo}
+ * parameters name another answers GitHub's 404 for a repository the token cannot see.
+ */
+function singleRepoTarget(
+  params: Record<string, string>,
+  state: MockState,
+  mask: PermissionMask,
+): Target | { foreign: string } {
+  const { owner, repo } = params;
+  const addressed = owner !== undefined && repo !== undefined ? `${owner}/${repo}` : state.slug;
+  return slugKey(addressed) === slugKey(state.slug)
+    ? { state, mask, targetSlug: "" }
+    : { foreign: addressed };
+}
+
+/**
  * Multi-repo routing follows the endpoint's scope; only the bare org probe grades against the global mask alone.
  *   /repos/... endpoint                          -> the slug's MockState, its per-slug mask over the global mask
  *   bare org probe (/orgs/{org})                 -> the shared org state, the global mask
@@ -627,13 +640,13 @@ function serveCoreRoute(request: PipelineRequest, run: Run): PipelineResult | nu
  */
 function resolveRestTarget(
   request: PipelineRequest,
-  endpoint: TaggedEndpoint,
+  { endpoint, params }: MatchedEndpoint,
   options: PipelineOptions,
-): Target | { violation: string } {
+): Target | { violation: string } | { foreign: string } {
   const { scenario, working } = options;
   const global = scenario.token_permissions ?? {};
   if (working.mode === "single") {
-    return { state: working.state, mask: global, targetSlug: "" };
+    return singleRepoTarget(params, working.state, global);
   }
 
   const unknownTarget = `multi-repo request ${request.method} ${request.pathname} names no known target slug`;
@@ -812,9 +825,13 @@ function serveSectionRequest(request: PipelineRequest, run: Run): PipelineResult
     );
   }
 
-  const target = resolveRestTarget(request, endpoint, options);
+  const target = resolveRestTarget(request, matched, options);
   if ("violation" in target) {
     return violation(target.violation);
+  }
+  if ("foreign" in target) {
+    const response: MockResponse = { status: 404, body: { message: "Not Found" } };
+    return { response, log: { ...baseLog, status: response.status } };
   }
 
   const faulted = restFault(key, target.targetSlug, run);
