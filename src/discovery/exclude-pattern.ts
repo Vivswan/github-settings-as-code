@@ -347,7 +347,10 @@ function judgeExcludePattern(pattern: string): { flaws: string[]; regex: RegExp 
  */
 export function compileExcludePattern(
   pattern: string,
-): Result<ExcludePattern, ProblemOf<"input-exclude-pattern-invalid">> {
+): Result<
+  ExcludePattern,
+  Extract<ProblemOf<"input-exclude-pattern-invalid">, { pattern: string }>
+> {
   const { flaws, regex } = judgeExcludePattern(pattern);
   if (flaws.length > 0) {
     return err({ code: "input-exclude-pattern-invalid", pattern, reason: flaws.join(", and ") });

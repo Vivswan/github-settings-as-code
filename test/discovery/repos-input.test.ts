@@ -21,12 +21,22 @@ describe("parseReposInput", () => {
     [
       "a bad slug is reported",
       "not-a-slug",
-      err({ code: "repos-input-invalid-entries", invalid: ["not-a-slug"], duplicated: [] }),
+      err({
+        code: "repos-input-invalid-entries",
+        entries: "shown",
+        invalid: ["not-a-slug"],
+        duplicated: [],
+      }),
     ],
     [
       "bad slugs and duplicates are reported once, together, each pasted twice counting once",
       "o/a, O/A, bad, bad, worse",
-      err({ code: "repos-input-invalid-entries", invalid: ["bad", "worse"], duplicated: ["O/A"] }),
+      err({
+        code: "repos-input-invalid-entries",
+        entries: "shown",
+        invalid: ["bad", "worse"],
+        duplicated: ["O/A"],
+      }),
     ],
   ])("%s: %p", (_case, input, result) => {
     expect(parseReposInput(input)).toEqual(result);

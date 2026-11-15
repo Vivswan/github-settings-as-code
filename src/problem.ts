@@ -132,6 +132,11 @@ export type Problem =
       readonly pattern: string;
       readonly reason: string;
     }
+  | {
+      readonly code: "input-exclude-pattern-invalid";
+      readonly position: number;
+      readonly reason: string;
+    }
   | { readonly code: "input-repository-with-multi" }
   | { readonly code: "input-settings-file-with-multi" }
   | {
@@ -145,7 +150,7 @@ export type Problem =
       readonly value: string;
       readonly mode: EngineMode | "init";
     }
-  | { readonly code: "input-repository-not-slug"; readonly value: string }
+  | { readonly code: "input-repository-not-slug"; readonly value: string | null }
   | { readonly code: "input-artifact-unsupported" }
   // The settings document
   | {
@@ -248,8 +253,15 @@ export type Problem =
   | { readonly code: "repos-input-wildcard-mixed" }
   | {
       readonly code: "repos-input-invalid-entries";
+      readonly entries: "shown";
       readonly invalid: readonly string[];
       readonly duplicated: readonly string[];
+    }
+  | {
+      readonly code: "repos-input-invalid-entries";
+      readonly entries: "hidden";
+      readonly invalid: readonly number[];
+      readonly duplicated: readonly number[];
     }
   | { readonly code: "repos-dir-missing"; readonly reposDir: string }
   | { readonly code: "repos-dir-unreadable"; readonly reposDir: string; readonly reason: string }
@@ -297,6 +309,10 @@ type RunProblem = Exclude<Problem, InputProblem | LayerProblem | TargetProblem>;
 const PAT_ADVICE =
   "Discovery needs a user PAT; the workflow GITHUB_TOKEN and GitHub App installation tokens " +
   'cannot enumerate a user\'s repositories. List the target repositories explicitly in the "repos" input';
+
+/** Said where a refusal names an entry by its 1-based place, or a `value` of null, instead of its text: no repository is listed yet, so under private-repos: redact the text may name a private one. */
+const HIDDEN_TEXT =
+  'its text is hidden because private-repos is "redact" and it may name a private repository; set private-repos: show to print it';
 
 /** The underscore rule at the document level; the wrapper's line (src/sections/shared/schema-helpers.ts) says the same in the wrapper's terms, and the two directives are all the underscore ever means. */
 const DIRECTIVES_ADVICE =
@@ -395,23 +411,31 @@ function describeUnknownSectionInput(
 }
 
 function describeInvalidReposEntries(problem: ProblemOf<"repos-input-invalid-entries">): string {
+  const hidden = problem.entries === "hidden";
+  const named = (entries: readonly (string | number)[]): string =>
+    hidden
+      ? `${agree(entries.length, "entry", "entries")} ${entries.map((at) => `#${at}`).join(", ")}`
+      : quoteList(entries as readonly string[]);
   const parts: string[] = [];
   if (problem.invalid.length > 0) {
     parts.push(
-      `${quoteList(problem.invalid)} ` +
+      `${named(problem.invalid)} ` +
         `${agree(problem.invalid.length, "is not an owner/name slug", "are not owner/name slugs")} ` +
         '(use values like "octocat/hello-world", comma- or newline-separated)',
     );
   }
   if (problem.duplicated.length > 0) {
     parts.push(
-      `${quoteList(problem.duplicated)} ` +
+      `${named(problem.duplicated)} ` +
         `${agree(problem.duplicated.length, "is", "are")} listed more than once ` +
         "(keep exactly one entry per repository)",
     );
   }
   const count = problem.invalid.length + problem.duplicated.length;
-  return `the "repos" input has ${countNoun(count, "invalid entry", "invalid entries")}: ${parts.join("; ")}. Or use "*" alone to discover repositories`;
+  const why = hidden
+    ? ` An entry is named by its place in the list, counted from 1: ${HIDDEN_TEXT}.`
+    : "";
+  return `the "repos" input has ${countNoun(count, "invalid entry", "invalid entries")}: ${parts.join("; ")}.${why} Or use "*" alone to discover repositories`;
 }
 
 /** The `layer "<name>": <site>` prefix every layer refusal opens with. */
@@ -560,20 +584,24 @@ function describeInputProblem(problem: InputProblem): string {
       return `the "affiliation" input entry "${problem.entry}" is not a supported affiliation, so discovery cannot build the /user/repos query. Use a comma-separated list of ${quoteList(problem.allowed)}`;
     case "input-exclude-pattern-invalid": {
       const shown =
-        problem.pattern.length > 60 ? `${problem.pattern.slice(0, 60)}...` : problem.pattern;
+        "position" in problem
+          ? `#${problem.position} (${HIDDEN_TEXT})`
+          : quote(
+              problem.pattern.length > 60 ? `${problem.pattern.slice(0, 60)}...` : problem.pattern,
+            );
       // A position names a character in the pattern as the fixes before it leave it, counted from 0.
       const positioned = / at \d+/.test(problem.reason)
         ? ", applying the fixes in order with positions counted from 0 in the pattern as the earlier fixes leave it"
         : "";
       return (
-        `the "exclude" input pattern ${quote(shown)} is not a usable glob: ${problem.reason}${positioned}. Write ` +
+        `the "exclude" input pattern ${shown} is not a usable glob: ${problem.reason}${positioned}. Write ` +
         `"<name-glob>" or "<owner-glob>/<name-glob>", where a glob is letters, digits, ".", "-", "_", "*", "?", ` +
         `and the classes "[abc]", "[!abc]", or "[^abc]" over those characters, with one optional leading "!" ` +
         `negating the whole pattern`
       );
     }
     case "input-repository-not-slug":
-      return `cannot target a repository: "${problem.value}" is not an owner/name slug. Set the "repository" input (--repository on the command line) to a value like "octocat/hello-world"; inside GitHub Actions, GITHUB_REPOSITORY supplies it`;
+      return `cannot target a repository: ${problem.value === null ? `the "repository" input (${HIDDEN_TEXT})` : `"${problem.value}"`} is not an owner/name slug. Set the "repository" input (--repository on the command line) to a value like "octocat/hello-world"; inside GitHub Actions, GITHUB_REPOSITORY supplies it`;
     case "input-artifact-unsupported":
       return (
         "private-report: artifact uploads the reports as a workflow artifact, which only the GitHub " +

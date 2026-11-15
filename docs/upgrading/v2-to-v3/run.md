@@ -243,4 +243,6 @@ A pattern outside the grammar (a leading `./`, a run of stars, a `.` or `..` sid
 error: the "exclude" input pattern "./tmp-**" is not a usable glob: it starts with "./", which names no owner, so drop every leading "./", and it holds a run of stars, which matches no more than one "*" does, so write one "*". Write ...
 ```
 
+That line is the `private-repos: show` form. Under `private-repos: redact`, the default, the refusal names the pattern by its place in the list (`pattern #1`) and hides its text, because the pattern may name a private repository.
+
 Fix: delete a pattern that relied on `?`, `[`, `]`, or `!` matching literally, since it never matched a repository; rewrite one that meant a glob in the grammar above, following the fix each refusal names. For library callers, `DiscoveryFilters.exclude` takes compiled `ExcludePattern` values instead of strings: run each pattern through `compileExcludePattern` at your input boundary and pass the `Result`'s value.

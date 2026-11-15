@@ -277,7 +277,12 @@ const SPECIMENS = {
     '"nope" is not an owner/name repository slug (use a value like "octocat/hello-world")',
   ],
   "repos-input-invalid-entries": [
-    { code: "repos-input-invalid-entries", invalid: ["bad", "worse"], duplicated: ["O/A"] },
+    {
+      code: "repos-input-invalid-entries",
+      entries: "shown",
+      invalid: ["bad", "worse"],
+      duplicated: ["O/A"],
+    },
     'the "repos" input has 3 invalid entries: "bad", "worse" are not owner/name slugs (use values ' +
       'like "octocat/hello-world", comma- or newline-separated); "O/A" is listed more than once ' +
       '(keep exactly one entry per repository). Or use "*" alone to discover repositories',
@@ -330,6 +335,9 @@ const SPECIMENS = {
     "not a valid age recipient: invalid recipient",
   ],
 } satisfies { [C in Exclude<Problem["code"], FieldlessCode>]: [ProblemOf<C>, string] };
+
+const HIDDEN_TEXT =
+  'its text is hidden because private-repos is "redact" and it may name a private repository; set private-repos: show to print it';
 
 describe("describeProblem", () => {
   test.each(Object.entries(SPECIMENS))("renders %s", (_code, [problem, line]) => {
@@ -438,14 +446,52 @@ describe("describeProblem", () => {
       { code: "no-targets", filteredOut: 1 },
       'multi-repo mode found no targets: repos: "*" discovery found 1 repository, but the discovery filters removed all of them (see the notices above). Relax the filter inputs, or add per-repo files to the repos-dir',
     ],
+    // Under private-repos: redact a refusal names an entry by its place: its text may name a private repository.
+    [
+      "a hidden exclude pattern is named by its place, with the flaw and the fix",
+      {
+        code: "input-exclude-pattern-invalid",
+        position: 2,
+        reason: 'it takes at most one "/", with a non-empty glob on each side of it',
+      },
+      `the "exclude" input pattern #2 (${HIDDEN_TEXT}) is not a usable glob: it takes at most one "/", with a ` +
+        'non-empty glob on each side of it. Write "<name-glob>" or "<owner-glob>/<name-glob>", where a glob is ' +
+        'letters, digits, ".", "-", "_", "*", "?", and the classes "[abc]", "[!abc]", or "[^abc]" over those ' +
+        'characters, with one optional leading "!" negating the whole pattern',
+    ],
+    [
+      "hidden repos entries are named by their places",
+      { code: "repos-input-invalid-entries", entries: "hidden", invalid: [2, 5], duplicated: [4] },
+      'the "repos" input has 3 invalid entries: entries #2, #5 are not owner/name slugs (use values like ' +
+        '"octocat/hello-world", comma- or newline-separated); entry #4 is listed more than once (keep exactly ' +
+        `one entry per repository). An entry is named by its place in the list, counted from 1: ${HIDDEN_TEXT}. ` +
+        'Or use "*" alone to discover repositories',
+    ],
+    [
+      "a hidden repository input is named, not quoted",
+      { code: "input-repository-not-slug", value: null },
+      `cannot target a repository: the "repository" input (${HIDDEN_TEXT}) is not an owner/name slug. Set the ` +
+        '"repository" input (--repository on the command line) to a value like "octocat/hello-world"; inside ' +
+        "GitHub Actions, GITHUB_REPOSITORY supplies it",
+    ],
     [
       "one invalid repos entry reads in the singular",
-      { code: "repos-input-invalid-entries", invalid: ["not-a-slug"], duplicated: [] },
+      {
+        code: "repos-input-invalid-entries",
+        entries: "shown",
+        invalid: ["not-a-slug"],
+        duplicated: [],
+      },
       'the "repos" input has 1 invalid entry: "not-a-slug" is not an owner/name slug (use values like "octocat/hello-world", comma- or newline-separated). Or use "*" alone to discover repositories',
     ],
     [
       "two duplicated repos entries read in the plural",
-      { code: "repos-input-invalid-entries", invalid: [], duplicated: ["o/a", "o/b"] },
+      {
+        code: "repos-input-invalid-entries",
+        entries: "shown",
+        invalid: [],
+        duplicated: ["o/a", "o/b"],
+      },
       'the "repos" input has 2 invalid entries: "o/a", "o/b" are listed more than once (keep exactly one entry per repository). Or use "*" alone to discover repositories',
     ],
     [

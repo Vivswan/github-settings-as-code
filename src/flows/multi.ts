@@ -391,7 +391,10 @@ function remoteFleet(api: GitHubClient, cfg: TargetsConfig): ResultAsync<RemoteF
       return ok(none);
     }
 
-    const parsed = yield* parseReposInput(cfg.reposInput);
+    const parsed = yield* parseReposInput(
+      cfg.reposInput,
+      cfg.privateRepos === "redact" ? "hidden" : "shown",
+    );
     if (parsed.discover) {
       const discovered = yield* discoverRepos(api, cfg.discoveryFilters);
       return ok(discoveredFleet(discovered));

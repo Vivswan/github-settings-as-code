@@ -45,6 +45,16 @@ A repository that a `repos: "*"` discovery filter drops is not a target, so it g
 
 The rule does not judge the pattern. A wildcard such as `secret-*` is hidden as well, because beside the count it would still say that a private repository has that prefix. The other filters (`visibility`, `archived`, `forks`, `topics`) are named in full: they hold a setting or a topic, never a repository name.
 
+A refused input follows the same rule. The refusal is printed before any repository is listed, so the run cannot know whether the text names a private repository. Under `private-repos: redact` it hides the text and still says the flaw and the fix:
+
+| Refused input                         | The refusal names it as                  |
+| ------------------------------------- | ---------------------------------------- |
+| a malformed `exclude` pattern         | `pattern #2`, its place in the list      |
+| a malformed or repeated `repos` entry | `entry #2`, its place in the list        |
+| a malformed `repository` value        | the `repository` input, without its text |
+
+Under `private-repos: show` each refusal quotes the text. A missing `repository` falls back to the workflow's own repository, which is never hidden.
+
 ## One seal, every mode
 
 Every target ends the same way, whichever mode ran it: its lines and its end state go through one channel, which closes open for a shown target and sealed for a hidden one. Only the seal's projections open it, and they render the public view alone. No mode has a redaction path of its own.

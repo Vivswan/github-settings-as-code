@@ -35,6 +35,7 @@ import {
   SNAPSHOT_REJECTED_INPUTS,
 } from "./inputs.js";
 import { DEFAULT_SETTINGS_FILE, type MultiConfig } from "./multi.js";
+import type { PrivateReposPolicy } from "./redact.js";
 import type { RenderConfig } from "./render.js";
 import type { SingleConfig } from "./single.js";
 import type { SnapshotConfig } from "./snapshot.js";
@@ -111,7 +112,7 @@ function readSnapshotBase(input: Inputs, env: ConfigEnv) {
   return safeTry(function* () {
     const token = yield* readToken(input, env);
     const policies = yield* readPolicies(input);
-    const filters = yield* readDiscoveryFilters(input);
+    const filters = yield* readDiscoveryFilters(input, policies.privateRepos);
     return ok({
       base: {
         kind: "snapshot" as const,
@@ -136,6 +137,7 @@ function readSnapshotBase(input: Inputs, env: ConfigEnv) {
 function refuseTargetInputs(
   reposInput: string,
   discoveryFiltersSet: readonly string[],
+  privateRepos: PrivateReposPolicy,
 ): Result<void, Problem> {
   const filtersWithout = (targets: "explicit-repos" | "repos-dir"): Result<void, Problem> =>
     discoveryFiltersSet.length > 0
@@ -144,8 +146,8 @@ function refuseTargetInputs(
   if (!reposInput) {
     return filtersWithout("repos-dir");
   }
-  return parseReposInput(reposInput).andThen((parsed) =>
-    parsed.discover ? ok(undefined) : filtersWithout("explicit-repos"),
+  return parseReposInput(reposInput, privateRepos === "redact" ? "hidden" : "shown").andThen(
+    (parsed) => (parsed.discover ? ok(undefined) : filtersWithout("explicit-repos")),
   );
 }
 
@@ -167,7 +169,7 @@ function parseSnapshotFileArm(
         targets: "snapshot-file",
       });
     }
-    const repo = yield* readSingleTarget(input, base.selfSlug);
+    const repo = yield* readSingleTarget(input, base.selfSlug, base.privateRepos);
     return ok({ ...base, form: "file" as const, repo, snapshotFile });
   });
 }
@@ -213,7 +215,7 @@ function parseSnapshotDirArm(
       return err({ code: "input-snapshot-dir-without-targets" });
     }
 
-    yield* refuseTargetInputs(reposInput, filters.discoveryFiltersSet);
+    yield* refuseTargetInputs(reposInput, filters.discoveryFiltersSet, base.privateRepos);
     return ok({
       ...base,
       form: "dir" as const,
@@ -332,7 +334,11 @@ function parseMultiArm(
     return err({ code: "input-settings-file-with-multi" });
   }
 
-  return refuseTargetInputs(targets.reposInput, filters.discoveryFiltersSet).map(() => ({
+  return refuseTargetInputs(
+    targets.reposInput,
+    filters.discoveryFiltersSet,
+    common.privateRepos,
+  ).map(() => ({
     ...common,
     kind: "multi" as const,
     reposDir: targets.reposDir,
@@ -370,7 +376,7 @@ function parseSingleArm(
     });
   }
 
-  return readSingleTarget(input, common.selfSlug).map((repo) => ({
+  return readSingleTarget(input, common.selfSlug, common.privateRepos).map((repo) => ({
     ...common,
     kind: "single" as const,
     repo,
@@ -405,7 +411,7 @@ export function parseConfig(
     }
 
     const common = yield* readCommon(input, env, mode, capabilities);
-    const filters = yield* readDiscoveryFilters(input);
+    const filters = yield* readDiscoveryFilters(input, common.privateRepos);
     const targets: TargetInputs = {
       reposInput: input.value("repos"),
       reposDir: input.value("repos-dir"),

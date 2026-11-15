@@ -19,8 +19,10 @@ export function splitList(value: string): string[] {
     .filter(Boolean);
 }
 
+/** `entries: "hidden"` names each refused entry by its 1-based place among the list's entries, for a run that hides private repositories. */
 export function parseReposInput(
   raw: string,
+  entries: "shown" | "hidden" = "shown",
 ): Result<
   { repos: RepoRef[]; discover: boolean },
   ProblemOf<"repos-input-wildcard-mixed" | "repos-input-invalid-entries">
@@ -33,30 +35,40 @@ export function parseReposInput(
     return ok({ repos: [], discover: true });
   }
   // Malformed and repeated entries are collected across the whole list, so N bad entries cost one run to discover, not
-  // N; the pools are Sets, so a bad entry pasted twice is one offender.
+  // N; the pools are keyed by the entry's text, so a bad entry pasted twice is one offender, at its first place.
   const seen = new Set<SlugKey>();
-  const invalid = new Set<string>();
-  const duplicated = new Set<string>();
+  const invalid = new Map<string, number>();
+  const duplicated = new Map<string, number>();
   const repos: RepoRef[] = [];
-  for (const item of items) {
+  for (const [index, item] of items.entries()) {
     const parsed = parseRepoSlug(item);
     if (parsed.isErr()) {
-      invalid.add(item);
+      invalid.set(item, invalid.get(item) ?? index + 1);
       continue;
     }
     const key = slugKey(item);
     if (seen.has(key)) {
-      duplicated.add(item);
+      duplicated.set(item, duplicated.get(item) ?? index + 1);
     }
     seen.add(key);
     repos.push(parsed.value);
   }
   if (invalid.size > 0 || duplicated.size > 0) {
-    return err({
-      code: "repos-input-invalid-entries",
-      invalid: [...invalid],
-      duplicated: [...duplicated],
-    });
+    return err(
+      entries === "hidden"
+        ? {
+            code: "repos-input-invalid-entries",
+            entries: "hidden",
+            invalid: [...invalid.values()],
+            duplicated: [...duplicated.values()],
+          }
+        : {
+            code: "repos-input-invalid-entries",
+            entries: "shown",
+            invalid: [...invalid.keys()],
+            duplicated: [...duplicated.keys()],
+          },
+    );
   }
   return ok({ repos, discover: false });
 }

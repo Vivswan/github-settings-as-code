@@ -66,7 +66,10 @@ describe("check and apply", () => {
 
   test("a config problem fails before any API call, the action's line on stderr", async () => {
     const api = new MockApi({});
-    const result = await cli(["check", "--repository", "not-a-slug", "--token", TOKEN], api);
+    const result = await cli(
+      ["check", "--repository", "not-a-slug", "--private-repos", "show", "--token", TOKEN],
+      api,
+    );
     expect(result.code).toBe(1);
     expect(api.calls).toHaveLength(0);
     expect(result.stderr).toBe(
@@ -86,10 +89,14 @@ describe("check and apply", () => {
     ],
     [
       "a config error echoing a padded --token",
-      ["check", "--token", ` ${TOKEN} `, "--repository", TOKEN],
+      ["check", "--token", ` ${TOKEN} `, "--repository", TOKEN, "--private-repos", "show"],
       {},
     ],
-    ["a config error echoing --token=", ["check", `--token=${TOKEN}`, "--repository", TOKEN], {}],
+    [
+      "a config error echoing --token=",
+      ["check", `--token=${TOKEN}`, "--repository", TOKEN, "--private-repos", "show"],
+      {},
+    ],
   ])("the token is masked in %s", async (_where, args, env) => {
     // Every writer goes through one boundary registered before the parse, so
     // a message no code of ours words (the parser's, a path echo) is masked too.

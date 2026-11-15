@@ -1,0 +1,26 @@
+# Refused exclude pattern under redaction. The second pattern spells a
+# repository's whole slug with a trailing "/", so the grammar refuses it before
+# discovery lists anything. The run cannot know whether that name is private,
+# so the refusal names the pattern by its place in the exclude list, says the
+# flaw and the fix, and prints the text on no public surface.
+name: discovery-refused-exclude-hidden
+settings: {}
+discovery:
+  inputs:
+    exclude: "tmp-*,e2e-owner/disc-vault/"
+  pool:
+    - { slug: e2e-owner/disc-keep, visibility: public }
+    - { slug: e2e-owner/disc-vault, visibility: private }
+repos:
+  e2e-owner/disc-keep:
+    settings: {}
+expect:
+  exit_code: 1
+  result: failed
+  stdout_contains:
+    - 'the "exclude" input pattern #2 (its text is hidden because private-repos is "redact"'
+    - 'is not a usable glob: it takes at most one "/", with a non-empty glob on each side of it'
+  leaks_nowhere:
+    - disc-vault
+  never:
+    - "GET /user/repos"
