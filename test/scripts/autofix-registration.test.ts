@@ -6,6 +6,8 @@
  *   an output missing from push.paths  -> the platform refuses the whole fix
  *   an input missing from push.on      -> no fix run starts, and the pull request fails on the drift test
  *   a generator missing from the hook  -> its output is never regenerated
+ *
+ * A list entry is read as the platform reads it: a glob, or a directory spelled with a closing slash.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -37,7 +39,6 @@ const packageScripts = (
   }
 ).scripts;
 
-/** The platform's list grammar: a glob, or a directory spelled with a closing slash. */
 const listed = (list: readonly string[], path: string): boolean =>
   list.some((entry) => new Bun.Glob(entry.endsWith("/") ? `${entry}**` : entry).match(path));
 
