@@ -20,7 +20,7 @@ import { indentedStdout, runScenario, type ScenarioReport } from "./runner/runne
 import { loadScenarios, type Scenario, scenarioRoots } from "./scenario.js";
 
 const FLAGS = {
-  sections: { type: "string" },
+  sections: { type: "string", multiple: true },
   scenario: { type: "string" },
   "print-stdout": { type: "boolean" },
 } as const;
@@ -54,7 +54,7 @@ function sectionKeys(value: string): string[] {
     .filter((key) => key !== "");
 }
 
-/** Strict parseArgs refuses an unknown flag, a stray argument, and a missing or surplus value itself; a repeated flag keeps its last value. */
+/** Strict parseArgs refuses an unknown flag, a stray argument, and a missing or surplus value itself. */
 function parseFlags(argv: readonly string[]): ParsedFlags {
   let values: ReturnType<typeof parseArgs<{ options: typeof FLAGS }>>["values"];
   try {
@@ -73,12 +73,17 @@ function parseFlags(argv: readonly string[]): ParsedFlags {
   if (values["print-stdout"] === true) {
     flags.printStdout = true;
   }
-  if (values.sections !== undefined && values.sections !== "all") {
-    const keys = sectionKeys(values.sections);
+  // Every --sections is read in order: `all` clears an earlier list, and an empty list is refused wherever it stands.
+  for (const value of values.sections ?? []) {
+    const keys = sectionKeys(value);
     if (keys.length === 0) {
       return refuse("--sections got an empty list; name at least one section, or all");
     }
-    flags.sections = keys;
+    if (value === "all") {
+      delete flags.sections;
+    } else {
+      flags.sections = keys;
+    }
   }
   return { ok: true, flags };
 }
