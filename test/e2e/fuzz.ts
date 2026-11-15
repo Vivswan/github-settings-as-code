@@ -22,6 +22,7 @@ import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
 import { endpointPath } from "../../src/sections/contract/endpoints.js";
 import { sectionModule } from "../../src/sections/registry.js";
 import { quote } from "../../src/text.js";
+import { iterationSummary } from "./fuzz-summary.js";
 import {
   type DiscoveryScenarioMeta,
   genDiscoveryScenario,
@@ -2149,10 +2150,12 @@ async function main(): Promise<number> {
   const tally = newTally();
   const failingSeeds: number[] = [];
   let failures = 0;
+  let ran = 0;
   for (let i = 0; i < flags.iterations; i++) {
     const seed = replayOne ? master : iterationSeed(master, i);
     const { mode, result } = await runIteration(seed, flags);
     recordIteration(tally, result, mode);
+    ran++;
     if (result.ok) {
       console.log(`  iter ${i} [${mode}] seed ${seed} ok`);
       continue;
@@ -2169,7 +2172,7 @@ async function main(): Promise<number> {
   const batteryFailures = replayOne ? 0 : await runBatteries(tally, master);
   const coverageFailures = printCoverage(tally, replayOne);
 
-  console.log(`\n${flags.iterations - failures}/${flags.iterations} iterations ok`);
+  console.log(`\n${iterationSummary({ requested: flags.iterations, ran, failed: failures })}`);
   if (batteryFailures > 0) {
     console.log(
       `directed battery failures (witness + input + fault + fixpoint + merge): ${batteryFailures}`,
