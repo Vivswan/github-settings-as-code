@@ -8,7 +8,11 @@
  */
 
 import { join } from "node:path";
+import { fromMarkdown } from "mdast-util-from-markdown";
+import { gfmTableFromMarkdown } from "mdast-util-gfm-table";
+import { gfmTable } from "micromark-extension-gfm-table";
 import { err, ok, Result, safeTry } from "neverthrow";
+import { visitParents } from "unist-util-visit-parents";
 import { RUN_RESULTS } from "../../src/engine/outcome.js";
 import {
   cellFault,
@@ -867,13 +871,26 @@ function architectureMapRegion(name: string, heading: string): GeneratedRegion {
 // reference, a second one, or a stale definition ahead of the generated one (it wins) would leave the page wrong
 // while regeneration stays a no-op.
 function patFormFault(page: string, path: string): string | undefined {
-  // CommonMark trims and case-folds labels and lets the first definition win, so every spelling counts: a mention
-  // opening a line and ending in ":" is a definition, any other bracketed mention is a reference.
-  const mentions = [...page.matchAll(/^ {0,3}\[([^\]]+)\]:|\[([^\]]+)\]/gm)].filter(
-    (match) => (match[1] ?? match[2] ?? "").trim().toLowerCase() === PAT_FORM_LABEL,
-  );
-  const definitions = mentions.filter((match) => match[1] !== undefined).length;
-  const references = mentions.length - definitions;
+  // CommonMark trims and case-folds labels, and a bracketed mention with no definition is plain text. The probe
+  // definition ahead of the page makes every mention a reference node even on a page that defines none; it is
+  // the one definition subtracted. A mention in a code span, a code block, or an HTML block is no node at all.
+  let definitions = -1;
+  let references = 0;
+  // Tables are split as GitHub splits them, cells first: a code span cannot hide a "|" there.
+  const tree = fromMarkdown(`[${PAT_FORM_LABEL}]: <probe>\n\n${page}`, {
+    extensions: [gfmTable()],
+    mdastExtensions: [gfmTableFromMarkdown()],
+  });
+  visitParents(tree, (node) => {
+    if (node.type === "definition" && node.identifier === PAT_FORM_LABEL) {
+      definitions += 1;
+    } else if (
+      (node.type === "linkReference" || node.type === "imageReference") &&
+      node.identifier === PAT_FORM_LABEL
+    ) {
+      references += 1;
+    }
+  });
   if (references !== definitions || definitions > 1) {
     return (
       `gen-docs: ${path} must reference [${PAT_FORM_LABEL}] exactly as often as it defines it, ` +
