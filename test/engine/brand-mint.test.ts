@@ -468,7 +468,7 @@ class Tree {
     return found;
   }
 
-  /** What a node says by itself: a function position, an identifier, a named property, a resolvable indexed access; undefined for a node judged by its children. */
+  /** What a node says by itself: a function position, an identifier, a named property, a tuple label, a qualified name, a resolvable indexed access; undefined for a node judged by its children. */
   private ownVerdict(
     file: string,
     node: Node,
@@ -485,6 +485,14 @@ class Tree {
     if (node.type === "TSPropertySignature" && node.computed !== true) {
       const annotation = node.typeAnnotation;
       return isNode(annotation) && this.mentions(file, annotation, carriers, bound);
+    }
+    // A tuple label is a name, not a type: only the element's type can carry.
+    if (node.type === "TSNamedTupleMember") {
+      return this.mentions(file, node.elementType as Node, carriers, bound);
+    }
+    // The right side of `ns.Name` is a member of `ns`, read by its own name and never through this file's aliases.
+    if (node.type === "TSQualifiedName") {
+      return carriers.names.has((node.right as Node).name as string);
     }
     if (node.type === "TSIndexedAccessType" && !isBound(node.objectType as Node, bound)) {
       const picked = this.pickedMember(file, node);
@@ -826,6 +834,10 @@ describe("the validated brand's mint", () => {
           "export const e = raw as { VS: string };",
           "export const f = raw as Plain;",
           "export const g = raw as { [VS]: string };",
+          "export const h = raw as [VS: string];",
+          "export const i = raw as E.VS;",
+          "export const j = raw as [label: VS];",
+          "export const k = raw as ns.ValidatedSettings;",
         ].join("\n"),
       },
     ];
@@ -833,6 +845,8 @@ describe("the validated brand's mint", () => {
       "alias.ts: raw as VS",
       'alias.ts: raw as S["settings"]',
       "alias.ts: raw as { [VS]: string }",
+      "alias.ts: raw as [label: VS]",
+      "alias.ts: raw as ns.ValidatedSettings",
     ]);
   });
 });
