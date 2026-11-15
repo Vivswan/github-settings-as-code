@@ -26,6 +26,9 @@ import { slicePage } from "./support.js";
 
 const start = mockServerLifecycle();
 
+/** GitHub's body for a path it does not serve. */
+const NOT_FOUND = { message: "Not Found" };
+
 const silentTrace = { debug: () => {}, ...maskRegistry(() => {}) };
 
 describe("handler-completeness startup assertion", () => {
@@ -52,8 +55,9 @@ describe("pagination slicing", () => {
   test.each<[number, Record<string, string>, number | undefined, number]>([
     [100, { per_page: "100", page: "1" }, undefined, 100], // the 100-boundary: a full page
     [100, { per_page: "100", page: "2" }, undefined, 0], // then an empty one
-    [150, {}, undefined, 100], // an absent query defaults per_page to 100 and page to 1
-    [150, { per_page: "0", page: "-1" }, undefined, 100], // an invalid query takes the same defaults
+    [150, {}, undefined, 30], // an absent query takes GitHub's defaults: per_page 30, page 1
+    [150, { per_page: "0", page: "-1" }, undefined, 30], // an invalid query takes the same defaults
+    [150, { per_page: "500" }, undefined, 100], // GitHub clamps per_page to 100 on every list
     [40, { per_page: "100", page: "1" }, 30, 30], // the cap clamps an oversized per_page
     [40, { per_page: "100", page: "2" }, 30, 10], // and paginates by the clamped size
     [40, { per_page: "10", page: "1" }, 30, 10], // a per_page under the cap stands
@@ -120,6 +124,39 @@ describe("pagination slicing", () => {
         : [];
     expect(names).toEqual(Array.from({ length: 150 }, (_, i) => `gen-${i + 1}`));
     expect(h.requests.map((r) => r.query)).toEqual(["per_page=100&page=1", "per_page=100&page=2"]);
+  });
+});
+
+describe("a single-repo run serves one repository", () => {
+  // GitHub answers 404 for a repository the token cannot see; a mock serving it would hide a request built on the wrong slug.
+  // A repository may itself be named "repos", so the addressed pair is the route's own parameters, not a scan for the word.
+  test.each(["/repos/someone-else/not-this-repo/labels", "/repos/someone-else/repos/labels"])(
+    "another repository's path %s answers 404 and writes nothing",
+    async (foreign) => {
+      const h = await start(
+        scenario({ live_state: { labels: [{ name: "bug", color: "d73a4a" }] } }),
+      );
+      const read = await call(h, "GET", foreign);
+      expect([read.status, await json(read)]).toEqual([404, NOT_FOUND]);
+      const write = await call(h, "POST", foreign, { body: { name: "stray", color: "ededed" } });
+      expect([write.status, await json(write)]).toEqual([404, NOT_FOUND]);
+      const own = await jsonArray(await call(h, "GET", labelsPath));
+      expect(own.map((label) => label.name)).toEqual(["bug"]);
+    },
+  );
+});
+
+describe("variable create", () => {
+  // GitHub refuses a second variable under one name; a mock that stored both would let a create-instead-of-update bug converge.
+  test("a second create under one name answers 409 and stores nothing", async () => {
+    const h = await start(scenario());
+    const path = `/repos/${OWNER}/${REPO}/actions/variables`;
+    const first = await call(h, "POST", path, { body: { name: "A", value: "1" } });
+    const second = await call(h, "POST", path, { body: { name: "a", value: "2" } });
+    expect([first.status, second.status]).toEqual([201, 409]);
+    expect((await json(second)).message).toBe("Already exists - Variable already exists");
+    const listed = (await json(await call(h, "GET", path))).variables;
+    expect(listed).toEqual([expect.objectContaining({ name: "A", value: "1" })]);
   });
 });
 
