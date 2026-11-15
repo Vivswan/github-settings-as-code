@@ -29,3 +29,7 @@ runs:
     - name: Drop the preparation script from the published manifest
       shell: bash
       run: npm pkg delete scripts.prepare
+    # After the removal: attw packs the package, and packing runs prepare. A broken exports map stops the publish here.
+    - name: Check the package's exports and types
+      shell: bash
+      run: bun run lint:package
