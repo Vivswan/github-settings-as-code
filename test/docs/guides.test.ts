@@ -30,7 +30,14 @@ import { listLayering, SECTIONS } from "../../src/sections/registry.js";
 import { STALE_VERSION_HINT } from "../../src/sections/secret_scanning_custom_patterns/index.js";
 import { ROOT } from "../root.js";
 import { deleteEnumerationProblems } from "./claims.js";
-import { codeFences, fencedBlocks, markdownTree, sectionText, tableRows } from "./markdown.js";
+import {
+  codeFences,
+  fencedBlocks,
+  indentedFences,
+  markdownTree,
+  sectionText,
+  tableRows,
+} from "./markdown.js";
 import { assertValidSettingsExample } from "./settings-examples.js";
 import { stalePins } from "./version-pins.js";
 
@@ -106,7 +113,7 @@ function isSettingsShaped(doc: unknown): boolean {
 function fenceViolations(markdown: string, allowed: ReadonlySet<string>): string[] {
   const malformed = (line: number, fence: string): string =>
     `line ${line}: fence "${fence.trim()}" must start at column zero with exactly three backticks (no indent, no blockquote)`;
-  const problems: string[] = [];
+  const problems = indentedFences(markdown).map((shown) => malformed(shown.line, shown.opener));
   for (const fence of codeFences(markdown)) {
     if (fence.nested || !/^`{3}(?!`)/.test(fence.opener)) {
       problems.push(malformed(fence.line, fence.opener));
@@ -514,11 +521,15 @@ describe("docs/ guide pages", () => {
       const glob = new Bun.Glob(entry.path);
       return (label: string) => (entry.glob === true ? glob.match(label) : label === entry.path);
     });
-    const unmatched = markerScanFiles()
+    const marked = markerScanFiles()
       .filter((file) => readFileSync(file.path, "utf8").includes("x-release-please-"))
-      .map((file) => file.label)
-      .filter((label) => !matchers.some((matches) => matches(label)));
-    expect(unmatched).toEqual([]);
+      .map((file) => file.label);
+    expect(marked.filter((label) => !matchers.some((matches) => matches(label)))).toEqual([]);
+    // release-please's matcher skips a dot path that Bun.Glob matches, so a marked page under one would pass here and be skipped there.
+    expect(marked.filter((label) => label.startsWith("docs/") && label.includes("/."))).toEqual([]);
+    // The other direction, for the entries named by path: one naming a file with no marker, or no file, is stale.
+    const literal = releaseExtraFiles().filter((entry) => typeof entry === "string");
+    expect(literal.filter((path) => !marked.includes(path))).toEqual([]);
   });
 
   /** The example with every `_remove: true` turned into the plain entry it names: the lower layer every removal in it matches. */
@@ -1102,6 +1113,14 @@ describe("fence policy guard (mutation checks)", () => {
       "  ```yaml settings\nlabels: []\n  ```\n",
       [malformed(1, "```yaml settings")],
     ],
+    "a fence indented into a code block": [
+      "    ```yaml settings\n    labels: []\n    ```\n",
+      [malformed(1, "```yaml settings")],
+    ],
+    "a fence indented past a code block's four spaces": [
+      "      ```yaml settings\n      labels: []\n      ```\n",
+      [malformed(1, "```yaml settings")],
+    ],
     "a fence in a list item": [
       "- item\n\n  ```yaml settings\n  labels: []\n  ```\n",
       [malformed(3, "```yaml settings")],
@@ -1240,6 +1259,11 @@ describe("github heading slugger", () => {
       "a heading inside an HTML comment renders nothing, so no link lands on it",
       "<!--\n## Hidden\n-->\n\n## Shown\n",
       ["shown"],
+    ],
+    [
+      "front matter is not a heading, though its last line and the closing rule read as a setext one",
+      "---\norder: 110\n---\n\n# Title\n",
+      ["title"],
     ],
     ["a setext heading is a heading", "Setup\n=====\n\nDetails\n-------\n", ["setup", "details"]],
     ["a heading indented up to three spaces is a heading", "   ## Indented\n", ["indented"]],

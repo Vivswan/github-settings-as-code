@@ -1,17 +1,21 @@
 import { fromMarkdown } from "mdast-util-from-markdown";
+import { frontmatterFromMarkdown } from "mdast-util-frontmatter";
 import { gfmTableFromMarkdown } from "mdast-util-gfm-table";
 import { headingRange } from "mdast-util-heading-range";
+import { frontmatter } from "micromark-extension-frontmatter";
 import { gfmTable } from "micromark-extension-gfm-table";
 import { source as sourceText } from "unist-util-source";
 import { visitParents } from "unist-util-visit-parents";
 
-/** The syntax tree of a CommonMark document with GFM tables, every node carrying its source position. */
+/** The syntax tree of a CommonMark document with GFM tables and YAML front matter, every node carrying its source position. */
 export function markdownTree(markdown: string): ReturnType<typeof fromMarkdown> {
   return fromMarkdown(markdown, {
-    extensions: [gfmTable()],
-    mdastExtensions: [gfmTableFromMarkdown()],
+    extensions: [gfmTable(), frontmatter()],
+    mdastExtensions: [gfmTableFromMarkdown(), frontmatterFromMarkdown()],
   });
 }
+
+type Code = Extract<ReturnType<typeof fromMarkdown>["children"][number], { type: "code" }>;
 
 /** One fenced code block, as the syntax tree reads it. */
 export interface CodeFence {
@@ -40,12 +44,16 @@ export interface CodeFence {
   readonly nested: boolean;
 }
 
-/** Every fenced code block of `markdown`, in order; an indented code block has no fence and is left out. */
-export function codeFences(markdown: string): CodeFence[] {
+/** Every code block of `markdown` in order, with its ancestors and the lines of its fences: two for a closed fence, one for an unclosed one, none for an indented block. */
+function codeBlocks(
+  markdown: string,
+): Array<{ node: Code; ancestors: unknown[]; fenceLines: number[] }> {
   // The parser's own fence tokens say where a block opens and whether it closes; the finished tree keeps neither.
   const fenceLines = new Map<object, number[]>();
   const tree = fromMarkdown(markdown, {
+    extensions: [frontmatter()],
     mdastExtensions: [
+      frontmatterFromMarkdown(),
       {
         enter: {
           codeFencedFence(token) {
@@ -59,12 +67,21 @@ export function codeFences(markdown: string): CodeFence[] {
       },
     ],
   });
+  const blocks: ReturnType<typeof codeBlocks> = [];
+  visitParents(tree, "code", (node, ancestors) => {
+    blocks.push({ node, ancestors, fenceLines: fenceLines.get(node) ?? [] });
+  });
+  return blocks;
+}
+
+/** Every fenced code block of `markdown`, in order; an indented code block has no fence and is left out. */
+export function codeFences(markdown: string): CodeFence[] {
   const lines = markdown.split(/\r\n|\r|\n/);
   const fences: CodeFence[] = [];
-  visitParents(tree, "code", (node, ancestors) => {
-    const [openLine, closeLine] = fenceLines.get(node) ?? [];
+  for (const { node, ancestors, fenceLines } of codeBlocks(markdown)) {
+    const [openLine, closeLine] = fenceLines;
     if (openLine === undefined) {
-      return;
+      continue;
     }
     fences.push({
       lang: node.lang ?? "",
@@ -76,8 +93,21 @@ export function codeFences(markdown: string): CodeFence[] {
       endLine: closeLine ?? node.position?.end.line ?? openLine,
       nested: ancestors.length > 1,
     });
-  });
+  }
   return fences;
+}
+
+/** The indented code blocks that open on a fence line, each by its line and that line's source: a fence indented out of being one, so nothing reads its example. */
+export function indentedFences(markdown: string): Array<{ line: number; opener: string }> {
+  const lines = markdown.split(/\r\n|\r|\n/);
+  return codeBlocks(markdown)
+    .filter(
+      ({ node, fenceLines }) => fenceLines.length === 0 && /^[ \t]*(`{3,}|~{3,})/.test(node.value),
+    )
+    .map(({ node }) => {
+      const line = node.position?.start.line ?? 0;
+      return { line, opener: lines[line - 1] ?? "" };
+    });
 }
 
 /** The text of every fenced code block whose info string is exactly `info`. */
