@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { err } from "neverthrow";
 import {
   type Delta,
@@ -240,6 +240,33 @@ describe("deltas", () => {
       { kind: "undeclared", path: ["list"], live: { b: 3, a: 1 }, match: "value" },
       { kind: "undeclared", path: ["list"], live: "y", match: "value" },
     ]);
+  });
+
+  test("list items pair as JSON would carry them: a library caller's undefined member or null-prototype mapping is the same item GitHub returns without either, and a stricter equality would report it missing and undeclared", () => {
+    const bare = Object.assign(Object.create(null), { a: 1 });
+    expect(
+      deltas({ list: ["x", { a: 1, optional: undefined }] }, { list: ["x", { a: 1 }] }),
+    ).toEqual([]);
+    expect(deltas({ list: ["x", bare] }, { list: [{ a: 1 }, "x"] })).toEqual([]);
+  });
+
+  test("a value repeated on one side is one delta when the other side lacks it, and none when the other side has it once", () => {
+    expect(deltas({ list: ["x", "x", { a: 1 }, { a: 1 }] }, { list: [{ a: 1 }] })).toEqual([
+      { kind: "missing", path: ["list"], desired: "x", match: "value" },
+    ]);
+  });
+
+  test("pairing a list costs one key per item, not one comparison per pair: a 2,000-entry allowlist with no drift would otherwise cost four million comparisons on every run", () => {
+    const patterns = Array.from({ length: 2000 }, (_, i) => `octo-org/action-${i}@*`);
+    const rendered = spyOn(JSON, "stringify");
+    try {
+      expect(deltas({ patterns_allowed: patterns }, { patterns_allowed: [...patterns] })).toEqual(
+        [],
+      );
+      expect(rendered).toHaveBeenCalledTimes(4000);
+    } finally {
+      rendered.mockRestore();
+    }
   });
 });
 

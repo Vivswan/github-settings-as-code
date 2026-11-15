@@ -9,11 +9,11 @@
  * omits into an `omitted` delta, because that write would remove it.
  */
 
-import { isDeepStrictEqual } from "node:util";
 import { err, type Result } from "neverthrow";
 import { isPlainObject, isZeroValue } from "../plain-data.js";
 import { type SectionFailure, sectionFailure } from "../sections/contract/errors.js";
 import { agree } from "../text.js";
+import { unknownNode } from "./canonical.js";
 
 type PathStep = string | number | { readonly key: string };
 
@@ -381,6 +381,11 @@ function walkByShape(
   }
 }
 
+/** A value as the text two equal values share: its JSON with every mapping's keys in one order and undefined members dropped, as the wire carries it. */
+function valueKey(value: unknown): string | undefined {
+  return JSON.stringify(unknownNode(value));
+}
+
 /** Any other list (scalars, an empty one, mixed items) pairs by value: the first occurrence of a value the other side lacks is one delta. */
 function walkByValue(
   desired: unknown[],
@@ -388,16 +393,18 @@ function walkByValue(
   path: readonly PathStep[],
   out: Delta[],
 ): void {
-  const firstOf = (items: unknown[], value: unknown): number =>
-    items.findIndex((item) => isDeepStrictEqual(item, value));
+  const desiredKeys = desired.map(valueKey);
+  const liveKeys = live.map(valueKey);
+  const lacking = new Set(desiredKeys).difference(new Set(liveKeys));
+  const surplus = new Set(liveKeys).difference(new Set(desiredKeys));
   for (const [index, value] of desired.entries()) {
-    if (firstOf(live, value) === -1 && firstOf(desired, value) === index) {
+    if (lacking.delete(desiredKeys[index])) {
       out.push({ kind: "missing", path, desired: value, match: "value" });
     }
   }
 
   for (const [index, value] of live.entries()) {
-    if (firstOf(desired, value) === -1 && firstOf(live, value) === index) {
+    if (surplus.delete(liveKeys[index])) {
       out.push({ kind: "undeclared", path, live: value, match: "value" });
     }
   }

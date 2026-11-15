@@ -104,7 +104,7 @@ function orderedKeys(value: Readonly<Record<string, unknown>>, known: readonly s
 }
 
 /** A node the schema says nothing about: mappings by code point, lists as written, scalars as they are. */
-function unknownNode(value: unknown): unknown {
+export function unknownNode(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map(unknownNode);
   }
