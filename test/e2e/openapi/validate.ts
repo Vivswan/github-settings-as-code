@@ -9,7 +9,6 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { Ajv, type ValidateFunction } from "ajv";
-import addFormats from "ajv-formats";
 import { UNDOCUMENTED_ROUTES } from "../../../src/generated/upstream-gaps.js";
 import {
   endpointMethod,
@@ -395,7 +394,6 @@ export class OpenApiValidator {
     // strict: false because the descriptor carries vocabulary ajv treats as unknown;
     // validateFormats: false because structure is checked, not string formats.
     this.ajv = new Ajv({ strict: false, validateFormats: false, allErrors: true });
-    addFormats(this.ajv);
     this.templates = Object.keys(spec.paths);
     this.graphqlOpNames =
       graphqlOpNames ?? new Set(Object.values(allGraphqlOps()).map((op) => op.name));
