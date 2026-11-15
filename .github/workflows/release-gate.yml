@@ -44,8 +44,8 @@ jobs:
           retention-days: 7
 
   # The release talks to GitHub's API as it is today, not as the pinned descriptor remembers it: the lockstep tests
-  # against the latest @octokit/openapi and @octokit/graphql-schema releases fail here when a path the action
-  # uses is gone or a selected field retired (.github/scripts/nightly-steps.ts probe-schema).
+  # against the latest @octokit/openapi, @octokit/openapi-webhooks, and @octokit/graphql-schema releases fail here
+  # when a path the action uses is gone or a selected field retired (.github/scripts/nightly-steps.ts probe-schema).
   upstream-drift:
     runs-on: ubuntu-latest
     timeout-minutes: 15

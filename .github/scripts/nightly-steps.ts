@@ -2,16 +2,17 @@
  * The nightly.yml steps against the latest upstream releases, one subcommand each (probe-schema is also the
  * release-gate.yml upstream-drift job, so the release PR sees the drift a night would):
  *
- *   probe-schema     checks job     @octokit/openapi and @octokit/graphql-schema at latest, then the lockstep tests
+ *   probe-schema     checks job     @octokit/openapi, @octokit/openapi-webhooks, and @octokit/graphql-schema at
+ *                                   latest, then the lockstep tests
  *   probe-types      checks job     @octokit/types and @octokit/openapi-types at latest, then the typecheck, its
  *                                   failures sorted into tripwires and breakage
  *   refresh-openapi  refresh-openapi job
  *                                   a newer @octokit/openapi pinned, the descriptor-derived files regenerated and
  *                                   committed, the whole gate run, and the bump PR opened when it passes
  *
- * The probed packages are the ones that describe GitHub's API; the runtime octokit client packages stay out on
- * purpose. The probes end the night red instead of leaving a later PR to find the break; the refresh opens the PR
- * that turns the night green again.
+ * The probed packages are the ones a generated file, a lockstep test, or the typecheck reads; the runtime octokit
+ * client packages stay out on purpose. The probes end the night red instead of leaving a later PR to find the
+ * break; the refresh opens that PR for @octokit/openapi alone.
  */
 
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -26,8 +27,12 @@ import { configureBotIdentity, leasePush } from "./lib/pr-branch.js";
 import { parseDiagnostics } from "./lib/tsc-diagnostics.js";
 import { capture, requireEnv, run, status } from "./lib/workflow-step.js";
 
-/** The packages describing GitHub's API that the lockstep tests read. */
-const SCHEMA_PACKAGES = ["@octokit/openapi", "@octokit/graphql-schema"] as const;
+/** The packages the lockstep tests read: the REST descriptor, the webhooks description, and the GraphQL schema. */
+const SCHEMA_PACKAGES = [
+  "@octokit/openapi",
+  "@octokit/openapi-webhooks",
+  "@octokit/graphql-schema",
+] as const;
 
 /** The packages the typecheck reads. */
 const TYPES_PACKAGES = ["@octokit/types", "@octokit/openapi-types"] as const;
