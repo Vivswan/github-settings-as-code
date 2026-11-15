@@ -17,6 +17,7 @@ import { type Comment, type Node, type ObjectExpression, parseSync } from "oxc-p
 import { countNoun } from "../../src/text.js";
 import { INDEX_PATH, isGapFileName, regenerateIndex } from "./gen-gaps-index.js";
 import { formatted } from "./lib/biome-format.js";
+import { command, type Outcome } from "./lib/command.js";
 import { runMain } from "./lib/entry.js";
 import { type Diagnostic, parseDiagnostics } from "./lib/tsc-diagnostics.js";
 
@@ -215,17 +216,8 @@ export function toSpecOnlyGapSource(source: string, gapFile: string): string {
 }
 
 /** Compile the repo; diagnostics land on stdout, tool failures on stderr. */
-function runTsc(): { exitCode: number; stdout: string; stderr: string } {
-  const result = Bun.spawnSync(["bun", "x", "tsc", "-p", ".", "--noEmit", "--pretty", "false"], {
-    cwd: ROOT,
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  return {
-    exitCode: result.exitCode,
-    stdout: result.stdout.toString(),
-    stderr: result.stderr.toString(),
-  };
+function runTsc(): Outcome {
+  return command(["bun", "x", "tsc", "-p", ".", "--noEmit", "--pretty", "false"], { cwd: ROOT });
 }
 
 function abort(reason: string, ...raw: string[]): never {
@@ -239,7 +231,7 @@ function abort(reason: string, ...raw: string[]): never {
 
 function main(): number {
   const first = runTsc();
-  if (first.exitCode === 0) {
+  if (first.status === 0) {
     console.log("nothing to graduate");
     return 0;
   }
@@ -288,7 +280,7 @@ function main(): number {
   }
   regenerateIndex();
   const second = runTsc();
-  if (second.exitCode !== 0) {
+  if (second.status !== 0) {
     abort(
       `graduating ${plan.gapFiles.join(", ")} did not turn the build green - likely a partial graduation ` +
         `(octokit shipped only some of a file's routes). Split the gap file by hand; ` +

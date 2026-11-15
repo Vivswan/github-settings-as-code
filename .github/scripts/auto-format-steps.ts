@@ -12,26 +12,27 @@
 
 import { statSync } from "node:fs";
 import { join } from "node:path";
+import { must, output, STREAMED } from "./lib/command.js";
 import { dispatch } from "./lib/entry.js";
 import { configureBotIdentity, leasePush } from "./lib/pr-branch.js";
-import { capture, requireEnv, run, setOutput } from "./lib/workflow-step.js";
+import { requireEnv, setOutput } from "./lib/workflow-step.js";
 
 function format(): void {
   // The patch belongs to this commit alone; the push job refuses any other head.
-  setOutput("head", capture(["git", "rev-parse", "HEAD"]));
-  run(["bun", "run", "lint:fix"]);
+  setOutput("head", output(["git", "rev-parse", "HEAD"], { stderr: "inherit" }));
+  must(["bun", "run", "lint:fix"], STREAMED);
   // Anything the formatter left staged is not this workflow's fix: start from an empty index, then stage
   // modifications and deletions of tracked files alone (a formatter adds nothing).
-  run(["git", "reset", "-q"]);
-  run(["git", "add", "-u"]);
+  must(["git", "reset", "-q"], STREAMED);
+  must(["git", "add", "-u"], STREAMED);
   const patch = join(requireEnv("RUNNER_TEMP"), "format.patch");
-  run(["git", "diff", "--cached", "--binary"], { stdoutFile: patch });
+  must(["git", "diff", "--cached", "--binary"], { ...STREAMED, stdout: { file: patch } });
   if (statSync(patch).size === 0) {
     console.log("nothing to format");
     setOutput("changed", "false");
     return;
   }
-  run(["git", "diff", "--cached", "--stat"]);
+  must(["git", "diff", "--cached", "--stat"], STREAMED);
   setOutput("changed", "true");
 }
 
@@ -44,19 +45,22 @@ function push(): void {
   const headSha = requireEnv("HEAD_SHA");
   // The branch can move between the two jobs; the patch was cut on HEAD_SHA and formats that tree alone, so a
   // newer head gets its own run (re-apply the label) instead of a commit formatting the old one.
-  if (capture(["git", "rev-parse", "HEAD"]) !== headSha) {
+  if (output(["git", "rev-parse", "HEAD"], { stderr: "inherit" }) !== headSha) {
     console.log("::notice::head moved since the format; skipping the stale formatting push");
     return;
   }
-  run([
-    "git",
-    "apply",
-    "--index",
-    "--binary",
-    join(requireEnv("RUNNER_TEMP"), "format", "format.patch"),
-  ]);
+  must(
+    [
+      "git",
+      "apply",
+      "--index",
+      "--binary",
+      join(requireEnv("RUNNER_TEMP"), "format", "format.patch"),
+    ],
+    STREAMED,
+  );
   configureBotIdentity();
-  run(["git", "commit", "--no-verify", "-m", "style: apply automated formatting"]);
+  must(["git", "commit", "--no-verify", "-m", "style: apply automated formatting"], STREAMED);
   const pushed = leasePush(headRef, headSha, token);
   if (pushed !== 0) {
     process.exit(pushed);
