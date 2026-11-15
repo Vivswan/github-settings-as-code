@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { renderArchitectureMermaid } from "../../.github/scripts/arch-lint.js";
 import type { CoverageData } from "../../.github/scripts/coverage-data.js";
 import type { EndpointAnchors } from "../../.github/scripts/endpoint-docs.js";
 import {
@@ -13,31 +12,14 @@ import {
   renderPatCell,
   renderPatFormUrl,
   renderSectionsTable,
-  SECTIONS_TABLE_HEADER,
-  type SectionsTableRow,
-  sectionsCells,
 } from "../../.github/scripts/gen-docs.js";
-import { type GeneratedRegion, unpadTables } from "../../.github/scripts/lib/generated-regions.js";
 import { regenerateFile } from "../../.github/scripts/lib/region-driver.js";
-import { tableFault, tableRow } from "../../src/report/markdown.js";
 import type { SectionDocs } from "../../src/sections/contract/docs.js";
 import { ROOT } from "../root.js";
 
 const renderPage = (path: string, text: string): string => regenerateFile(PAGES, path, text);
 const renderCoverageFile = (text: string): string => renderPage("docs/reference/coverage.md", text);
 const FORMATTER_TIMEOUT_MS = 60_000;
-
-/** The region `name` among `regions`; a page that lost it fails here, not on an undefined read. */
-function regionNamed(
-  regions: readonly GeneratedRegion[] | undefined,
-  name: string,
-): GeneratedRegion {
-  const region = regions?.find((region) => region.name === name);
-  if (region === undefined) {
-    throw new Error(`no ${name} region is registered`);
-  }
-  return region;
-}
 
 describe("renderSectionsTable", () => {
   test("renders one row per section, derived cells around the authored ones", () => {
@@ -62,7 +44,10 @@ describe("renderSectionsTable", () => {
         teams: {
           sections_table: { endpoints: "org team repo permissions", notes: "org repos only" },
         },
-        environments: { sections_table: { endpoints: "PUT environments", notes: "reviewers" } },
+        // Authored cells are written verbatim: surrounding blanks, parentheses, backticks, and colons stay.
+        environments: {
+          sections_table: { endpoints: " PUT (environments): `x` ", notes: "reviewers" },
+        },
       },
     );
     expect(table).toBe(
@@ -71,7 +56,7 @@ describe("renderSectionsTable", () => {
         "|---|---|---|---|---|",
         "| `labels` | labels CRUD | Issues: write | deleted (settable) | upsert by name |",
         "| `teams` | org team repo permissions | Members: read (org permission) + Administration: write | untouched | org repos only |",
-        "| `environments` | PUT environments | Environments: write; declared `deployment_branch_policies` keys additionally need Actions: read and Administration: write | untouched | reviewers |",
+        "| `environments` |  PUT (environments): `x`  | Environments: write; declared `deployment_branch_policies` keys additionally need Actions: read and Administration: write | untouched | reviewers |",
       ].join("\n"),
     );
   });
@@ -93,141 +78,6 @@ describe("renderSectionsTable", () => {
         labels: { sections_table: { endpoints: "labels CRUD", notes: "upsert\nby name" } },
       }),
     ).toThrow('row 1 of the table cell 5 is blank or contains "|" or a line break');
-  });
-});
-
-describe("the Sections table guard", () => {
-  const region = regionNamed(PAGES["docs/reference/sections.md"]?.regions, "sections-table");
-  const sectionsRow =
-    "| `labels` | labels CRUD | Issues: write | deleted (settable) | upsert by name |";
-  const sectionsTable = (rows: string): string =>
-    `\n| Section | Endpoints | PAT permission | Undeclared default | Notes |\n|---|---|---|---|---|\n${rows}\n`;
-
-  test("admits the renderer's output, padded and punctuated cells included", () => {
-    // Surrounding blanks, parentheses, backticks, and colons are all cells cellFault() admits and read back byte for byte.
-    const rendered = renderSectionsTable(
-      [
-        { key: "labels", permission: { repo: ["issues"] }, undeclaredDefault: "delete" },
-        { key: "rulesets", permission: { repo: ["administration"] }, undeclaredDefault: "keep" },
-      ],
-      {
-        labels: { sections_table: { endpoints: " labels (CRUD): `x` ", notes: "a: (b) `c`" } },
-        rulesets: { sections_table: { endpoints: "rulesets CRUD", notes: "n" } },
-      },
-    );
-    expect(rendered).toContain("|  labels (CRUD): `x`  |");
-    expect(region.bodyRefusal(`\n${rendered}\n`)).toBeUndefined();
-    expect(region.bodyRefusal(sectionsTable("").slice(0, -1))).toBeUndefined();
-    expect(region.bodyRefusal("\n")).toBeUndefined();
-  });
-
-  // Each body is table text the renderer never writes; admitted, it would be erased on the next regeneration.
-  test.each<[label: string, body: string, refusal: RegExp]>([
-    [
-      "a pipe in the Notes cell",
-      sectionsTable(sectionsRow.replace("upsert by name", "upsert | rename")),
-      /line 3 has 6 cells where the table has 5/,
-    ],
-    [
-      "a carriage return in the Notes cell",
-      sectionsTable(sectionsRow.replace("upsert by name", "upsert\rby name")),
-      /line 3 cell 5 is blank or contains "\|" or a line break/,
-    ],
-    [
-      "a sixth cell",
-      sectionsTable(`${sectionsRow.slice(0, -2)} | authored |`),
-      /line 3 has 6 cells where the table has 5/,
-    ],
-    [
-      "a blank Endpoints cell",
-      sectionsTable(sectionsRow.replace("labels CRUD", "")),
-      /line 3 cell 2 is blank/,
-    ],
-    [
-      "a row without its outer pipes",
-      sectionsTable(sectionsRow.slice(2, -2)),
-      /line 3 has 3 cells where the table has 5/,
-    ],
-    [
-      "an Undeclared default outside the three displays",
-      sectionsTable(sectionsRow.replace("deleted (settable)", "deleted")),
-      /line 3 shows an Undeclared default the renderer has no display for/,
-    ],
-    [
-      "a Section cell outside a code span",
-      sectionsTable(sectionsRow.replace("`labels`", "labels")),
-      /line 3 does not open with a section key in a code span/,
-    ],
-    [
-      "a second row for the same section with other prose",
-      sectionsTable(`${sectionsRow}\n${sectionsRow.replace("upsert by name", "other notes")}`),
-      /line 4 repeats the `labels` row/,
-    ],
-    [
-      "the page's column table",
-      "\n| Value | Meaning |\n|---|---|\n| `untouched` | never read |\n",
-      /line 1 reads "\| Value \| Meaning \|" where the generator writes "\| Section \| Endpoints/,
-    ],
-    ["a blank line after the last row", sectionsTable(`${sectionsRow}\n`), /line 4 has 0 cells/],
-  ])("refuses %s, which does not round-trip", (_label, body, refusal) => {
-    expect(region.bodyRefusal(body)).toMatch(refusal);
-  });
-
-  // The equivalence the round trip promises, held to the one statement both sides consult: the renderer throws
-  // exactly the fault tableFault() states for the cells, the guard admits what the renderer wrote, and the guard
-  // refuses the same cells joined without the renderer whenever the statement faults. A check on one side only
-  // turns a generated input red.
-  test("the Sections renderer and guard agree with the shared statement on every generated input", () => {
-    const displays = ["delete", "keep", "untouched"] as const;
-    const row = (key: "labels" | "rulesets", undeclaredDefault: (typeof displays)[number]) =>
-      ({ key, permission: { repo: ["issues"] }, undeclaredDefault }) as const;
-    const outcomes = new Map<string, "written" | "faulted">();
-    const hold = (
-      input: string,
-      sections: readonly SectionsTableRow[],
-      text: { endpoints: string; notes: string },
-    ): void => {
-      const docs = { labels: { sections_table: text }, rulesets: { sections_table: text } };
-      const cells = sectionsCells(sections, docs);
-      const fault = tableFault(SECTIONS_TABLE_HEADER, cells, "keyed");
-      let rendered: string | undefined;
-      let thrown: string | undefined;
-      try {
-        rendered = renderSectionsTable(sections, docs);
-      } catch (error) {
-        thrown = error instanceof Error ? error.message : String(error);
-      }
-      expect(thrown, input).toBe(fault);
-      if (rendered === undefined) {
-        const joined = [SECTIONS_TABLE_HEADER, ...cells.map(tableRow)].join("\n");
-        expect(region.bodyRefusal(`\n${joined}\n`), input).toBeDefined();
-        outcomes.set(input, "faulted");
-      } else {
-        expect(region.bodyRefusal(`\n${rendered}\n`), input).toBeUndefined();
-        outcomes.set(input, "written");
-      }
-    };
-    const texts = ["x", "", "  ", "a | b", "a\rb", " padded ", "`code`: (p)", "y\u2028z"];
-    for (const display of displays) {
-      const lists = {
-        one: [row("labels", display)],
-        two: [row("labels", display), row("rulesets", display)],
-        twice: [row("labels", display), row("labels", display)],
-      };
-      for (const [name, sections] of Object.entries(lists)) {
-        for (const endpoints of texts) {
-          for (const notes of texts) {
-            const input = `${display} ${name} ${JSON.stringify({ endpoints, notes })}`;
-            hold(input, sections, { endpoints, notes });
-          }
-        }
-      }
-    }
-    expect(outcomes.get('delete twice {"endpoints":"x","notes":"x"}')).toBe("faulted");
-    expect(outcomes.get('untouched one {"endpoints":"x","notes":" padded "}')).toBe("written");
-    const written = [...outcomes.values()].filter((outcome) => outcome === "written").length;
-    expect(written).toBeGreaterThan(0);
-    expect(outcomes.size - written).toBeGreaterThan(0);
   });
 });
 
@@ -358,30 +208,6 @@ describe("renderCoverage", () => {
       ].join("\n"),
     );
   });
-
-  // Prose may repeat a structural line word for word, and keys may hold the two Unicode line separators the cell
-  // rule admits; the guard reads the structure from the lines around a line, never from one line alone, or a page
-  // the generator wrote would be refused as authored.
-  test(
-    "prose repeating a structural line, or keys holding a line separator, still read back as the generator's",
-    () => {
-      const rendered = render({
-        docs: {
-          ...docs,
-          labels: {
-            coverage: [{ area: "Labels", keys: "x\u2028y", endpoints: ["list"], notes: ["CRUD."] }],
-          },
-        },
-        data: {
-          intro: ["Intro.", "## Supported"],
-          gaps: { emptyNote: "| Area | Endpoints | Why it matters |" },
-        },
-      });
-      const file = `---\norder: 115\n---\n\n# Coverage\n\n<!-- BEGIN GENERATED: coverage -->\n${rendered}\n<!-- END GENERATED: coverage -->\n`;
-      expect(() => renderCoverageFile(file)).not.toThrow();
-    },
-    FORMATTER_TIMEOUT_MS,
-  );
 
   test("a known gap renders as a table row and drops the empty-state note", () => {
     const rendered = render({
@@ -710,66 +536,11 @@ describe("the committed pages", () => {
       (page) => `${page}\nsee the [form][pat-form]\n`,
       "at most once; found 1 and 0",
     ],
-    [
-      "the link markers around another definition",
-      "README.md",
-      (page) => page.replace(/^\[pat-form\]: /m, "[other]: "),
-      "the readme-pat-url region in README.md encloses content the generator would not write",
-    ],
-    [
-      "the link markers around another definition",
-      "docs/start/getting-started.md",
-      (page) => page.replace(/^\[pat-form\]: /m, "[other]: "),
-      "the pat-url region in docs/start/getting-started.md encloses content the generator would not write",
-    ],
-    [
-      "the Sections table markers around the column table",
-      "docs/reference/sections.md",
-      (page) => {
-        const columnTable = page.match(/\| Value +\| Meaning +\|\n[\s\S]*?\n\n/)?.[0] ?? "";
-        expect(columnTable).not.toBe("");
-        return page.replace(
-          /(<!-- BEGIN GENERATED: sections-table[^\n]*\n)[\s\S]*?(<!-- END GENERATED: sections-table -->)/,
-          `$1${columnTable.trimEnd()}\n$2`,
-        );
-      },
-      "the sections-table region in docs/reference/sections.md encloses content the generator would not write",
-    ],
-    [
-      "the outputs list markers around the bullet's prose",
-      "docs/reference/inputs.md",
-      (page) => {
-        const begin = page.match(/<!-- BEGIN GENERATED: outputs-list[^\n]*?-->/)?.[0] ?? "";
-        const end = "<!-- END GENERATED: outputs-list -->";
-        expect(begin).not.toBe("");
-        return page
-          .replace(begin, "")
-          .replace(end, "")
-          .replace("- `skipped-sections`: the", `- ${begin}\`skipped-sections\`: the${end}`);
-      },
-      "the outputs-list region in docs/reference/inputs.md encloses content the generator would not write",
-    ],
-    [
-      "the architecture map markers around an authored line inside the fence",
-      "docs/reference/architecture.md",
-      (page) => page.replace("```mermaid\ngraph TD\n", "```mermaid\ngraph TD\nAuthored note.\n"),
-      "the architecture-map region in docs/reference/architecture.md encloses content the generator would not write; move its marker back (line 3 is neither a layer node nor an import edge",
-    ],
-    [
-      "the architecture map markers around an authored line after the diagram",
-      "docs/reference/architecture.md",
-      (page) =>
-        page.replace(
-          "```\n<!-- END GENERATED: architecture-map -->",
-          "```\nAuthored note.\n<!-- END GENERATED: architecture-map -->",
-        ),
-      "the architecture-map region in docs/reference/architecture.md encloses content the generator would not write",
-    ],
   ])(
     "refuses to regenerate %s in %s",
     (_label, path, mutate, error) => {
-      // Each page reads wrong while its markers still pair up: the enclosed text is not the generator's, or a token-form reference
-      // has no tail definition. A region moved away from its home is refused by the placement checks generated-regions.test.ts pins.
+      // The page reads wrong while its markers still pair up: a token-form reference has no tail definition. A region moved away
+      // from its home is refused by the placement checks generated-regions.test.ts pins.
       const page = readFileSync(join(ROOT, path), "utf8");
       expect(() => renderPage(path, mutate(page))).toThrow(error);
     },
@@ -777,26 +548,8 @@ describe("the committed pages", () => {
   );
 });
 
-describe("the architecture map guard", () => {
-  test("a layer id the renderer leaves as is (a dot, a digit) reads back, since only dashes are rewritten", () => {
-    // The parse and renderArchitectureMermaid() must agree on what a node id may hold, or a renamed layer would
-    // refuse its own freshly generated page.
-    const region = regionNamed(
-      PAGES["docs/reference/architecture.md"]?.regions,
-      "architecture-map",
-    );
-    const diagram = renderArchitectureMermaid({
-      layers: { "plain.data": ["src/plain-data.ts"], v2: ["src/v2/", "src/v2.ts"] },
-      edges: { "plain.data": ["v2"] },
-      exclude: [],
-    });
-    expect(region.bodyRefusal(`\n\`\`\`mermaid\n${diagram}\n\`\`\`\n`)).toBeUndefined();
-  });
-});
-
 describe("the committed coverage page", () => {
-  // In the renderers' spelling: the committed page is biome's padded output, and every anchor below is the renderers'.
-  const coverage = unpadTables(readFileSync(join(ROOT, "docs/reference/coverage.md"), "utf8"));
+  const coverage = readFileSync(join(ROOT, "docs/reference/coverage.md"), "utf8");
 
   test(
     "must keep the region spanning everything below the title",
@@ -816,83 +569,6 @@ describe("the committed coverage page", () => {
       expect(() => renderCoverageFile(coverage.trimEnd())).toThrow(exact);
       expect(() => renderCoverageFile(`${coverage}\n`)).toThrow(exact);
       expect(() => renderCoverageFile(`${coverage}\nTrailing prose.\n`)).toThrow(exact);
-      // A pipe-wrapped line that is not a three-cell row of the table it sits in is authored prose.
-      const shape =
-        "the coverage region in docs/reference/coverage.md encloses content the generator would not write";
-      expect(() =>
-        renderCoverageFile(coverage.replace("\n\n### Notes", "\n| Authored prose |\n\n### Notes")),
-      ).toThrow(shape);
-      const topics = "[`repository`](sections.md) (`topics`)";
-      expect(coverage).toContain(topics);
-      expect(() =>
-        renderCoverageFile(coverage.replace(topics, "[`repository`](sections.md) (`top | ics`)")),
-      ).toThrow(shape);
-      expect(() =>
-        renderCoverageFile(coverage.replace(topics, "[`repository`](sections.md) (`top `ics`)")),
-      ).toThrow(shape);
-      // A key cell that links anywhere but the Sections page is not the generator's.
-      expect(() =>
-        renderCoverageFile(coverage.replace(topics, "[`repository`](semantics.md) (`topics`)")),
-      ).toThrow(shape);
-      // A parenthesized qualifier is what supportedRowFault() lets through, so the guard admits it.
-      expect(() =>
-        renderCoverageFile(
-          coverage.replace(topics, "[`repository`](sections.md) (`topics (legacy)`)"),
-        ),
-      ).not.toThrow();
-      // A notes group is a bold label naming its section, a blank, and bullets; anything else between groups is authored.
-      const label = "**Topics** (`repository`)\n\n";
-      expect(coverage).toContain(label);
-      expect(() =>
-        renderCoverageFile(coverage.replace(label, `Authored aside.\n\n${label}`)),
-      ).toThrow(shape);
-      expect(() => renderCoverageFile(coverage.replace(label, "**Topics**\n\n"))).toThrow(shape);
-      expect(() =>
-        renderCoverageFile(coverage.replace(label, `${label}- extra bullet\n\n`)),
-      ).toThrow(shape);
-      const gapsHeader = "| Area | Endpoints | Why it matters |\n|---|---|---|\n";
-      expect(coverage).toContain(gapsHeader);
-      expect(() =>
-        renderCoverageFile(coverage.replace(gapsHeader, `${gapsHeader}| a | b | c |\n`)),
-      ).toThrow(shape);
-      expect(() =>
-        renderCoverageFile(coverage.replace(/\nThe table is EMPTY right now[^\n]*\n\n/, "\n")),
-      ).toThrow(shape);
-      expect(() =>
-        renderCoverageFile(
-          coverage
-            .replace(/\nThe table is EMPTY right now[^\n]*\n\n/, "\n")
-            .replace(gapsHeader, `${gapsHeader}| a | b | c |\n`),
-        ),
-      ).not.toThrow();
-      // A label the authoring side refuses (a star inside the double stars) is no label the printer writes, even
-      // when the Area cell and the label agree with each other.
-      expect(() =>
-        renderCoverageFile(
-          coverage
-            .replace("[Labels](", "[*Labels*](")
-            .replace("**Labels** (`labels`)", "***Labels*** (`labels`)"),
-        ),
-      ).toThrow(shape);
-      // A carriage return is not something any validator lets through, so the shape refuses it too.
-      expect(coverage).toContain("[Labels](");
-      expect(() => renderCoverageFile(coverage.replace("[Labels](", "[Labels]\r("))).toThrow(shape);
-      expect(() =>
-        renderCoverageFile(
-          coverage.replace(
-            "|---|---|---|\n\n## No public API",
-            "|---|---|---|\n| a | b |\n\n## No public API",
-          ),
-        ),
-      ).toThrow(shape);
-      expect(() =>
-        renderCoverageFile(
-          coverage.replace(
-            "\n<!-- END GENERATED: coverage -->",
-            "\nAuthored afterword.\n\n<!-- END GENERATED: coverage -->",
-          ),
-        ),
-      ).toThrow(shape);
     },
     FORMATTER_TIMEOUT_MS,
   );

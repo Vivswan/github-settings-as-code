@@ -11,6 +11,9 @@ The fleet-wide conventions - Conventional Commit titles, squash merges, the `all
 - `bun run test` and `bun run fuzz` run `bun run build:schema` first: the tests and the fuzzer load the built, gitignored `lib/settings.schema.json`.
 - Committed generated output is the table in `.github/scripts/generated.ts`: the whole files under `src/generated/` and the generated regions of `action.yml` and the docs pages.
 - `bun run build:check` regenerates every table entry and fails on drift. Before that, it fails on a GENERATED marker, in a file the table lists, that names a region no generator registers.
+- A generated region is everything between its `BEGIN GENERATED: <name>` and `END GENERATED: <name>` markers, and it belongs to its generator: the next regeneration overwrites it without reading it. Hand-written text belongs outside the markers.
+- Text typed inside a region, or enclosed by a marker moved over it, is replaced. Committed text shows in the diff of the regenerated file and stays in git; uncommitted text is gone.
+- The generator refuses, naming the file and the region, when a marker is missing, repeated, out of order, inside another region, or away from the heading or YAML key its declaration names.
 - `lib/index.js` (the action bundle), `lib/settings.schema.json` (the published schema), and `lib/pkg/` (the npm library) are built where they are needed and never committed on `main`.
 - The action bundle compiles every runtime dependency in. The library keeps them external: they are the `dependencies` of `package.json`, installed by the consumer's package manager.
 - [docs/reference/coverage.md](docs/reference/coverage.md) is the inventory of the supported API surface, one link per call. A change that adds or extends a section keeps its `<key>.docs.yml` rows and `.github/scripts/endpoint-docs.yml` in step.

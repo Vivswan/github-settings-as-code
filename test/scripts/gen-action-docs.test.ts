@@ -3,13 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import {
-  DEFAULTS_TABLE_HEADER,
   FILES,
-  type KnobbedSection,
-  type PolicyRow,
-  type PolicyRowProse,
-  policyCells,
-  policyTableFault,
   renderActionInputs,
   renderActionOutputs,
   renderCheckModeGatedReads,
@@ -21,12 +15,10 @@ import {
 import {
   type GeneratedRegion,
   markerSyntaxFor,
-  regionBounds,
 } from "../../.github/scripts/lib/generated-regions.js";
 import { regenerateFile } from "../../.github/scripts/lib/region-driver.js";
 import { OUTPUT_DECLS } from "../../src/action/io.js";
 import { INPUT_DECLS } from "../../src/flows/inputs.js";
-import { tableRow } from "../../src/report/markdown.js";
 import type { SectionMeta } from "../../src/sections/contract/module.js";
 import { sectionModule } from "../../src/sections/registry.js";
 import { ROOT } from "../root.js";
@@ -94,6 +86,9 @@ describe("action.yml renderers", () => {
     expect(renderActionOutputs({ y: { description: "Short." } })).toBe(
       '  "y":\n    description: >-\n      Short.',
     );
+    // An empty declaration set renders an empty body, not the `{}` the library writes for an empty mapping.
+    expect(renderActionInputs({})).toBe("");
+    expect(renderActionOutputs({})).toBe("");
   });
 
   test.each([
@@ -148,8 +143,8 @@ describe("undeclared-policy renderers", () => {
         labels: { override: "manage a core set | or two" },
       }),
     ).toThrow('row 1 of the table cell 3 is blank or contains "|" or a line break');
-    // The renderer refuses at its own boundary what its guard could never read back: a blank caveat or override,
-    // whatever the type said about the value, since a narrowing can hide a property.
+    // The renderer refuses a blank caveat or override at its own boundary, whatever the type said about the value,
+    // since a narrowing can hide a property.
     const labels = sections.slice(1, 2);
     const empty = 'the "labels" Defaults row has a blank caveat or override';
     expect(() =>
@@ -309,353 +304,13 @@ describe("generated files", () => {
     ).toThrow(`the ${name} region ${home}`);
   });
 
-  const regions = new Map(
-    Object.values(FILES)
-      .flatMap((file) => file.regions)
-      .map((region) => [region.name, region]),
-  );
-  const regionOf = (name: string): GeneratedRegion => {
-    const region = regions.get(name);
-    if (region === undefined) {
-      throw new Error(`no ${name} region is registered`);
-    }
-    return region;
-  };
-
-  test("each region admits its renderer's output on edge-case declarations", () => {
-    const accepts = (name: string, rendered: string): void => {
-      expect(regionOf(name).bodyRefusal(`\n${rendered}\n`), name).toBeUndefined();
-    };
-    accepts(
-      "action-inputs",
-      renderActionInputs({
-        'say "hi"': { description: "A quoted, escaped name.", default: 'a "quoted" default' },
-        on: { description: "A".repeat(200), default: "" },
-        "settings-file": { description: "Plain.", default: "" },
-      }),
-    );
-    // An empty declaration set renders a body the shapes admit, not the `{}` the library writes for an empty mapping.
-    accepts("action-inputs", renderActionInputs({}));
-    accepts("action-outputs", renderActionOutputs({}));
-    accepts("action-outputs", renderActionOutputs({ result: { description: "A | B." } }));
-    const knobbed = [
-      { key: "labels", undeclaredDefault: "delete" },
-      { key: "rulesets", undeclaredDefault: "keep" },
-    ] as const;
-    accepts("policy-count-sentence", renderPolicyCountSentence(knobbed));
-    // Parentheses, backticks, colons, and the two Unicode line separators cellFault() admits must read back as the
-    // opaque prose they are.
-    accepts(
-      "policy-defaults-table",
-      renderPolicyDefaultsTable(knobbed, {
-        labels: { caveat: "Probot (parity): `delete`\u2028", override: "manage a core set" },
-        rulesets: { override: "make the file (`settings.yml`): the inventory\u2029" },
-      }),
-    );
-    accepts("policy-defaults-table", renderPolicyDefaultsTable([], {}));
-    accepts("permissions-grant-sentence", renderGrantSentence([sectionModule("teams")]));
-    const overrideGated: SectionMeta = {
-      ...sectionModule("labels"),
-      endpoints: {
-        list: {
-          route: "GET /repos/{owner}/{repo}/actions/variables",
-          statuses: { 200: "the variables" },
-          permission: { repo: ["actions"] },
-          accessGrade: "write",
-        },
-      },
-    };
-    const partlyGated: SectionMeta = {
-      ...sectionModule("labels"),
-      permission: { repo: ["administration"] },
-      endpoints: {
-        get: { route: "GET /repos/{owner}/{repo}/interaction-limits", statuses: { 200: "x" } },
-        capGet: {
-          route: "GET /repos/{owner}/{repo}/interaction-limits/pulls/creation-cap",
-          statuses: { 200: "x" },
-          accessGrade: "write",
-        },
-      },
-    };
-    for (const sections of [
-      [sectionModule("labels")],
-      [sectionModule("codespaces_secrets"), overrideGated, partlyGated],
-    ]) {
-      accepts("permissions-gated-reads", renderGatedReads(sections));
-      accepts("check-mode-gated-reads", renderCheckModeGatedReads(sections));
-    }
-  });
-
-  test("each region refuses authored text and every other region's body", () => {
-    // A parse loosened to read anything back would still pass the renderer test above.
-    const regions = Object.entries(FILES).flatMap(([path, file]) =>
-      file.regions.map((region) => ({ path, region })),
-    );
-    const bodies = new Map(
-      regions.map(({ path, region }) => {
-        const text = readFileSync(join(ROOT, path), "utf8");
-        const { begin, end } = regionBounds(text, region.name, markerSyntaxFor(path));
-        return [region.name, text.slice(begin[1], end[0])];
-      }),
-    );
-    for (const { region } of regions) {
-      const foreign = [
-        "\nAuthored prose the generator never writes.\n",
-        "\n## A heading\n",
-        ...[...bodies].filter(([name]) => name !== region.name).map(([, body]) => body),
-      ];
-      for (const body of foreign) {
-        expect(
-          region.bodyRefusal(body),
-          `${region.name} accepts ${JSON.stringify(body.slice(0, 40))}`,
-        ).toBeDefined();
-      }
-    }
-  });
-
-  // Each body is table text the renderer never writes; admitted, it would be erased on the next regeneration.
-  const policyRow = "| `labels` | delete (Probot parity) | `keep`: manage a core set |";
-  const policyTable = (rows: string): string =>
-    `\n| Section | Default | The override buys you |\n|---|---|---|\n${rows}\n`;
-  test.each<[label: string, body: string, refusal: RegExp]>([
-    [
-      "an override naming the default policy itself",
-      policyTable("| `labels` | delete | `delete`: manage a core set |"),
-      /line 3 names `delete` where the override is the opposite policy, `keep`/,
-    ],
-    [
-      "a keep row above a delete row",
-      policyTable(
-        `| \`rulesets\` | keep | \`delete\`: make the file the inventory |\n${policyRow}`,
-      ),
-      /line 3 reads "\| `rulesets` .* where the generator writes "\| `labels` /,
-    ],
-    [
-      "a fourth cell",
-      policyTable(`${policyRow.slice(0, -2)} | authored |`),
-      /line 3 has 4 cells where the table has 3/,
-    ],
-    [
-      "a pipe in the caveat",
-      policyTable(policyRow.replace("Probot parity", "a | b")),
-      /line 3 has 4 cells/,
-    ],
-    [
-      "a carriage return in the caveat",
-      policyTable(policyRow.replace("Probot parity", "a\rb")),
-      /line 3 cell 2 is blank or contains "\|" or a line break/,
-    ],
-    [
-      "a blank Default cell",
-      policyTable(policyRow.replace("delete (Probot parity)", "")),
-      /line 3 cell 2 is blank/,
-    ],
-    [
-      "a Section cell outside a code span",
-      policyTable(policyRow.replace("`labels`", "labels")),
-      /line 3 does not open with a section key/,
-    ],
-    [
-      "a Default outside delete and keep",
-      policyTable(policyRow.replace("delete (", "deleted (")),
-      /line 3 states no delete or keep default/,
-    ],
-    [
-      "an override without its policy span",
-      policyTable(policyRow.replace("`keep`: ", "")),
-      /line 3 names no policy span/,
-    ],
-    [
-      "the same section twice",
-      policyTable(`${policyRow}\n${policyRow}`),
-      /line 4 repeats the `labels` row/,
-    ],
-    [
-      "a blank caveat, which the renderer refuses",
-      policyTable(policyRow.replace("Probot parity", "")),
-      /line 3 has a blank caveat or override/,
-    ],
-    [
-      "a blank override, which the renderer refuses",
-      policyTable(policyRow.replace("manage a core set", "")),
-      /line 3 has a blank caveat or override/,
-    ],
-    [
-      "another table's header",
-      "\n| Section | Default |\n|---|---|\n",
-      /line 1 reads "\| Section \| Default \|" where the generator writes/,
-    ],
-    ["a body without its closing newline", policyTable(policyRow).slice(0, -1), /line 3 reads/],
-  ])("the Defaults table guard refuses %s, which does not round-trip", (_label, body, refusal) => {
-    expect(regionOf("policy-defaults-table").bodyRefusal(body)).toMatch(refusal);
-  });
-
-  /** Holds one input to the statement: the renderer faults as it says, the guard admits what was written and refuses the joined cells otherwise; `outcomes` records which. */
-  function holdPolicyTable(
-    region: ReturnType<typeof regionOf>,
-    outcomes: Map<string, "written" | "faulted">,
-    input: string,
-    sections: readonly KnobbedSection[],
-    prose: Readonly<Record<string, PolicyRowProse>>,
-  ): void {
-    // The renderer's delete-first order, so a fault names the same row on both sides.
-    const rows = ["delete", "keep"].flatMap((policy) =>
-      sections
-        .filter((section) => section.undeclaredDefault === policy)
-        .map((section): PolicyRow => ({ section, prose: prose[section.key] ?? { override: "" } })),
-    );
-    const fault = policyTableFault(rows);
-    let rendered: string | undefined;
-    let thrown: string | undefined;
-    try {
-      rendered = renderPolicyDefaultsTable(sections, prose);
-    } catch (error) {
-      thrown = error instanceof Error ? error.message : String(error);
-    }
-    expect(thrown, input).toBe(fault);
-    if (rendered === undefined) {
-      const joined = [DEFAULTS_TABLE_HEADER, ...rows.map(policyCells).map(tableRow)].join("\n");
-      expect(region.bodyRefusal(`\n${joined}\n`), input).toBeDefined();
-      outcomes.set(input, "faulted");
-    } else {
-      expect(region.bodyRefusal(`\n${rendered}\n`), input).toBeUndefined();
-      outcomes.set(input, "written");
-    }
-  }
-
-  // The equivalence the round trip promises, held to the one statement both sides consult: the renderer throws
-  // exactly the fault policyTableFault() states for the rows, the guard admits what the renderer wrote, and the
-  // guard refuses the same cells joined without the renderer whenever the statement faults. A check on one side
-  // only turns a generated input red.
-  test("the Defaults renderer and guard agree with the shared statement on every generated input", () => {
-    const region = regionOf("policy-defaults-table");
-    const outcomes = new Map<string, "written" | "faulted">();
-    const policies = ["delete", "keep"] as const;
-    const caveats = [
-      undefined,
-      "Probot parity",
-      "",
-      "  ",
-      " padded ",
-      "(nested) `x`",
-      "a | b",
-      "a\rb",
-    ];
-    const overrides = ["x", "", "   ", " padded ", "`keep`: y", "a | b", "y\u2028z"];
-    const inputs = ["labels", "Labels", "secret_scanning_custom_patterns"].flatMap((key) =>
-      policies.flatMap((undeclaredDefault) =>
-        caveats.flatMap((caveat) =>
-          overrides.map((override) => ({ key, undeclaredDefault, caveat, override })),
-        ),
-      ),
-    );
-    for (const { key, undeclaredDefault, caveat, override } of inputs) {
-      const prose = caveat === undefined ? { override } : { caveat, override };
-      holdPolicyTable(
-        region,
-        outcomes,
-        `${key} ${undeclaredDefault} ${JSON.stringify(prose)}`,
-        [{ key, undeclaredDefault }],
-        { [key]: prose },
-      );
-    }
-    const labels: KnobbedSection = { key: "labels", undeclaredDefault: "delete" };
-    const rulesets: KnobbedSection = { key: "rulesets", undeclaredDefault: "keep" };
-    const prose = { labels: { override: "x" }, rulesets: { caveat: "c", override: "y" } };
-    holdPolicyTable(region, outcomes, "labels twice", [labels, labels], prose);
-    holdPolicyTable(region, outcomes, "keep before delete", [rulesets, labels], prose);
-    holdPolicyTable(region, outcomes, "whitespace override", [labels], {
-      labels: { override: "   " },
-    });
-    expect(outcomes.get("labels twice")).toBe("faulted");
-    expect(outcomes.get("keep before delete")).toBe("written");
-    expect(outcomes.get("whitespace override")).toBe("faulted");
-    const written = [...outcomes.values()].filter((outcome) => outcome === "written").length;
-    expect(written).toBeGreaterThan(0);
-    expect(outcomes.size - written).toBeGreaterThan(0);
-  });
-
-  // A prose list the renderer could never have written comes back as a refusal naming the line, never as the
-  // renderer's own throw escaping the round trip.
-  test.each<[label: string, name: string, body: string, refusal: RegExp]>([
-    [
-      'a comma-joined pair with no "and"',
-      "permissions-grant-sentence",
-      "\nTo manage everything in one PAT, grant Issues, Pages at write.\n",
-      /^line 1 lists "Issues, Pages", which holds a comma or the word "and"$/,
-    ],
-    [
-      "a doubled joiner",
-      "permissions-gated-reads",
-      "\n- GitHub gates even the A and and and B reads at write, so `x` needs its write grant in check mode too.\n",
-      /^line 1 lists "and", which holds a comma or the word "and"$/,
-    ],
-    [
-      'a route span holding the word "and"',
-      "check-mode-gated-reads",
-      [
-        "",
-        "The read-only rule has exceptions, each a section to drop from the preview or grant at write:",
-        "",
-        "- GitHub gates the `GET /repos/{owner}/{repo}/labels and more` reads at write, so `labels` needs its Issues write grant in check mode to verify what they return.",
-        "",
-      ].join("\n"),
-      /^line 3 lists "`GET \/repos\/\{owner\}\/\{repo\}\/labels and more`", which holds a comma or the word "and"$/,
-    ],
-  ])("a malformed prose list, %s, is refused naming its line", (_label, name, body, refusal) => {
-    expect(regionOf(name).bodyRefusal(body)).toMatch(refusal);
-  });
-
   test("the renderer refuses a list item a reader could not tell from a joiner", () => {
-    // A key's span is an item of the count sentence's prose list, so one holding "and" would read back as two.
+    // A key's span is an item of the count sentence's prose list, so one holding "and" would read as two.
     expect(() =>
       renderPolicyCountSentence([{ key: "labels and more", undeclaredDefault: "delete" }]),
     ).toThrow(
       '"`labels and more`" holds a comma or the word "and", which an item of a prose list cannot',
     );
-  });
-
-  test("a count sentence past the word table is refused naming its line, never handed to the renderer's throw", () => {
-    const spans = Array.from({ length: 21 }, () => "`labels`");
-    const listed = `${spans.slice(0, -1).join(", ")}, and ${spans.at(-1)}`;
-    const body = `\nTwenty-one sections list the live resources sitting next to the declared ones: ${listed}.\n`;
-    expect(regionOf("policy-count-sentence").bodyRefusal(body)).toBe(
-      "line 1 lists 21 section keys, past the 20 the count words name",
-    );
-  });
-
-  // Each row is YAML the emitter never writes; admitted, it would be replaced on the next regeneration. The tab inside
-  // the quoted timestamp is literal, and the two-line description folds to one line.
-  const inputEntry = (
-    key: string,
-    defaultValue: string,
-    description = "      D.\n",
-    header = ">-",
-  ) =>
-    `\n  ${key}:\n    description: ${header}\n${description}    required: false\n    default: ${defaultValue}\n`;
-  test.each<[label: string, body: string, refusal: RegExp]>([
-    ["a bare YAML word as a key", inputEntry("on", '"x"'), /line 1 reads " {2}on:"/],
-    ["a quoted plain name", inputEntry('"ordinary"', '"x"'), /line 1 reads/],
-    [
-      "a quoted timestamp holding a literal tab",
-      inputEntry('"2000-01-01\t0:0:0"', '"x"'),
-      /line 1 reads/,
-    ],
-    ["an escaped surrogate pair as a default", inputEntry("x", '"\\ud83d\\ude00"'), /line 5 reads/],
-    ["a \\u0009 default the emitter spells \\t", inputEntry("x", '"\\u0009"'), /line 5 reads/],
-    ["a two-line description", inputEntry("x", '"x"', "      One\n      two.\n"), /line 3 reads/],
-    ["a number as a default", inputEntry("x", "42"), /x\.default: .*received number/],
-    [
-      "a leading-space description",
-      inputEntry("x", '"x"', "       Padded.\n", ">2-"),
-      /x\.description/,
-    ],
-    ["an input entry under the outputs markers", inputEntry("x", '"x"'), /x: Unrecognized key/],
-    ["text that is not YAML", "\n  x: [\n", /does not parse as YAML/],
-    ["an alias without its anchor", "\n  x: *missing\n", /does not convert from YAML/],
-  ])("the guard refuses %s, which does not round-trip", (label, body, refusal) => {
-    const region = regionOf(label.includes("outputs") ? "action-outputs" : "action-inputs");
-    expect(region.bodyRefusal(body)).toMatch(refusal);
   });
 
   test.each<[label: string, name: string, decl: { description: string; default: string }]>([
@@ -669,9 +324,8 @@ describe("generated files", () => {
       "<<",
       { description: "<<", default: "<<" },
     ],
-  ])("legitimate emitter output with %s round-trips through the guard", (_label, name, decl) => {
+  ])("the emitted YAML for %s parses back to the declaration", (_label, name, decl) => {
     const text = renderActionInputs(Object.fromEntries([[name, decl]]));
-    expect(regionOf("action-inputs").bodyRefusal(`\n${text}\n`)).toBeUndefined();
     expect(Object.entries(parseYaml(`inputs:\n${text}\n`).inputs)).toEqual([
       [name, { ...decl, required: false }],
     ]);

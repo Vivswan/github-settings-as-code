@@ -1,18 +1,20 @@
 /**
  * The marker grammar every generator splices through: `BEGIN GENERATED: <name> (hint)` to
  * `END GENERATED: <name>`, each written in the comment syntax of the file's own language, and
- * the two checks each region passes before its splice: its placement, and the parse-render round
- * trip over its body that GeneratedRegion.of() and GeneratedRegion.markdown() are the two ways to declare.
+ * the two checks each region passes before its splice: its markers pair up, and they sit where
+ * the region's declaration says.
+ *
+ * A region belongs to its generator. Whatever sits between its markers is overwritten on the next
+ * regeneration, unread: hand-written text belongs outside the markers. Committed text that lands
+ * inside shows in the diff of the regenerated file and stays in git; uncommitted text is gone.
  */
 
 import { extname } from "node:path";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { gfmTableFromMarkdown } from "mdast-util-gfm-table";
 import { gfmTable } from "micromark-extension-gfm-table";
-import { err, ok, type Result } from "neverthrow";
 import { visitParents } from "unist-util-visit-parents";
-import { Parser } from "yaml";
-import { tableRow } from "../../../src/report/markdown.js";
+import { CST, Lexer } from "yaml";
 import { formatted } from "./biome-format.js";
 
 /** Which comment syntax a file's markers use: a complete `<!-- -->` comment, or a whole-line YAML `#` comment. */
@@ -48,46 +50,27 @@ const MARKED_NAME = new RegExp(` GENERATED: (${REGION_NAME_CLASS})`);
 /** A docs path for biome's markdown formatter: it picks the language and the config's overrides from the path, which need not exist. */
 const MARKDOWN_PATH = "docs/generated-region.md";
 
-/** A table row with its outer pipes, the one shape biome pads: one line, so a bare CR is never swallowed, while the two Unicode separators cellFault() admits may sit inside a cell. */
-const TABLE_LINE = /^\|[^\r\n]*\|$/;
-
-/** A delimiter cell: dashes, each side optionally a colon. */
-const DELIMITER_CELL = /^:?-+:?$/;
-
 function markerText(kind: "BEGIN" | "END", name: string): string {
   const hint = kind === "BEGIN" ? String.raw`(?: \([^)\n]*\))?` : "";
   return `${kind} GENERATED: ${name}${hint}`;
 }
 
+/** The tokens the lexer emits as signals, which hold no byte of the source. */
+const LEXER_SIGNALS: ReadonlySet<string> = new Set([CST.DOCUMENT, CST.FLOW_END, CST.SCALAR]);
+
 // Every comment the YAML lexer sees, so a marker-shaped line inside a block or quoted scalar
 // (content, not a comment) can never pass as a marker.
 function yamlComments(text: string): Array<{ offset: number; source: string }> {
   const comments: Array<{ offset: number; source: string }> = [];
-  const walk = (node: unknown): void => {
-    if (Array.isArray(node)) {
-      for (const item of node) {
-        walk(item);
-      }
-      return;
+  let offset = 0;
+  for (const source of new Lexer().lex(text)) {
+    if (LEXER_SIGNALS.has(source)) {
+      continue;
     }
-    if (typeof node !== "object" || node === null) {
-      return;
+    if (CST.tokenType(source) === "comment") {
+      comments.push({ offset, source });
     }
-    const token = node as { type?: unknown; offset?: unknown; source?: unknown };
-    if (
-      token.type === "comment" &&
-      typeof token.offset === "number" &&
-      typeof token.source === "string"
-    ) {
-      comments.push({ offset: token.offset, source: token.source });
-      return;
-    }
-    for (const value of Object.values(node)) {
-      walk(value);
-    }
-  };
-  for (const token of new Parser().parse(text)) {
-    walk(token);
+    offset += source.length;
   }
   return comments;
 }
@@ -120,28 +103,39 @@ export function regionNames(text: string, syntax: MarkerSyntax): string[] {
   );
 }
 
-/** Region `name`'s marker spans: exactly one BEGIN and one END, in that order, else a throw. */
-export function regionBounds(
+/** Region `name`'s marker spans, or why its markers do not pair up, ending with the fix. */
+function markerPair(
   text: string,
   name: string,
   syntax: MarkerSyntax,
-): { begin: MarkerSpan; end: MarkerSpan } {
+): { begin: MarkerSpan; end: MarkerSpan } | string {
   if (!REGION_NAME.test(name)) {
-    throw new Error(`a region name is lowercase letters, digits, and dashes; got "${name}"`);
+    return `a region name is lowercase letters, digits, and dashes; got "${name}"`;
   }
   const begins = markerSpans(text, "BEGIN", name, syntax);
   const ends = markerSpans(text, "END", name, syntax);
   const [begin] = begins;
   const [end] = ends;
   if (begin === undefined || end === undefined || begins.length !== 1 || ends.length !== 1) {
-    throw new Error(
-      `region "${name}" needs exactly one BEGIN and one END marker, found ${begins.length} and ${ends.length}`,
-    );
+    return `region "${name}" needs exactly one BEGIN and one END marker, found ${begins.length} and ${ends.length}; restore the missing marker or delete the repeated one`;
   }
   if (end[0] < begin[1]) {
-    throw new Error(`region "${name}" has its END marker before its BEGIN marker`);
+    return `region "${name}" has its END marker before its BEGIN marker; put the BEGIN marker first`;
   }
   return { begin, end };
+}
+
+/** Region `name`'s marker spans: exactly one BEGIN and one END, in that order, else a throw. */
+export function regionBounds(
+  text: string,
+  name: string,
+  syntax: MarkerSyntax,
+): { begin: MarkerSpan; end: MarkerSpan } {
+  const pair = markerPair(text, name, syntax);
+  if (typeof pair === "string") {
+    throw new Error(pair);
+  }
+  return pair;
 }
 
 /** `text` with the span strictly between region `name`'s markers replaced by `body`, markers kept. */
@@ -166,153 +160,32 @@ export type RegionPlacement =
   | { readonly kind: "under-key"; readonly key: string };
 
 /**
- * What a generator declares for one region: its markers' name, where it belongs, and its body as the
- * data it renders from. The body is every byte between the markers, so a block region's `render`
- * usually wraps in block().
+ * One region a generator owns: its markers' name, where they belong, and the body it writes between them. The body
+ * is every byte between the markers, so a region on its own lines wraps its text in block() or markdownBlock().
  */
-export interface RegionDeclaration<Data> {
+export interface GeneratedRegion {
   /** The markers' name: lowercase letters, digits, and dashes. */
   readonly name: string;
 
   /** Where the markers must sit, checked before any splice. */
   readonly placement: RegionPlacement;
 
-  /** The data the committed file is regenerated from. */
-  readonly data: () => Data;
-
-  /** The body for `data`. */
-  readonly render: (data: Data) => string;
-
-  /** A body read back into the data it renders from, or why it is not one `render` wrote; a line it names counts from the BEGIN marker's line as line 0. */
-  readonly parse: (body: string) => Result<Data, string>;
+  /** The body, rendered when the file is regenerated. */
+  readonly render: () => string;
 }
 
-/** The first line on which `body` differs from `rendered`, or undefined when they are the same bytes. */
-function renderedMismatch(body: string, rendered: string): string | undefined {
-  if (rendered === body) {
-    return undefined;
-  }
-  const authored = body.split("\n");
-  const expected = rendered.split("\n");
-  const differing = authored.findIndex((line, i) => line !== expected[i]);
-  const at = differing === -1 ? authored.length : differing;
-  return `line ${at} reads ${JSON.stringify(authored[at] ?? "")} where the generator writes ${JSON.stringify(expected[at] ?? "")}`;
+/** `text` as the body of a block region: on the lines between the markers, each marker owning its line. */
+export function block(text: string): string {
+  return `\n${text}\n`;
 }
 
 /**
- * The body check of a declaration: a body holding nothing (fresh markers, or an empty rendering) is
- * admitted and renders next; any other must parse, and re-rendering what it parsed to must
- * reproduce it byte for byte, so an authored spelling the renderer never writes is refused rather
- * than erased.
+ * `text` as the body of a block region in a markdown page, formatted as biome formats the page (without the final
+ * newline biome adds), since the lint judges a committed page like hand-written markdown. A region in a YAML file
+ * stays with block(): its body is formatted in the file's context, never alone.
  */
-function roundTrip<Data>(decl: RegionDeclaration<Data>): (body: string) => string | undefined {
-  return (body) =>
-    body.trim() === ""
-      ? undefined
-      : decl.parse(body).match(
-          (data) => renderedMismatch(body, decl.render(data)),
-          (refusal) => refusal,
-        );
-}
-
-/** The body of a block region: `render`'s text on the lines between the markers, each marker owning its line. */
-export function block<Data>(render: (data: Data) => string): (data: Data) => string {
-  return (data) => `\n${render(data)}\n`;
-}
-
-/** `text` as biome formats a markdown page, without the final newline biome adds, so the markers keep their lines. */
-function formattedMarkdown(text: string): string {
-  return formatted(MARKDOWN_PATH, text).replace(/\n$/, "");
-}
-
-/** One table line respelled as tableRow() writes it; a delimiter row becomes `|---|` per column. Only spaces go: biome pads with spaces, and any other character at a cell's edge is content the parse judges. */
-function respelledRow(line: string): string {
-  const cells = line
-    .slice(1, -1)
-    .split(/(?<!\\)\|/)
-    .map((cell) => cell.replace(/^ +| +$/g, ""));
-  return cells.every((cell) => DELIMITER_CELL.test(cell))
-    ? `|${cells.map(() => "---").join("|")}|`
-    : tableRow(cells);
-}
-
-/**
- * `text` with every table line respelled as tableRow() writes it: one space around each cell and a `|---|`
- * delimiter. biome pads a committed table to its column widths, so a parser written against the renderer's
- * spelling reads the page through this. Lines map one to one, so a refusal still numbers the committed line.
- */
-export function unpadTables(text: string): string {
-  return text
-    .split("\n")
-    .map((line) => (TABLE_LINE.test(line) ? respelledRow(line) : line))
-    .join("\n");
-}
-
-/**
- * A region as the generators hand it to regenerateRegions(). Only of() and markdown() mint one: the
- * constructor is private and the class nominal, so a region's body check is always its own declaration's
- * round trip (over the body's tables respelled, for markdown()) and no region can carry a grammar written
- * beside its renderer.
- */
-export class GeneratedRegion {
-  private constructor(
-    readonly name: string,
-    readonly placement: RegionPlacement,
-    private readonly check: (body: string) => string | undefined,
-    private readonly body: () => string,
-  ) {}
-
-  static of<Data>(decl: RegionDeclaration<Data>): GeneratedRegion {
-    return new GeneratedRegion(decl.name, decl.placement, roundTrip(decl), () =>
-      decl.render(decl.data()),
-    );
-  }
-
-  /**
-   * A markdown block region: the body written is `render`'s text as biome formats it, between the markers, since
-   * the lint judges a committed page like hand-written markdown; the body check reads tables in the renderer's
-   * spelling whatever their padding, so the guard judges content and biome judges format. A region in a YAML file
-   * stays with of() and block(): its body is formatted in the file's context, never alone.
-   */
-  static markdown<Data>(decl: RegionDeclaration<Data>): GeneratedRegion {
-    const check = roundTrip({ ...decl, render: block(decl.render) });
-    return new GeneratedRegion(
-      decl.name,
-      decl.placement,
-      (body) => check(unpadTables(body)),
-      () => `\n${formattedMarkdown(decl.render(decl.data()))}\n`,
-    );
-  }
-
-  /** Why `body` is not one the renderer wrote, or undefined for a body it could have written. */
-  bodyRefusal(body: string): string | undefined {
-    return this.check(body);
-  }
-
-  /** The body rendered from the declaration's data. */
-  render(): string {
-    return this.body();
-  }
-}
-
-/** A block region's body as its lines, the first being line 1; or why the markers do not own their lines. */
-export function blockLines(body: string): Result<string[], string> {
-  if (!body.startsWith("\n")) {
-    return err("line 0 runs on past the BEGIN marker");
-  }
-  if (!body.endsWith("\n")) {
-    return err("the last line runs on into the END marker");
-  }
-  return ok(body.slice(1, -1).split("\n"));
-}
-
-/** The one line of a block region holding one line, or why the body is not that. */
-export function blockLine(body: string): Result<string, string> {
-  return blockLines(body).andThen((lines) =>
-    lines.length === 1
-      ? ok(lines[0] ?? "")
-      : err(`line ${lines.length} is a line past the one the generator writes`),
-  );
+export function markdownBlock(text: string): string {
+  return block(formatted(MARKDOWN_PATH, text).replace(/\n$/, ""));
 }
 
 type MarkdownTree = ReturnType<typeof fromMarkdown>;
@@ -475,13 +348,21 @@ function assertYamlPlacement(
 }
 
 /**
- * Throw unless `region` sits where its placement says and encloses only a body its round trip
- * admits; a relocated marker would otherwise regenerate cleanly while the page reads wrong, or
- * erase the authored text it came to enclose. `path` picks the marker syntax.
+ * Throw unless `region`'s markers pair up and sit where its placement says: a relocated marker would
+ * otherwise regenerate cleanly while the page reads wrong. `path` picks the marker syntax and is
+ * named in every refusal. The spans are returned for the enclosed-marker check.
  */
-export function assertRegionPlacement(text: string, region: GeneratedRegion, path: string): void {
+export function assertRegionPlacement(
+  text: string,
+  region: GeneratedRegion,
+  path: string,
+): { begin: MarkerSpan; end: MarkerSpan } {
   const syntax = markerSyntaxFor(path);
-  const { begin, end } = regionBounds(text, region.name, syntax);
+  const pair = markerPair(text, region.name, syntax);
+  if (typeof pair === "string") {
+    throw new Error(`${path}: ${pair}`);
+  }
+  const { begin, end } = pair;
   if (region.placement.kind === "under-key") {
     if (syntax !== "yaml") {
       throw new Error(
@@ -497,41 +378,40 @@ export function assertRegionPlacement(text: string, region: GeneratedRegion, pat
     }
     assertMarkdownPlacement(text, region.name, region.placement, begin, end, path);
   }
-  const refusal = region.bodyRefusal(text.slice(begin[1], end[0]));
-  if (refusal !== undefined) {
-    throw new Error(
-      `the ${region.name} region in ${path} encloses content the generator would not write; move its marker back (${refusal}; line N is N lines below the BEGIN marker)`,
-    );
-  }
+  return pair;
 }
 
 /**
- * `text` with every region in `regions` checked for placement first, then its body re-rendered;
- * a rendering its own parse does not read back fails here rather than on the next run. `path`
- * picks the marker syntax.
+ * `text` with every region in `regions` checked first (markers paired and placed, and no marker of any
+ * region, this generator's or another's, between them), then its body overwritten with the rendered
+ * one. `path` picks the marker syntax.
  */
 export function regenerateRegions(
   text: string,
   regions: readonly GeneratedRegion[],
   path: string,
 ): string {
+  const syntax = markerSyntaxFor(path);
   const names = new Set<string>();
   for (const region of regions) {
     if (names.has(region.name)) {
       throw new Error(`the ${region.name} region of ${path} is declared twice`);
     }
     names.add(region.name);
-    assertRegionPlacement(text, region, path);
-  }
-  const syntax = markerSyntaxFor(path);
-  return regions.reduce((current, region) => {
-    const body = region.render();
-    const refusal = region.bodyRefusal(body);
-    if (refusal !== undefined) {
+    const { begin, end } = assertRegionPlacement(text, region, path);
+    const inner = [
+      ...markerSpans(text, "BEGIN", REGION_NAME_CLASS, syntax),
+      ...markerSpans(text, "END", REGION_NAME_CLASS, syntax),
+    ].find(([start]) => begin[1] <= start && start < end[0]);
+    if (inner !== undefined) {
+      const other = MARKED_NAME.exec(text.slice(...inner))?.[1];
       throw new Error(
-        `the ${region.name} region's renderer wrote a body its own parse does not read back: ${JSON.stringify(body)} (${refusal})`,
+        `${path}: the ${region.name} region encloses a marker of the ${other} region, which regenerating would erase; move the markers apart, so each region encloses only its own body`,
       );
     }
-    return replaceRegion(current, region.name, body, syntax);
-  }, text);
+  }
+  return regions.reduce(
+    (current, region) => replaceRegion(current, region.name, region.render(), syntax),
+    text,
+  );
 }

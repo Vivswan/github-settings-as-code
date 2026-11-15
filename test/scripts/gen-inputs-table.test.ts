@@ -1,71 +1,31 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import {
-  INPUTS_PAGE_PATH,
-  INPUTS_PAGES,
-  renderInputsTable,
-} from "../../.github/scripts/gen-inputs-table.js";
-import { regionBounds } from "../../.github/scripts/lib/generated-regions.js";
-import { regenerateFile } from "../../.github/scripts/lib/region-driver.js";
-import { ROOT } from "../root.js";
+import { renderInputsTable } from "../../.github/scripts/gen-inputs-table.js";
 
-/** The inputs page as checked in. */
-const page = readFileSync(join(ROOT, INPUTS_PAGE_PATH), "utf8");
-
-/** The inputs-table region's marker spans in it. */
-const { begin, end } = regionBounds(page, "inputs-table", "html");
-
-/** The page before, inside, and after the region. */
-const [intro, body, tail] = [
-  page.slice(0, begin[1]),
-  page.slice(begin[1], end[0]),
-  page.slice(end[0]),
-];
-
-/** The page regenerated from `text`, as the build does it. */
-const regenerate = (text: string): string => regenerateFile(INPUTS_PAGES, INPUTS_PAGE_PATH, text);
-
-/** Bun's 5 s default is too tight for a test that spawns the formatter on a loaded machine. */
-const FORMATTER_TIMEOUT_MS = 60_000;
-
-/** The seal's refusal of the inputs-table region, naming the line below the BEGIN marker. */
-const refusal = (lineBelowBegin: number): RegExp =>
-  new RegExp(
-    `^the inputs-table region in docs/reference/inputs.md encloses content .*\\(line ${lineBelowBegin} `,
-  );
-
-describe("the inputs table region", () => {
-  test(
-    "the committed page regenerates to itself and a fresh marker pair renders the table",
-    () => {
-      expect(regenerate(page)).toBe(page);
-      expect(regenerate(`${intro}\n${tail}`)).toBe(page);
-    },
-    FORMATTER_TIMEOUT_MS,
-  );
-
-  /** A parse that checked only the cell count let an authored four-cell row through; each shape is placed where a moved marker would swallow it. */
-  test.each([
-    ["| authored prose", "a one-cell line"],
-    ["| a | b |\n| --- | --- |\n| 1 | 2 |", "a two-column table"],
-    [
-      "| Keep this warning | It is authored prose | do not erase | note |",
-      "a four-cell row with bare cells",
-    ],
-  ])("%p between the markers is refused naming its line (%s)", (authored) => {
-    const rows = body.split("\n").length - 2;
-    expect(() => regenerate(`${intro}${body}${authored}\n${tail}`)).toThrow(refusal(rows + 1));
-    expect(() => regenerate(`${intro}\n${authored}\n${tail}`)).toThrow(refusal(1));
+describe("the inputs table", () => {
+  test("one row per declaration: the name and default in code spans, the description in a paragraph, an empty default as two quotes", () => {
+    // The page's only other reader is a person; a respelled cell would drift unseen between regenerations of a changed declaration.
+    expect(
+      renderInputsTable({
+        token: { description: "The token to act with.", default: "" },
+        mode: { description: "Either `apply` or `check`.", default: "apply" },
+      }),
+    ).toBe(
+      [
+        "| name | description | required | default |",
+        "|---|---|---|---|",
+        '| `token` | <p>The token to act with.</p> | `false` | `""` |',
+        "| `mode` | <p>Either `apply` or `check`.</p> | `false` | `apply` |",
+      ].join("\n"),
+    );
   });
 
-  test('a description holding "<" is refused on both sides, since the cell would read it as a tag', () => {
+  test('a description holding "<" or "|" is refused, since the cell would read a tag or split its row', () => {
     // The page's renderer swallows an HTML tag inside the cell; nothing else on the page would notice.
     expect(() =>
       renderInputsTable({ repos: { description: "the <owner>/name", default: "" } }),
     ).toThrow('gen-inputs-table: the "repos" description holds a "<"');
-    const tagged = body.replace("<p>The token", "<p>The <token>");
-    expect(tagged).not.toBe(body);
-    expect(() => regenerate(`${intro}${tagged}${tail}`)).toThrow(refusal(3));
+    expect(() => renderInputsTable({ repos: { description: "a | b", default: "" } })).toThrow(
+      'gen-inputs-table: row 1 of the table cell 2 is blank or contains "|" or a line break',
+    );
   });
 });
