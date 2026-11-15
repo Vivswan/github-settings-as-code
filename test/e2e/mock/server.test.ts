@@ -26,9 +26,6 @@ import { slicePage } from "./support.js";
 
 const start = mockServerLifecycle();
 
-/** GitHub's body for a path it does not serve. */
-const NOT_FOUND = { message: "Not Found" };
-
 const silentTrace = { debug: () => {}, ...maskRegistry(() => {}) };
 
 describe("handler-completeness startup assertion", () => {
@@ -137,13 +134,21 @@ describe("a single-repo run serves one repository", () => {
         scenario({ live_state: { labels: [{ name: "bug", color: "d73a4a" }] } }),
       );
       const read = await call(h, "GET", foreign);
-      expect([read.status, await json(read)]).toEqual([404, NOT_FOUND]);
+      expect([read.status, await json(read)]).toEqual([404, { message: "Not Found" }]);
       const write = await call(h, "POST", foreign, { body: { name: "stray", color: "ededed" } });
-      expect([write.status, await json(write)]).toEqual([404, NOT_FOUND]);
+      expect([write.status, await json(write)]).toEqual([404, { message: "Not Found" }]);
       const own = await jsonArray(await call(h, "GET", labelsPath));
       expect(own.map((label) => label.name)).toEqual(["bug"]);
     },
   );
+
+  // GitHub matches a slug whatever its case, so the same repository spelled another way is not a foreign one.
+  test("the repository's own path in another case is served", async () => {
+    const h = await start(scenario({ live_state: { labels: [{ name: "bug", color: "d73a4a" }] } }));
+    const own = await call(h, "GET", `/repos/${OWNER.toUpperCase()}/${REPO.toUpperCase()}/labels`);
+    expect(own.status).toBe(200);
+    expect((await jsonArray(own)).map((label) => label.name)).toEqual(["bug"]);
+  });
 });
 
 describe("variable create", () => {

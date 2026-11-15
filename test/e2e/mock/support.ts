@@ -326,7 +326,7 @@ export function repoVariablesRestHandlers<K extends VariablesFamilyKey>(section:
       // GitHub stores variable names uppercased however they are entered.
       const name = variableName(payload);
       if (list(state).some((existing) => variableName(existing) === name)) {
-        // GitHub's observed answer; its REST reference documents the 201 alone.
+        // Status not in GitHub's docs; the message is GitHub's observed answer.
         return { status: 409, body: { message: "Already exists - Variable already exists" } };
       }
       const variable: Json = {

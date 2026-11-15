@@ -10,6 +10,7 @@
  */
 
 import type { GraphQLFormattedError } from "graphql";
+import { slugKey } from "../../../src/github/slug.js";
 import { isPlainObject } from "../../../src/plain-data.js";
 import type { SectionKey } from "../../../src/schema.js";
 import { endpointPath, toleratedStatuses } from "../../../src/sections/contract/endpoints.js";
@@ -614,8 +615,8 @@ function serveCoreRoute(request: PipelineRequest, run: Run): PipelineResult | nu
 }
 
 /**
- * A single-repo run serves its one repository; a route whose {owner}/{repo} parameters name another answers GitHub's
- * 404 for a repository the token cannot see.
+ * A single-repo run serves its one repository, in whatever case the path spells it; a route whose {owner}/{repo}
+ * parameters name another answers GitHub's 404 for a repository the token cannot see.
  */
 function singleRepoTarget(
   params: Record<string, string>,
@@ -624,7 +625,9 @@ function singleRepoTarget(
 ): Target | { foreign: string } {
   const { owner, repo } = params;
   const addressed = owner !== undefined && repo !== undefined ? `${owner}/${repo}` : state.slug;
-  return addressed === state.slug ? { state, mask, targetSlug: "" } : { foreign: addressed };
+  return slugKey(addressed) === slugKey(state.slug)
+    ? { state, mask, targetSlug: "" }
+    : { foreign: addressed };
 }
 
 /**

@@ -30,9 +30,6 @@ import { stalePins } from "./version-pins.js";
 
 const readme = readFileSync(join(ROOT, "README.md"), "utf8");
 
-/** The language words a renderer highlights as YAML. */
-const YAML_LANGS: ReadonlySet<string> = new Set(["yaml", "yml"]);
-
 function assertBacktickedEnumeration(
   text: string,
   leadRe: RegExp,
@@ -50,7 +47,7 @@ describe("README example settings.yml blocks", () => {
     const known = new Set<string>(SECTION_KEYS);
     let validated = 0;
     // Every YAML fence, whatever follows the language word: an example tagged `yml` or `yaml title="..."` is still an example.
-    const yamlBlocks = codeFences(readme).filter((fence) => YAML_LANGS.has(fence.lang));
+    const yamlBlocks = codeFences(readme).filter((fence) => ["yaml", "yml"].includes(fence.lang));
     for (const { body: block } of yamlBlocks) {
       let doc: unknown;
       try {
