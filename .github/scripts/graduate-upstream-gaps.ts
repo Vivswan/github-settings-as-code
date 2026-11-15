@@ -13,7 +13,7 @@
 
 import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { type Node, type ObjectExpression, parseSync } from "oxc-parser";
+import { type Comment, type Node, type ObjectExpression, parseSync } from "oxc-parser";
 import { countNoun } from "../../src/text.js";
 import { INDEX_PATH, isGapFileName, regenerateIndex } from "./gen-gaps-index.js";
 import { formatted } from "./lib/biome-format.js";
@@ -65,8 +65,8 @@ interface GapExport {
   /** The block comment directly above the export, its delimiters stripped. */
   doc: string | undefined;
 
-  /** The source text of each comment inside `node`: a rewrite that keeps only the node's values would drop it. */
-  commentsIn(node: Node): string[];
+  /** Every comment of the file, in source order. */
+  comments: readonly Comment[];
 }
 
 /** The helper and the object literal of `export const GAP = helper({...})`, or undefined for any other statement. */
@@ -123,10 +123,7 @@ function readGapExport(source: string): GapExport | undefined {
       properties,
       plain,
       doc: isDoc ? above.value : undefined,
-      commentsIn: (node) =>
-        comments
-          .filter((comment) => comment.start >= node.start && comment.end <= node.end)
-          .map((comment) => source.slice(comment.start, comment.end)),
+      comments,
     };
   }
   return undefined;
@@ -159,16 +156,6 @@ export function graduationOf(gapSource: string): Graduation {
   return flag.value ? "delete" : "rewrite";
 }
 
-/** A spec-only gap source: octokit ships its routes already, so it carries no tripwire. */
-export function isSpecOnly(gapSource: string): boolean {
-  return readGapExport(gapSource)?.helper === "defineSpecOnlyGap";
-}
-
-/** A gap source the graduation rewrites instead of deleting. */
-export function isSpecPinned(gapSource: string): boolean {
-  return graduationOf(gapSource) === "rewrite";
-}
-
 /** Only the feature clause survives (the text up to the first ";", where the octokit-lags prose starts): preserving
  * the whole original would keep a now-false "octokit does not carry these routes yet" sentence in a bot-committed file. */
 function specOnlyDoc(doc: string): string {
@@ -183,14 +170,13 @@ function specOnlyDoc(doc: string): string {
 
 export function toSpecOnlyGapSource(source: string, gapFile: string): string {
   const gap = readGapExport(source);
-  if (gap?.helper !== "defineGap" || gap.doc === undefined) {
+  if (gap?.helper !== "defineGap" || !gap.plain || gap.doc === undefined) {
     throw new Error(
       `${gapFile} does not match the documented defineGap shape (doc comment + export const GAP = defineGap({...})); rewrite it to defineSpecOnlyGap by hand`,
     );
   }
   const array = gap.properties.get("routes");
-  const elements = array?.type === "ArrayExpression" ? array.elements : [];
-  if (elements.length === 0) {
+  if (array?.type !== "ArrayExpression" || array.elements.length === 0) {
     throw new Error(
       `${gapFile} declares no parsable routes; rewrite it to defineSpecOnlyGap by hand`,
     );
@@ -198,8 +184,10 @@ export function toSpecOnlyGapSource(source: string, gapFile: string): string {
   // Anything besides plain string literals (an identifier, a spread, a template literal, a comment) would be
   // dropped by the rewrite: refuse instead of silently losing it.
   const routes: string[] = [];
-  const leftover = array === undefined ? [] : gap.commentsIn(array);
-  for (const element of elements) {
+  const leftover = gap.comments
+    .filter((comment) => comment.start >= array.start && comment.end <= array.end)
+    .map((comment) => source.slice(comment.start, comment.end));
+  for (const element of array.elements) {
     if (element?.type === "Literal" && typeof element.value === "string") {
       routes.push(element.value);
     } else {

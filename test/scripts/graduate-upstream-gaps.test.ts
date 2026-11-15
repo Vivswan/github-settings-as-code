@@ -18,8 +18,6 @@ import { gapFileBases, generateIndex, INDEX_PATH } from "../../.github/scripts/g
 import {
   graduationOf,
   isGapFile,
-  isSpecOnly,
-  isSpecPinned,
   planGraduation,
   toSpecOnlyGapSource,
 } from "../../.github/scripts/graduate-upstream-gaps.js";
@@ -186,47 +184,38 @@ function gapSource(call: string, body: string, lead = ""): string {
   return `${lead}export const GAP = ${call}({ routes: ["GET /x"], ${body} });\n`;
 }
 
-describe("isSpecPinned", () => {
-  // The flag's value in the object literal decides which gap files the graduation rewrites; text that merely
-  // quotes the flag (a comment, a string) deciding would rewrite a gap the lifecycle deletes.
-  test.each<[label: string, source: string, pinned: boolean]>([
-    ["documentedInSpec: false", gapSource("defineGap", "documentedInSpec: false"), true],
-    ["documentedInSpec: true", gapSource("defineGap", "documentedInSpec: true"), false],
-    ["routes only, spec-only shape", gapSource("defineSpecOnlyGap", ""), false],
+describe("graduationOf", () => {
+  // The object literal decides, never text that quotes a flag or a helper: a comment or a string deciding would
+  // rewrite a gap the lifecycle deletes. A flag the script cannot read is refused: the deletion branch would take
+  // the gap's UNDOCUMENTED_ROUTES exemption with it. main acts on exactly this value.
+  const UNREADABLE = { refusal: expect.stringContaining("plain true or false") };
+  const SPEC_ONLY = { refusal: expect.stringContaining("is a spec-only gap") };
+  test.each<[source: string, graduation: unknown]>([
+    [gapSource("defineGap", "documentedInSpec: true"), "delete"],
+    [gapSource("defineGap", "documentedInSpec: false"), "rewrite"],
+    ["export const GAP = defineGap({ documentedInSpec: false });", "rewrite"],
     [
-      "documentedInSpec: true under a comment quoting the other value",
       gapSource(
         "defineGap",
         "documentedInSpec: true",
         "// was documentedInSpec: false until the bump\n",
       ),
-      false,
+      "delete",
     ],
     [
-      "documentedInSpec: true beside a string quoting the other value",
       `const NOTE = "documentedInSpec: false";\n${gapSource("defineGap", "documentedInSpec: true")}`,
-      false,
+      "delete",
     ],
-  ])("the gap source with %s is spec-pinned: %p", (_label, source, pinned) => {
-    expect(isSpecPinned(source)).toBe(pinned);
-  });
-});
-
-describe("graduationOf", () => {
-  // Without the refusals, a flag the script cannot read falls to the deletion branch and takes the gap's
-  // UNDOCUMENTED_ROUTES exemption with it; main acts on exactly this value.
-  const UNREADABLE = { refusal: expect.stringContaining("plain true or false") };
-  test.each<[source: string, graduation: unknown]>([
-    [gapSource("defineGap", "documentedInSpec: true"), "delete"],
-    [gapSource("defineGap", "documentedInSpec: false"), "rewrite"],
+    [
+      gapSource("defineGap", "documentedInSpec: true", "// not defineSpecOnlyGap(...) yet\n"),
+      "delete",
+    ],
     [gapSource("defineGap", "documentedInSpec: false as const"), UNREADABLE],
     [gapSource("defineGap", "documentedInSpec: true, ...OVERRIDE"), UNREADABLE],
     [gapSource("defineGap", ""), UNREADABLE],
     ["export const GAP = 42;", UNREADABLE],
-    [
-      gapSource("defineSpecOnlyGap", ""),
-      { refusal: expect.stringContaining("is a spec-only gap") },
-    ],
+    [gapSource("defineSpecOnlyGap", ""), SPEC_ONLY],
+    ['export const GAP = defineSpecOnlyGap({\n  routes: ["GET /x"],\n});', SPEC_ONLY],
   ])("the gap source %j graduates as %j", (source, graduation) => {
     expect<unknown>(graduationOf(source)).toEqual(graduation);
   });
@@ -346,7 +335,7 @@ describe("the real src/upstream-gaps/ satisfies the scripts' contracts", () => {
         GAP: { kind: "octokit"; documentedInSpec: boolean } | { kind: "spec-only" };
       };
       const expected = GAP.kind === "octokit" && !GAP.documentedInSpec;
-      expect(isSpecPinned(readFileSync(abs, "utf8"))).toBe(expected);
+      expect(graduationOf(readFileSync(abs, "utf8")) === "rewrite").toBe(expected);
     }
   });
 
@@ -356,7 +345,7 @@ describe("the real src/upstream-gaps/ satisfies the scripts' contracts", () => {
     for (const gap of realGapFiles) {
       const abs = join(ROOT, gap);
       const source = readFileSync(abs, "utf8");
-      if (!isSpecPinned(source)) {
+      if (graduationOf(source) !== "rewrite") {
         continue;
       }
       const { GAP } = (await import(abs)) as { GAP: { routes: readonly string[] } };
@@ -366,20 +355,6 @@ describe("the real src/upstream-gaps/ satisfies the scripts' contracts", () => {
         expect(rewritten).toContain(`"${route}"`);
       }
     }
-  });
-});
-
-describe("spec-only sources never reach the deletion branch", () => {
-  test.each<[source: string, specOnly: boolean]>([
-    ['export const GAP = defineSpecOnlyGap({\n  routes: ["GET /x"],\n});', true],
-    ["export const GAP = defineGap({ documentedInSpec: false });", false],
-    // A comment naming the other helper must not turn a graduation into the spec-only abort.
-    [
-      gapSource("defineGap", "documentedInSpec: true", "// not defineSpecOnlyGap(...) yet\n"),
-      false,
-    ],
-  ])("the gap source %j is spec-only: %p", (source, specOnly) => {
-    expect(isSpecOnly(source)).toBe(specOnly);
   });
 });
 
@@ -410,7 +385,7 @@ describe("a graduation on a copy of src/", () => {
       (dir) => {
         for (const base of gapBases(dir)) {
           const source = readFileSync(gapPath(dir, base), "utf8");
-          if (isSpecPinned(source)) {
+          if (graduationOf(source) === "rewrite") {
             writeFileSync(
               gapPath(dir, base),
               toSpecOnlyGapSource(source, `src/upstream-gaps/${base}.ts`),
