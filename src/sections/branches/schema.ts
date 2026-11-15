@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { isPlainObject } from "../../plain-data.js";
 import { stringItems } from "../shared/raw-values.js";
-import { conditional, open, rule } from "../shared/schema-helpers.js";
+import { conditional, open, pathSegmentName, rule } from "../shared/schema-helpers.js";
 import { type BooleanControl, isGetOnlyKey, isUrlKey, NULLABLE_CONTROLS } from "./keys.js";
 
 export type BypassActor =
@@ -404,9 +404,9 @@ export type BranchProtectionConfig = z.infer<typeof BranchProtectionConfig>;
 /** What makes a name a wildcard pattern: git refnames forbid `*`, `?`, and `[`, so one can never collide with a literal branch. */
 export const WILDCARD_NAME = /[*?[]/;
 
-/** One `branches:` entry: a branch name or a wildcard pattern (WILDCARD_NAME), and its protection, where null removes it. */
+/** One `branches:` entry: the name of a branch or a wildcard pattern (WILDCARD_NAME), and its protection, where null removes it. */
 export const BranchConfig = open({
-  name: z.string(),
+  name: pathSegmentName("the name of a branch"),
   protection: BranchProtectionConfig.nullable(),
 })
   .check(

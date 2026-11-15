@@ -26,7 +26,7 @@ import {
   type PathParams,
   toleratedStatuses,
 } from "./endpoints.js";
-import { failureFor, type SectionFailure } from "./errors.js";
+import { failureFor, type SectionFailure, sectionFailure } from "./errors.js";
 import {
   type GraphqlOpDecl,
   type GraphqlPaginatedReadDecl,
@@ -149,6 +149,23 @@ export async function callDeclared(
   return answered.map((result) => ("data" in result ? result.data : undefined));
 }
 
+/** The request path, or the section's refusal when a live value cannot be a path segment (see expand()). */
+function sectionPath(
+  section: SectionMeta,
+  endpoint: EndpointDecl,
+  ctx: SectionContext,
+  params: Readonly<Record<string, string>> | undefined,
+  query: Readonly<Record<string, string>> | undefined,
+): Result<string, SectionFailure> {
+  if (params === undefined) {
+    return ok(expand(endpoint, ctx, undefined, query));
+  }
+
+  return expand(endpoint, ctx, params, query).mapErr((reason) =>
+    sectionFailure("refused", `${section.key}: ${reason}`),
+  );
+}
+
 /** Tolerated statuses come back as { error }; an explicit `tolerate` only ever tolerates FEWER than declared. */
 export async function tryCall<E extends EndpointDecl>(
   ctx: SectionContext,
@@ -212,7 +229,11 @@ export async function tryCallDeclared(
   },
 ): Promise<Result<{ data: unknown } | { error: ApiError }, SectionFailure>> {
   const method = endpointMethod(endpoint.route);
-  const path = expand(endpoint, ctx, opts.params, opts.query);
+  const expanded = sectionPath(section, endpoint, ctx, opts.params, opts.query);
+  if (expanded.isErr()) {
+    return err(expanded.error);
+  }
+  const path = expanded.value;
   const issued = await issue(`${method} ${path}`, opts.carriesSecret, (mark) =>
     ctx.api.tryRequest(method, path, opts.payload, mark),
   );
@@ -248,7 +269,11 @@ export async function probeAbsent<E extends EndpointDecl>(
   >
 ): Promise<Result<{ data: unknown } | { missing: true }, SectionFailure>> {
   const options = args[0];
-  const path = expand(endpoint, ctx, options?.params, options?.query);
+  const expanded = sectionPath(section, endpoint, ctx, options?.params, options?.query);
+  if (expanded.isErr()) {
+    return err(expanded.error);
+  }
+  const path = expanded.value;
   const tolerated = declaredTolerance(endpoint, options?.tolerate);
   const result = await ctx.api.tryRequest("GET", path, undefined, { accept: options?.accept });
   if ("failed" in result) {
@@ -311,9 +336,12 @@ export async function listAll<E extends EndpointDecl>(
   ...args: OptsArg<E, { query?: Readonly<Record<string, string>>; describe?: string }>
 ): Promise<Result<unknown[], SectionFailure>> {
   const opts = args[0];
-  const path = expand(endpoint, ctx, opts?.params, opts?.query);
+  const expanded = sectionPath(section, endpoint, ctx, opts?.params, opts?.query);
+  if (expanded.isErr()) {
+    return err(expanded.error);
+  }
   return listPages(ctx, section, endpoint, {
-    path,
+    path: expanded.value,
     extract: (data) => (Array.isArray(data) ? data : null),
     shape: "a list",
     describe: opts?.describe,
@@ -329,9 +357,12 @@ export async function listAllEnveloped<E extends EndpointDecl>(
   ...args: OptsArg<E, { query?: Readonly<Record<string, string>>; describe?: string }>
 ): Promise<Result<unknown[], SectionFailure>> {
   const opts = args[0];
-  const path = expand(endpoint, ctx, opts?.params, opts?.query);
+  const expanded = sectionPath(section, endpoint, ctx, opts?.params, opts?.query);
+  if (expanded.isErr()) {
+    return err(expanded.error);
+  }
   return listPages(ctx, section, endpoint, {
-    path,
+    path: expanded.value,
     extract: (data) => {
       const chunk = (data as Record<string, unknown> | null)?.[envelopeKey];
       return Array.isArray(chunk) ? chunk : null;

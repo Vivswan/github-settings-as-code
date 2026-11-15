@@ -4,7 +4,7 @@ import type { SectionInput } from "../../../src/sections/contract/declared.js";
 import { planContext } from "../../../src/sections/contract/plan.js";
 import { labelsSection } from "../../../src/sections/labels/index.js";
 import { MockApi } from "../../mock-api.js";
-import { REPO, unwrap } from "../section-run.js";
+import { NO_SECRETS, REPO, unwrap } from "../section-run.js";
 import { validatedInput } from "../validated-input.js";
 
 const LIST = "GET /repos/o/r/labels?per_page=100&page=1";
@@ -123,6 +123,29 @@ describe("labels", () => {
     expect(execution.status).toBe("applied");
     expect(api.mutations().map((m) => m.path)).toEqual([
       "/repos/o/r/labels/autorelease%3A%20pending",
+    ]);
+  });
+
+  test('an undeclared live label named ".." is never deleted by path: its DELETE would resolve to the repository route, so the section refuses and sends nothing', async () => {
+    const api = new MockApi({
+      [LIST]: { data: [{ name: "..", color: "ededed", description: null }] },
+    }).allowMutations("DELETE /repos/o/r/*");
+    const execution = await executePlan(await plan(api, []), labelsSection, api, REPO, NO_SECRETS);
+
+    expect([execution, api.mutations()]).toEqual([
+      {
+        status: "failed",
+        failure: {
+          kind: "refused",
+          message:
+            'labels: DELETE /repos/{owner}/{repo}/labels/{name} cannot be sent for name "..": as a URL path segment "." and ".." resolve to another API route. Rename or remove it on GitHub',
+        },
+        changes: [],
+        notes: [],
+        landed: 0,
+        unattempted: [],
+      },
+      [],
     ]);
   });
 

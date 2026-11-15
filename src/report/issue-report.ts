@@ -165,6 +165,20 @@ function isReportBody(body: unknown): boolean {
   );
 }
 
+/** The path of a route whose params are an issue number or the marker label: neither can be the "." or ".." expand() refuses. */
+function fixedPath(
+  endpoint: EndpointDecl,
+  ref: { repo: RepoRef },
+  params: Readonly<Record<string, string>>,
+): string {
+  const path = expand(endpoint, ref, params);
+  if (path.isErr()) {
+    throw new Error(`BUG: ${path.error}`);
+  }
+
+  return path.value;
+}
+
 /** Among several reports (a duplicate an earlier run left behind), the one still open wins, then the newest. */
 function pickReportIssue(candidates: ReportIssue[]): ReportIssue | null {
   const ranked = [...candidates].sort(
@@ -254,7 +268,7 @@ async function closeIfOpen(
   }
   const closed = await api.tryRequest(
     "PATCH",
-    expand(ISSUE_REPORT_ENDPOINTS.update, ref, { issue_number: String(found.number) }),
+    fixedPath(ISSUE_REPORT_ENDPOINTS.update, ref, { issue_number: String(found.number) }),
     { body, state: "closed" },
   );
   if ("failed" in closed) {
@@ -331,7 +345,7 @@ async function updateReportIssue(
   const { body, state, relabel } = patch;
   const updated = await api.tryRequest(
     "PATCH",
-    expand(ISSUE_REPORT_ENDPOINTS.update, ref, { issue_number: String(found.number) }),
+    fixedPath(ISSUE_REPORT_ENDPOINTS.update, ref, { issue_number: String(found.number) }),
     relabel ? { body, state, labels: relabel } : { body, state },
   );
   if ("failed" in updated) {
@@ -373,7 +387,7 @@ async function createReportIssue(
   if (report.state === "closed") {
     const closed = await api.tryRequest(
       "PATCH",
-      expand(ISSUE_REPORT_ENDPOINTS.update, ref, { issue_number: String(issue.number) }),
+      fixedPath(ISSUE_REPORT_ENDPOINTS.update, ref, { issue_number: String(issue.number) }),
       { state: report.state },
     );
     if ("failed" in closed) {
@@ -450,7 +464,7 @@ export async function mayHoldMarkerLabel(api: GitHubClient, repo: RepoRef): Prom
   try {
     const label = await api.tryRequest(
       "GET",
-      expand(ISSUE_REPORT_ENDPOINTS.readLabel, { repo }, { name: MARKER_LABEL }),
+      fixedPath(ISSUE_REPORT_ENDPOINTS.readLabel, { repo }, { name: MARKER_LABEL }),
     );
     return !("error" in label && label.error.status === 404);
   } catch {
