@@ -133,7 +133,7 @@ export type Problem =
       readonly reason: string;
     }
   | {
-      readonly code: "input-exclude-pattern-invalid";
+      readonly code: "input-exclude-pattern-invalid-hidden";
       readonly position: number;
       readonly reason: string;
     }
@@ -150,7 +150,8 @@ export type Problem =
       readonly value: string;
       readonly mode: EngineMode | "init";
     }
-  | { readonly code: "input-repository-not-slug"; readonly value: string | null }
+  | { readonly code: "input-repository-not-slug"; readonly value: string }
+  | { readonly code: "input-repository-not-slug-hidden" }
   | { readonly code: "input-artifact-unsupported" }
   // The settings document
   | {
@@ -253,13 +254,11 @@ export type Problem =
   | { readonly code: "repos-input-wildcard-mixed" }
   | {
       readonly code: "repos-input-invalid-entries";
-      readonly entries: "shown";
       readonly invalid: readonly string[];
       readonly duplicated: readonly string[];
     }
   | {
-      readonly code: "repos-input-invalid-entries";
-      readonly entries: "hidden";
+      readonly code: "repos-input-invalid-entries-hidden";
       readonly invalid: readonly number[];
       readonly duplicated: readonly number[];
     }
@@ -310,9 +309,9 @@ const PAT_ADVICE =
   "Discovery needs a user PAT; the workflow GITHUB_TOKEN and GitHub App installation tokens " +
   'cannot enumerate a user\'s repositories. List the target repositories explicitly in the "repos" input';
 
-/** Said where a refusal names an entry by its 1-based place, or a `value` of null, instead of its text: no repository is listed yet, so under private-repos: redact the text may name a private one. */
+/** Why a `-hidden` refusal names an input by its 1-based place, or not at all: no repository is listed yet, so under private-repos: redact its text may name a private one. */
 const HIDDEN_TEXT =
-  'its text is hidden because private-repos is "redact" and it may name a private repository; set private-repos: show to print it';
+  "its text is hidden under private-repos: redact, since it may name a private repository; set private-repos: show to print it";
 
 /** The underscore rule at the document level; the wrapper's line (src/sections/shared/schema-helpers.ts) says the same in the wrapper's terms, and the two directives are all the underscore ever means. */
 const DIRECTIVES_ADVICE =
@@ -410,12 +409,12 @@ function describeUnknownSectionInput(
     : `unknown sections ${quoted} in the "${unknown.input}" input; each matches none of: ${known.join(", ")}. Fix the section names`;
 }
 
-function describeInvalidReposEntries(problem: ProblemOf<"repos-input-invalid-entries">): string {
-  const hidden = problem.entries === "hidden";
-  const named = (entries: readonly (string | number)[]): string =>
-    hidden
-      ? `${agree(entries.length, "entry", "entries")} ${entries.map((at) => `#${at}`).join(", ")}`
-      : quoteList(entries as readonly string[]);
+/** The repos-list refusal in both forms: `named` renders the offenders (their text, or their places), `why` says why places stand for text. */
+function describeReposEntries<T>(
+  problem: { readonly invalid: readonly T[]; readonly duplicated: readonly T[] },
+  named: (offenders: readonly T[]) => string,
+  why: string,
+): string {
   const parts: string[] = [];
   if (problem.invalid.length > 0) {
     parts.push(
@@ -432,11 +431,11 @@ function describeInvalidReposEntries(problem: ProblemOf<"repos-input-invalid-ent
     );
   }
   const count = problem.invalid.length + problem.duplicated.length;
-  const why = hidden
-    ? ` An entry is named by its place in the list, counted from 1: ${HIDDEN_TEXT}.`
-    : "";
   return `the "repos" input has ${countNoun(count, "invalid entry", "invalid entries")}: ${parts.join("; ")}.${why} Or use "*" alone to discover repositories`;
 }
+
+const entryPlaces = (at: readonly number[]): string =>
+  `${agree(at.length, "entry", "entries")} ${at.map((place) => `#${place}`).join(", ")}`;
 
 /** The `layer "<name>": <site>` prefix every layer refusal opens with. */
 function layerSite(problem: LayerProblem): string {
@@ -584,24 +583,30 @@ function describeInputProblem(problem: InputProblem): string {
       return `the "affiliation" input entry "${problem.entry}" is not a supported affiliation, so discovery cannot build the /user/repos query. Use a comma-separated list of ${quoteList(problem.allowed)}`;
     case "input-exclude-pattern-invalid": {
       const shown =
-        "position" in problem
-          ? `#${problem.position} (${HIDDEN_TEXT})`
-          : quote(
-              problem.pattern.length > 60 ? `${problem.pattern.slice(0, 60)}...` : problem.pattern,
-            );
+        problem.pattern.length > 60 ? `${problem.pattern.slice(0, 60)}...` : problem.pattern;
       // A position names a character in the pattern as the fixes before it leave it, counted from 0.
       const positioned = / at \d+/.test(problem.reason)
         ? ", applying the fixes in order with positions counted from 0 in the pattern as the earlier fixes leave it"
         : "";
       return (
-        `the "exclude" input pattern ${shown} is not a usable glob: ${problem.reason}${positioned}. Write ` +
+        `the "exclude" input pattern ${quote(shown)} is not a usable glob: ${problem.reason}${positioned}. Write ` +
         `"<name-glob>" or "<owner-glob>/<name-glob>", where a glob is letters, digits, ".", "-", "_", "*", "?", ` +
         `and the classes "[abc]", "[!abc]", or "[^abc]" over those characters, with one optional leading "!" ` +
         `negating the whole pattern`
       );
     }
+    case "input-exclude-pattern-invalid-hidden":
+      return (
+        `the "exclude" input pattern #${problem.position} is not a usable glob: ${problem.reason}. The pattern is ` +
+        `named by its place in the list, counted from 1: ${HIDDEN_TEXT}`
+      );
+    case "input-repository-not-slug-hidden":
+      return (
+        `cannot target a repository: the "repository" input is not an owner/name slug (${HIDDEN_TEXT}). Set it ` +
+        '(--repository on the command line) to a value like "octocat/hello-world"'
+      );
     case "input-repository-not-slug":
-      return `cannot target a repository: ${problem.value === null ? `the "repository" input (${HIDDEN_TEXT})` : `"${problem.value}"`} is not an owner/name slug. Set the "repository" input (--repository on the command line) to a value like "octocat/hello-world"; inside GitHub Actions, GITHUB_REPOSITORY supplies it`;
+      return `cannot target a repository: "${problem.value}" is not an owner/name slug. Set the "repository" input (--repository on the command line) to a value like "octocat/hello-world"; inside GitHub Actions, GITHUB_REPOSITORY supplies it`;
     case "input-artifact-unsupported":
       return (
         "private-report: artifact uploads the reports as a workflow artifact, which only the GitHub " +
@@ -646,8 +651,14 @@ function describeTargetProblem(problem: TargetProblem): string {
   switch (problem.code) {
     case "repos-input-wildcard-mixed":
       return 'the "repos" input mixes "*" with explicit repositories. Use "*" alone to discover every repository the token owns, or list the repositories without it';
+    case "repos-input-invalid-entries-hidden":
+      return describeReposEntries(
+        problem,
+        entryPlaces,
+        ` An entry is named by its place in the list, counted from 1: ${HIDDEN_TEXT}.`,
+      );
     case "repos-input-invalid-entries":
-      return describeInvalidReposEntries(problem);
+      return describeReposEntries(problem, quoteList, "");
     case "repos-dir-missing":
       return `repos-dir "${problem.reposDir}" does not exist in the workspace, so there are no central settings files to read. Add an actions/checkout step before this action, or fix the repos-dir path`;
     case "repos-dir-unreadable":

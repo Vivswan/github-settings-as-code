@@ -46,7 +46,7 @@ The rule does not judge the pattern or what it skipped. A pattern can name a rep
 
 The other filters (`visibility`, `archived`, `forks`, `topics`) are named in full: they hold a setting or a topic, never a repository name.
 
-A refused input follows the same rule. The refusal is printed before any repository is listed, so the run cannot know whether the text names a private repository. Under `private-repos: redact` it hides the text and still says the flaw and the fix:
+A refused input follows the same rule. The refusal is printed before any repository is listed, so the run cannot know whether the text names a private repository. Under `private-repos: redact` it hides the text and still says the flaw and the fix, in words that quote no character of the input:
 
 | Refused input                         | The refusal names it as                  |
 | ------------------------------------- | ---------------------------------------- |

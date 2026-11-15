@@ -563,7 +563,11 @@ describe("a refused entry that may name a private repository", () => {
     [
       "an exclude pattern is named by its place in the list",
       { repos: "*", exclude: "tmp-*, e2e-owner/secret-repo/" },
-      { code: "input-exclude-pattern-invalid", position: 2, reason: AT_MOST_ONE_SLASH },
+      {
+        code: "input-exclude-pattern-invalid-hidden",
+        position: 2,
+        reason: "it takes at most one slash, with a glob on each side of it",
+      },
       {
         code: "input-exclude-pattern-invalid",
         pattern: "e2e-owner/secret-repo/",
@@ -574,10 +578,9 @@ describe("a refused entry that may name a private repository", () => {
     [
       "a repos entry is named by its place in the list",
       { repos: "o/a, secret-repo, o/vault, O/Vault" },
-      { code: "repos-input-invalid-entries", entries: "hidden", invalid: [2], duplicated: [4] },
+      { code: "repos-input-invalid-entries-hidden", invalid: [2], duplicated: [4] },
       {
         code: "repos-input-invalid-entries",
-        entries: "shown",
         invalid: ["secret-repo"],
         duplicated: ["O/Vault"],
       },
@@ -586,7 +589,7 @@ describe("a refused entry that may name a private repository", () => {
     [
       "the repository input is not quoted",
       { repository: "secret-repo" },
-      { code: "input-repository-not-slug", value: null },
+      { code: "input-repository-not-slug-hidden" },
       { code: "input-repository-not-slug", value: "secret-repo" },
       ["secret-repo"],
     ],
@@ -624,7 +627,7 @@ describe("target inputs the file system cannot change", () => {
     [
       "a repos list with a bad entry",
       { repos: "o/r,not-a-slug" },
-      { code: "repos-input-invalid-entries", entries: "hidden", invalid: [2], duplicated: [] },
+      { code: "repos-input-invalid-entries-hidden", invalid: [2], duplicated: [] },
     ],
     [
       "discovery filters beside explicit repos",

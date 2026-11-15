@@ -12,7 +12,11 @@ import {
   FORKS_FILTERS,
   VISIBILITY_FILTERS,
 } from "../discovery/discover.js";
-import { compileExcludePattern, type ExcludePattern } from "../discovery/exclude-pattern.js";
+import {
+  compileExcludePattern,
+  compileHiddenExcludePattern,
+  type ExcludePattern,
+} from "../discovery/exclude-pattern.js";
 import { splitList } from "../discovery/repos-input.js";
 import { parseRepoSlug, type RepoRef } from "../discovery/targets.js";
 import { UNDECLARED_POLICIES } from "../engine/layers.js";
@@ -199,12 +203,9 @@ export function readDiscoveryFilters(
     const exclude: ExcludePattern[] = [];
     for (const [index, pattern] of input.list("exclude").entries()) {
       exclude.push(
-        yield* compileExcludePattern(pattern).mapErr(
-          (refused): Problem =>
-            privateRepos === "redact"
-              ? { code: refused.code, position: index + 1, reason: refused.reason }
-              : refused,
-        ),
+        yield* privateRepos === "redact"
+          ? compileHiddenExcludePattern(pattern, index + 1)
+          : compileExcludePattern(pattern),
       );
     }
     const discoveryFilters: DiscoveryFilters = {
@@ -231,9 +232,9 @@ export function readSingleTarget(
   const named = input.value("repository");
   const rawRepo = named || githubRepository;
   return parseRepoSlug(rawRepo).mapErr(
-    (): Problem => ({
-      code: "input-repository-not-slug",
-      value: named !== "" && privateRepos === "redact" ? null : rawRepo,
-    }),
+    (): Problem =>
+      named !== "" && privateRepos === "redact"
+        ? { code: "input-repository-not-slug-hidden" }
+        : { code: "input-repository-not-slug", value: rawRepo },
   );
 }

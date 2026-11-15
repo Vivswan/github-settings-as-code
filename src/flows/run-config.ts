@@ -6,7 +6,7 @@
 
 import { err, ok, type Result, safeTry } from "neverthrow";
 import type { DiscoveryFilters } from "../discovery/discover.js";
-import { LIST_SEPARATOR, parseReposInput } from "../discovery/repos-input.js";
+import { LIST_SEPARATOR, parseReposInputUnder } from "../discovery/repos-input.js";
 import { LAYERINGS } from "../engine/layers.js";
 import type { Problem } from "../problem.js";
 import { PRIVATE_REPORT_CHANNELS } from "../report/delivery.js";
@@ -146,8 +146,8 @@ function refuseTargetInputs(
   if (!reposInput) {
     return filtersWithout("repos-dir");
   }
-  return parseReposInput(reposInput, privateRepos === "redact" ? "hidden" : "shown").andThen(
-    (parsed) => (parsed.discover ? ok(undefined) : filtersWithout("explicit-repos")),
+  return parseReposInputUnder(reposInput, privateRepos === "redact").andThen((parsed) =>
+    parsed.discover ? ok(undefined) : filtersWithout("explicit-repos"),
   );
 }
 

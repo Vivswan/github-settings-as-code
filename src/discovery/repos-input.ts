@@ -19,14 +19,65 @@ export function splitList(value: string): string[] {
     .filter(Boolean);
 }
 
-/** `entries: "hidden"` names each refused entry by its 1-based place among the list's entries, for a run that hides private repositories. */
+/** What a `repos` list resolves to, and every way it is refused: the offenders by text, each with its first 1-based place. */
+type ReposList = Result<
+  { repos: RepoRef[]; discover: boolean },
+  | ProblemOf<"repos-input-wildcard-mixed">
+  | { code: "offenders"; invalid: Map<string, number>; duplicated: Map<string, number> }
+>;
+
+/** The refusal quotes each offending entry: the form for a run that hides nothing. */
 export function parseReposInput(
   raw: string,
-  entries: "shown" | "hidden" = "shown",
 ): Result<
   { repos: RepoRef[]; discover: boolean },
   ProblemOf<"repos-input-wildcard-mixed" | "repos-input-invalid-entries">
 > {
+  return readReposList(raw).mapErr((refused) =>
+    refused.code === "offenders"
+      ? {
+          code: "repos-input-invalid-entries",
+          invalid: [...refused.invalid.keys()],
+          duplicated: [...refused.duplicated.keys()],
+        }
+      : refused,
+  );
+}
+
+/** The refusal for a run that hides private repositories: each offending entry is named by its place, never its text. */
+function parseHiddenReposInput(
+  raw: string,
+): Result<
+  { repos: RepoRef[]; discover: boolean },
+  ProblemOf<"repos-input-wildcard-mixed" | "repos-input-invalid-entries-hidden">
+> {
+  return readReposList(raw).mapErr((refused) =>
+    refused.code === "offenders"
+      ? {
+          code: "repos-input-invalid-entries-hidden",
+          invalid: [...refused.invalid.values()],
+          duplicated: [...refused.duplicated.values()],
+        }
+      : refused,
+  );
+}
+
+/** parseReposInput under the run's policy: `hide` picks the refusal that names offenders by place. */
+export function parseReposInputUnder(
+  raw: string,
+  hide: boolean,
+): Result<
+  { repos: RepoRef[]; discover: boolean },
+  ProblemOf<
+    | "repos-input-wildcard-mixed"
+    | "repos-input-invalid-entries"
+    | "repos-input-invalid-entries-hidden"
+  >
+> {
+  return hide ? parseHiddenReposInput(raw) : parseReposInput(raw);
+}
+
+function readReposList(raw: string): ReposList {
   const items = splitList(raw);
   if (items.includes("*")) {
     if (items.length > 1) {
@@ -54,21 +105,7 @@ export function parseReposInput(
     repos.push(parsed.value);
   }
   if (invalid.size > 0 || duplicated.size > 0) {
-    return err(
-      entries === "hidden"
-        ? {
-            code: "repos-input-invalid-entries",
-            entries: "hidden",
-            invalid: [...invalid.values()],
-            duplicated: [...duplicated.values()],
-          }
-        : {
-            code: "repos-input-invalid-entries",
-            entries: "shown",
-            invalid: [...invalid.keys()],
-            duplicated: [...duplicated.keys()],
-          },
-    );
+    return err({ code: "offenders", invalid, duplicated });
   }
   return ok({ repos, discover: false });
 }

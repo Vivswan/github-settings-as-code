@@ -151,13 +151,128 @@ function withHyphensLast(members: string): string {
 const listed = <T>(items: readonly T[], render: (item: T) => string): string =>
   items.map(render).join(" and ");
 
+/** One operator or bracket of a view, with where it sits. */
+interface MarkAt {
+  readonly char: string;
+  readonly index: number;
+}
+
+const marksAt = (view: string, where: readonly number[]): MarkAt[] =>
+  where.map((index) => ({ char: view[index] ?? "", index }));
+
+/**
+ * One flaw of a pattern: its kind, and the fragments of the pattern its sentence quotes. Only shownFlaw reads the
+ * fragments; the hidden form is HIDDEN_FLAW, keyed by kind alone, so it can print no character of the pattern.
+ */
+export type ExcludeFlaw =
+  | { readonly kind: "whitespace" }
+  | { readonly kind: "strays"; readonly strays: readonly string[] }
+  | { readonly kind: "unpaired-brackets"; readonly at: readonly MarkAt[] }
+  | { readonly kind: "misplaced-marks"; readonly at: readonly MarkAt[] }
+  | { readonly kind: "class-operators"; readonly cls: string; readonly fixed: string }
+  | { readonly kind: "class-empty"; readonly cls: string }
+  | { readonly kind: "class-hyphen"; readonly cls: string; readonly fixed: string }
+  | {
+      readonly kind: "class-backwards";
+      readonly cls: string;
+      readonly ranges: readonly string[];
+      readonly fixed: string;
+    }
+  | { readonly kind: "dot-slash" }
+  | { readonly kind: "star-run" }
+  | { readonly kind: "too-long"; readonly length: number }
+  | { readonly kind: "empty" }
+  | { readonly kind: "bare-negation" }
+  | { readonly kind: "slash-sides" }
+  | { readonly kind: "dots-only" }
+  | { readonly kind: "not-a-glob" }
+  | { readonly kind: "engine-refused" };
+
+/** Each kind's sentence for a run that hides private repositories: the flaw and the fix, and nothing of the pattern. */
+export const HIDDEN_FLAW: Readonly<Record<ExcludeFlaw["kind"], string>> = {
+  whitespace: "it is wrapped in whitespace, so trim it",
+  strays: "it holds a character no owner or repository name contains, so remove each one",
+  "unpaired-brackets": "it has a bracket with no partner, so remove it",
+  "misplaced-marks": "it has a negation mark that neither negates nor opens a class, so remove it",
+  "class-operators":
+    "it has a class holding a glob operator, and a class takes name characters only, so remove the operator",
+  "class-empty": "it has a class that matches nothing, so delete the class",
+  "class-hyphen":
+    "it has a class with a hyphen where it reads as a range operator, so keep one hyphen and put it last in the class",
+  "class-backwards": "it has a class with a backwards range, so turn the range around",
+  "dot-slash": "it starts with a dot and a slash, which names no owner, so drop that lead",
+  "star-run":
+    "it holds a run of stars, which matches no more than one star does, so write one star",
+  "too-long": `it is longer than the cap of ${EXCLUDE_MAX_LENGTH} characters, so shorten it`,
+  empty: "it is empty",
+  "bare-negation": "it is a negation mark with nothing to negate",
+  "slash-sides": "it takes at most one slash, with a glob on each side of it",
+  "dots-only": "one side of it is one dot or two dots, which is never a name",
+  "not-a-glob":
+    "it is not name characters, stars, question marks, and classes on each side of the slash",
+  "engine-refused":
+    "it compiles to a regular expression the runtime refuses, so shorten it or split it across several patterns",
+};
+
+/** The sentence that quotes the pattern's own fragments beside the fix. */
+function shownFlaw(flaw: ExcludeFlaw): string {
+  switch (flaw.kind) {
+    case "whitespace":
+      return "it is wrapped in whitespace, so trim it";
+    case "strays":
+      return (
+        `it holds ${flaw.strays.map(quote).join(", ")}, which no owner or repository name contains, so remove ` +
+        `${flaw.strays.length === 1 ? "it" : "them"}`
+      );
+    case "unpaired-brackets": {
+      const one = flaw.at.length === 1;
+      return `its ${listed(flaw.at, markAt)} ${one ? "has" : "have"} no partner, so remove ${one ? "it" : "them"}`;
+    }
+    case "misplaced-marks": {
+      const one = flaw.at.length === 1;
+      return (
+        `its ${listed(flaw.at, markAt)} neither negate${one ? "s" : ""} ` +
+        `nor open${one ? "s" : ""} a class, so remove ${one ? "it" : "them"}`
+      );
+    }
+    case "class-operators":
+      return `the class "${flaw.cls}" takes name characters only, so write it as "${flaw.fixed}"`;
+    case "class-empty":
+      return `the class "${flaw.cls}" matches nothing, so delete it`;
+    case "class-hyphen":
+      return `the class "${flaw.cls}" has a "-" where it reads as a range operator, so write it as "${flaw.fixed}"`;
+    case "class-backwards":
+      return `the class "${flaw.cls}" has the backwards range ${listed(flaw.ranges, quote)}, so write it as "${flaw.fixed}"`;
+    case "dot-slash":
+      return `it starts with "./", which names no owner, so drop every leading "./"`;
+    case "star-run":
+      return `it holds a run of stars, which matches no more than one "*" does, so write one "*"`;
+    case "too-long":
+      return `it is ${flaw.length} characters long, past the cap of ${EXCLUDE_MAX_LENGTH}, so shorten it`;
+    case "empty":
+      return "it is empty";
+    case "bare-negation":
+      return `"!" has nothing to negate`;
+    case "slash-sides":
+      return `it takes at most one "/", with a non-empty glob on each side of it`;
+    case "dots-only":
+      return `"." and ".." are never names`;
+    case "not-a-glob":
+      return `it is not name characters, "*", "?", and classes "[abc]" or "[!abc]" on each side of the "/"`;
+    case "engine-refused":
+      return "it compiles to a regular expression the runtime refuses, so shorten it or split it across several patterns";
+  }
+}
+
+const markAt = (mark: MarkAt): string => `${quote(mark.char)} at ${mark.index}`;
+
 /** A step's result: the view with its fix applied and the sentence naming it; `done` ends the pass. */
 interface Pass {
   /** The pattern with this step's fix applied. */
   readonly view: string;
 
-  /** The sentence naming the fix, none when the view was already right. */
-  readonly flaws: readonly string[];
+  /** The flaw this step found, none when the view was already right. */
+  readonly flaws: readonly ExcludeFlaw[];
 
   /** Ends the pass: no later step can judge the view. */
   readonly done?: boolean;
@@ -171,39 +286,36 @@ type Step = (view: string) => Pass;
 
 const unchanged = (view: string): Pass => ({ view, flaws: [] });
 
-const applied = (view: string, fixed: string, flaw: string): Pass =>
+const applied = (view: string, fixed: string, flaw: ExcludeFlaw): Pass =>
   fixed === view ? unchanged(view) : { view: fixed, flaws: [flaw] };
 
-const named = (view: string, flaw: string): Pass => ({ view, flaws: [flaw] });
+const named = (view: string, flaw: ExcludeFlaw): Pass => ({ view, flaws: [flaw] });
 
 /** The classes are rewritten in one walk, so a pattern of many flawed classes costs one pass, not one per class. */
 function rewriteClasses(view: string): Pass {
-  const flaws: string[] = [];
+  const flaws: ExcludeFlaw[] = [];
   let rebuilt = "";
   let cursor = 0;
   for (const { at, text } of classesOf(view)) {
     rebuilt += view.slice(cursor, at);
     cursor = at + text.length;
     let cls = text;
-    const rewrite = (to: string, flaw: string): void => {
+    const rewrite = (to: string, flaw: ExcludeFlaw): void => {
       if (to !== cls) {
         flaws.push(flaw);
         cls = to;
       }
     };
     const kept = cls.replace(/[*?]/g, "");
-    rewrite(kept, `the class "${cls}" takes name characters only, so write it as "${kept}"`);
+    rewrite(kept, { kind: "class-operators", cls, fixed: kept });
     if (/^\[[!^]?\]$/.test(cls)) {
-      rewrite("", `the class "${cls}" matches nothing, so delete it`);
+      rewrite("", { kind: "class-empty", cls });
       continue;
     }
     if (!EXCLUDE_CLASS.test(cls)) {
       const [, opener = "", members = ""] = /^\[([!^]?)(.*)\]$/.exec(cls) ?? [];
       const settled = `[${opener}${withHyphensLast(members)}]`;
-      rewrite(
-        settled,
-        `the class "${cls}" has a "-" where it reads as a range operator, so write it as "${settled}"`,
-      );
+      rewrite(settled, { kind: "class-hyphen", cls, fixed: settled });
     }
     const backwards: string[] = [];
     const turned = cls.replace(/([\w.])-([\w.])/g, (range, low: string, high: string) => {
@@ -213,10 +325,7 @@ function rewriteClasses(view: string): Pass {
       backwards.push(range);
       return `${high}-${low}`;
     });
-    rewrite(
-      turned,
-      `the class "${cls}" has the backwards range ${listed(backwards, quote)}, so write it as "${turned}"`,
-    );
+    rewrite(turned, { kind: "class-backwards", cls, ranges: backwards, fixed: turned });
     rebuilt += cls;
   }
   return { view: rebuilt + view.slice(cursor), flaws };
@@ -224,66 +333,43 @@ function rewriteClasses(view: string): Pass {
 
 /** Each step names one fix and hands the next the view with it applied; the header says why the grammar is owned here. */
 const EXCLUDE_STEPS: readonly Step[] = [
-  (view) => applied(view, view.trim(), "it is wrapped in whitespace, so trim it"),
+  (view) => applied(view, view.trim(), { kind: "whitespace" }),
   (view) => {
     const strays = [...new Set(view.match(EXCLUDE_STRAYS) ?? [])];
-    return applied(
-      view,
-      view.replace(EXCLUDE_STRAYS, ""),
-      `it holds ${strays.map(quote).join(", ")}, which no owner or repository name contains, so remove ` +
-        `${strays.length === 1 ? "it" : "them"}`,
-    );
+    return applied(view, view.replace(EXCLUDE_STRAYS, ""), { kind: "strays", strays });
   },
   (view) => {
     const where = unpairedBrackets(view);
-    return applied(
-      view,
-      without(view, where),
-      `its ${listed(where, (i) => `${quote(view[i])} at ${i}`)} ${where.length === 1 ? "has" : "have"} no ` +
-        `partner, so remove ${where.length === 1 ? "it" : "them"}`,
-    );
+    return applied(view, without(view, where), {
+      kind: "unpaired-brackets",
+      at: marksAt(view, where),
+    });
   },
   (view) => {
     const where = misplacedMarks(view);
-    const one = where.length === 1;
-    return applied(
-      view,
-      without(view, where),
-      `its ${listed(where, (i) => `${quote(view[i])} at ${i}`)} neither negate${one ? "s" : ""} ` +
-        `nor open${one ? "s" : ""} a class, so remove ${one ? "it" : "them"}`,
-    );
+    return applied(view, without(view, where), {
+      kind: "misplaced-marks",
+      at: marksAt(view, where),
+    });
   },
   rewriteClasses,
-  (view) =>
-    applied(
-      view,
-      view.replace(/^(!?)(?:\.\/)+/, "$1"),
-      `it starts with "./", which names no owner, so drop every leading "./"`,
-    ),
-  (view) =>
-    applied(
-      view,
-      view.replace(/\*{2,}/g, "*"),
-      `it holds a run of stars, which matches no more than one "*" does, so write one "*"`,
-    ),
+  (view) => applied(view, view.replace(/^(!?)(?:\.\/)+/, "$1"), { kind: "dot-slash" }),
+  (view) => applied(view, view.replace(/\*{2,}/g, "*"), { kind: "star-run" }),
   (view) =>
     view.length > EXCLUDE_MAX_LENGTH
-      ? named(
-          view,
-          `it is ${view.length} characters long, past the cap of ${EXCLUDE_MAX_LENGTH}, so shorten it`,
-        )
+      ? named(view, { kind: "too-long", length: view.length })
       : unchanged(view),
   (view) => {
     const negated = view.startsWith("!");
     const body = negated ? view.slice(1) : view;
     return body === ""
-      ? { view, flaws: [negated ? `"!" has nothing to negate` : "it is empty"], done: true }
+      ? { view, flaws: [{ kind: negated ? "bare-negation" : "empty" }], done: true }
       : unchanged(view);
   },
   (view) => {
     const segments = view.replace(/^!/, "").split("/");
     return segments.length > 2 || segments.includes("")
-      ? named(view, `it takes at most one "/", with a non-empty glob on each side of it`)
+      ? named(view, { kind: "slash-sides" })
       : unchanged(view);
   },
   (view) =>
@@ -291,7 +377,7 @@ const EXCLUDE_STEPS: readonly Step[] = [
       .replace(/^!/, "")
       .split("/")
       .some((side) => side === "." || side === "..")
-      ? named(view, `"." and ".." are never names`)
+      ? named(view, { kind: "dots-only" })
       : unchanged(view),
   (view) =>
     view
@@ -299,10 +385,7 @@ const EXCLUDE_STEPS: readonly Step[] = [
       .split("/")
       .every((side) => side === "" || EXCLUDE_SEGMENT.test(side))
       ? unchanged(view)
-      : named(
-          view,
-          `it is not name characters, "*", "?", and classes "[abc]" or "[!abc]" on each side of the "/"`,
-        ),
+      : named(view, { kind: "not-a-glob" }),
   (view) => {
     if (view.length > EXCLUDE_MAX_LENGTH) {
       return unchanged(view);
@@ -314,17 +397,14 @@ const EXCLUDE_STEPS: readonly Step[] = [
       regex.test("");
       return { view, flaws: [], regex };
     } catch {
-      return named(
-        view,
-        "it compiles to a regular expression the runtime refuses, so shorten it or split it across several patterns",
-      );
+      return named(view, { kind: "engine-refused" });
     }
   },
 ];
 
 /** Every flaw of the pattern, and the compiled view when the engine step reached and accepted it. */
-function judgeExcludePattern(pattern: string): { flaws: string[]; regex: RegExp | undefined } {
-  const flaws: string[] = [];
+function judgeExcludePattern(pattern: string): { flaws: ExcludeFlaw[]; regex: RegExp | undefined } {
+  const flaws: ExcludeFlaw[] = [];
   let view = pattern;
   let regex: RegExp | undefined;
   for (const step of EXCLUDE_STEPS) {
@@ -345,23 +425,42 @@ function judgeExcludePattern(pattern: string): { flaws: string[]; regex: RegExp 
  * The scope split mirrors the repos-dir `<name>.yml` vs `<owner>/<name>.yml` pairing; picomatch's own basename
  * mode cannot express it (a slashed pattern stops matching the whole slug under it).
  */
-export function compileExcludePattern(
-  pattern: string,
-): Result<
-  ExcludePattern,
-  Extract<ProblemOf<"input-exclude-pattern-invalid">, { pattern: string }>
-> {
+function compile(pattern: string): Result<ExcludePattern, ExcludeFlaw[]> {
   const { flaws, regex } = judgeExcludePattern(pattern);
   if (flaws.length > 0) {
-    return err({ code: "input-exclude-pattern-invalid", pattern, reason: flaws.join(", and ") });
+    return err(flaws);
   }
   if (regex === undefined) {
-    throw new Error(
-      `BUG: the exclude pattern ${quote(pattern)} passed every step but the engine step never ran`,
-    );
+    throw new Error("BUG: an exclude pattern passed every step but the engine step never ran");
   }
   const scope = pattern.includes("/") ? "slug" : "name";
   return ok({ pattern, scope, regex });
+}
+
+/** The refusal quotes the pattern and each flaw's fragment of it: the form for a run that hides nothing. */
+export function compileExcludePattern(
+  pattern: string,
+): Result<ExcludePattern, ProblemOf<"input-exclude-pattern-invalid">> {
+  return compile(pattern).mapErr((flaws) => ({
+    code: "input-exclude-pattern-invalid",
+    pattern,
+    reason: flaws.map(shownFlaw).join(", and "),
+  }));
+}
+
+/**
+ * The refusal for a run that hides private repositories: the pattern is named by its 1-based `position` in the
+ * list and each kind of flaw by a sentence with no character of the pattern in it.
+ */
+export function compileHiddenExcludePattern(
+  pattern: string,
+  position: number,
+): Result<ExcludePattern, ProblemOf<"input-exclude-pattern-invalid-hidden">> {
+  return compile(pattern).mapErr((flaws) => ({
+    code: "input-exclude-pattern-invalid-hidden",
+    position,
+    reason: [...new Set(flaws.map((flaw) => HIDDEN_FLAW[flaw.kind]))].join(", and "),
+  }));
 }
 
 export function excludeMatches(exclude: ExcludePattern, slug: string): boolean {

@@ -155,9 +155,9 @@ describe("run in multi-repo mode (env glue)", () => {
   const FILTER = (input: string, value: string) =>
     `the "${input}" input is "${value}", which is not a supported`;
   const EXCLUDE: Problem = {
-    code: "input-exclude-pattern-invalid",
+    code: "input-exclude-pattern-invalid-hidden",
     position: 1,
-    reason: 'it takes at most one "/", with a non-empty glob on each side of it',
+    reason: "it takes at most one slash, with a glob on each side of it",
   };
   // A row names the whole Problem where that is the rule, and a message fragment where the whole message would restate
   // the input's option list or a library's own wording.
@@ -185,7 +185,7 @@ describe("run in multi-repo mode (env glue)", () => {
     [
       "exclude: svc-[ab",
       { INPUT_REPOS: "*", INPUT_EXCLUDE: "svc-[ab" },
-      'is not a usable glob: its "[" at 4 has no partner, so remove it',
+      'the "exclude" input pattern #1 is not a usable glob: it has a bracket with no partner, so remove it',
     ],
     [
       "exclude: svc-[ab under show quotes the pattern",

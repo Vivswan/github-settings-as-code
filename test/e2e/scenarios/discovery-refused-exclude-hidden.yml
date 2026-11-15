@@ -18,8 +18,8 @@ expect:
   exit_code: 1
   result: failed
   stdout_contains:
-    - 'the "exclude" input pattern #2 (its text is hidden because private-repos is "redact"'
-    - 'is not a usable glob: it takes at most one "/", with a non-empty glob on each side of it'
+    - 'the "exclude" input pattern #2 is not a usable glob: it takes at most one slash, with a glob on each side of it'
+    - "its text is hidden under private-repos: redact"
   leaks_nowhere:
     - disc-vault
   never:
