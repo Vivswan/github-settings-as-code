@@ -149,10 +149,12 @@ const PARSE_ERROR_LINES: Readonly<Record<string, string>> = {
     "two options that cannot be given together were; run the command with --help for its options",
   "commander.invalidArgument":
     "an option or argument was given a value it does not take; run the command with --help for its usage",
-  // A missing subcommand is the usage shown as an error, which commander has already written.
-  "commander.help": "no subcommand was given; the usage above lists them",
+  // The usage shown as an error, which commander has already written: no command at all, or `help` for one it lacks.
+  "commander.help":
+    "no command was given, or the one given is not a command; the usage above lists them",
 };
 
+/** Joins the declared command names as prose lists them: `a, b and c`. */
 const PROSE_LIST = new Intl.ListFormat("en-GB", { type: "conjunction", style: "long" });
 
 /** The root command with the four global flags, every line it prints going through the masked streams. */

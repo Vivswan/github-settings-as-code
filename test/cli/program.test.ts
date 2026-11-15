@@ -397,15 +397,24 @@ describe("the --json failure envelope", () => {
     expect(result.stdout).not.toContain('"result"');
   });
 
-  test("no subcommand under --json: the usage on stderr, an envelope naming the missing subcommand, exit 1", async () => {
-    const result = await cli(["--json"]);
-    expect(result.code).toBe(1);
-    expect(result.stderr).toStartWith("Usage: github-settings-as-code");
-    expect(JSON.parse(result.stdout)).toEqual({
-      result: "failed",
-      problem: "no subcommand was given; the usage above lists them",
-    });
-  });
+  // commander ends both the same way, so one line has to be true of both, and the second argv names what it must not repeat.
+  test.each<[string, string[]]>([
+    ["no subcommand", ["--json"]],
+    ["help for a command the program lacks", ["--json", "help", "o/zq-secret-zq"]],
+  ])(
+    "%s under --json: the usage on stderr, an envelope that says so, exit 1",
+    async (_case, argv) => {
+      const result = await cli(argv);
+      expect(result.code).toBe(1);
+      expect(result.stderr).toStartWith("Usage: github-settings-as-code");
+      expect(result.stderr).not.toContain("zq-secret-zq");
+      expect(JSON.parse(result.stdout)).toEqual({
+        result: "failed",
+        problem:
+          "no command was given, or the one given is not a command; the usage above lists them",
+      });
+    },
+  );
 
   test("a mode command's failed envelope still carries the three outputs", async () => {
     const result = await cli(["render", "--settings-file", SINGLE, "--json"]);

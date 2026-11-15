@@ -322,12 +322,9 @@ const OUTSIDE_THE_RULE = 'export function outside(): never {\n  throw new Error(
 /** A second src/ module beside the fixture of throws: the rule reaches every file under src/, not one. */
 const SECOND_MODULE = "src/cli/inputs.ts";
 
-/**
- * A suppression that silences the plugin, in any form Biome honours: one line, a whole file (`-all`), a range
- * (`-start`); the plugin by name, every plugin, or all of `lint`; alone or anywhere in a list of categories.
- */
+/** A suppression that silences the plugin in any form Biome honours: a line, a file (`-all`), a range (`-start`); `lint` or `lint/plugin...`, with or without a `(value)`, anywhere in the category list. */
 const SUPPRESSION =
-  /biome-ignore(?:-all|-start)?(?:\s+[^\s:]+)*?\s+lint(?:\/plugin(?:\/[^\s:]*)?)?(?=[\s:])/;
+  /biome-ignore(?:-all|-start)?(?:\s+[^\s:]+)*?\s+lint(?:\/plugin(?:\/[^\s:(]*)?)?(?=[\s:(])/;
 
 describe("the never-throw plugin", () => {
   test("flags exactly the throws and rejections outside the rule, and nothing outside src/", () =>
@@ -362,6 +359,10 @@ describe("the never-throw plugin", () => {
     ["// biome-ignore lint: reason", true],
     ["// biome-ignore-all lint: reason", true],
     ["// biome-ignore lint/suspicious/noExplicitAny lint/plugin: reason", true],
+    ["// biome-ignore lint(value): reason", true],
+    ["// biome-ignore lint(plugin): reason", true],
+    ["// biome-ignore lint(): reason", true],
+    ["// biome-ignore lint/plugin(value): reason", true],
     ["// biome-ignore lint/suspicious/noExplicitAny: the lint plugin is not at issue", false],
     ["// biome-ignore format: reason", false],
   ])("the matcher reads %s as silencing the plugin: %p", (comment, silences) => {

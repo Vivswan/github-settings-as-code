@@ -90,6 +90,7 @@ export interface DiscoveryResult {
 /** One filter's verdict on one repository: null keeps it. */
 type SkipReason = Pick<SkipGroup, "reason" | "sealedReason"> | null;
 
+/** A verdict whose reason quotes no repository name, so it needs no sealed form. */
 const skippedBy = (reason: string): SkipReason => ({ reason });
 
 /** Shared by the rule that emits it and formatSkipNotice, which special-cases it for the unarchive-to-manage prose; a literal in one place and not the other would silently drop that guidance. */
