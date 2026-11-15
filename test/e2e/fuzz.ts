@@ -294,9 +294,9 @@ const REQUIRED_CLASSES: Record<WitnessSection, MutationClass[]> = {
 };
 
 /**
- * The engine escapes every Markdown mark in a cell (markdownCell, src/report/markdown.ts), so under HOSTILE_NAMES a
- * broken escape surfaces as a row whose cell count differs from the header's; the GFM grammar reads the table as
- * GitHub renders it, and a malformed delimiter row leaves no table at all.
+ * Under HOSTILE_NAMES a free-text cell (markdownCell, src/report/markdown.ts) whose pipe escape broke shows as a row
+ * narrower or wider than the header, and a malformed delimiter row as no table at all. A cell's inline markup is not
+ * judged here.
  */
 function summaryTableProblems(summary: string, expectedRows: number): string[] {
   const table = reportTree(summary).children.find((node) => node.type === "table");
