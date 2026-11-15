@@ -122,7 +122,9 @@ flowchart TD
   minted -->|the only input a planner accepts| plan
 ```
 
-One rule decides what belongs here: what the settings file alone shows wrong is refused when the file is parsed, naming the key and the fix, never discovered at apply time. A GET-only field, a value outside its enum, a contradictory key pair, two entries naming one label, a secret name GitHub would reject: each is an issue of this phase.
+One rule decides what belongs here: what the settings file alone cheaply shows wrong is refused when the file is parsed, naming the key and the fix. A GET-only field, a value outside its enum, a contradictory key pair, two entries naming one label, a secret name GitHub would reject: each is an issue of this phase.
+
+GitHub's own validation is not rebuilt here. What only GitHub can judge is refused by GitHub at apply, as a failure naming the key and the reason.
 
 The phase runs in check and apply before the first request to that repository's sections, and in render mode on every layer and on the fold. A layer of the fold is judged as its standalone view, the document minus the directives the fold consumes (`_layering`, the file-wide `_undeclared`, and the `_remove` entries); the fold itself is judged whole.
 

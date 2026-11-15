@@ -45,12 +45,13 @@ Never take an exception silently, and never apply a guideline against the eviden
 - Generated artifacts are regenerated, never hand-edited; `.github/scripts/generated.ts` is the one list of them, and whole-file generated TypeScript lives under `src/generated/`.
 - `lib/index.js`, `lib/settings.schema.json`, and `lib/pkg/` are built, never committed on main.
 - Every section read and write goes through `src/sections/contract/requests.ts` (`listAll()`/`listAllEnveloped()` for lists, `call()`/`failureFor()` for errors), so the permission policy holds. The raw client is for callers outside the sections' reach: `src/github/` and `src/discovery/`, which the layering keeps off the sections import, and `src/report/issue-report.ts`, whose warnings land in public logs and so never carry the slug, the path, or the API message the shared renderer embeds.
-- What can be known wrong from the settings file or the run inputs alone is refused when the file is parsed, naming the key and the fix, never discovered at apply time:
+- What is cheaply known wrong from the settings file or the run inputs alone is refused when the file is parsed, naming the key and the fix:
   GET-only fields, enum violations, contradictory key pairs, unknown keys in a closed GitHub shape.
+  GitHub's own validation is not rebuilt to refuse earlier: what only GitHub can judge, GitHub refuses at apply.
+  A late refusal is fine, a silent one is not. Every refusal, early or late, names the key, the target, and the reason.
   Healing is for state this action owns: GitHub's repository settings, which apply converges toward what the settings file declares;
   the settings file and the inputs are the user's and are never healed from GitHub or repaired by the parser.
   Open passthrough shapes keep unknown keys and note them at check time when GitHub does not echo them back.
-  Exception, by the owner's decision: a secret-scanning custom pattern's regular-expression dialect is GitHub's to judge, because a second implementation of it can only drift and refuse what GitHub accepts; the tool passes GitHub's refusal through at apply.
 - The import layering of `src/` is declared in `architecture.yml`; a new cross-layer import is a deliberate edit to that file.
 - A type a section module exposes is exported from its home module, or the bundled declarations cannot reach it and the package-smoke job fails.
 - New sections and endpoints ship with e2e scenarios.

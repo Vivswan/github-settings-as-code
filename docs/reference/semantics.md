@@ -26,7 +26,9 @@ Three examples of a declared state no operation of the plan reaches: a `workflow
 
 ## What the parse refuses
 
-Anything the settings file alone proves wrong is refused when the file is parsed, before any section reads or writes the repository, with an error naming the key and the fix. That covers a field GitHub reports but cannot set, a value outside its enum, two keys that contradict each other, and an unknown key inside a closed shape.
+Anything the settings file alone cheaply proves wrong is refused when the file is parsed, before any section reads or writes the repository, with an error naming the key and the fix. That covers a field GitHub reports but cannot set, a value outside its enum, two keys that contradict each other, and an unknown key inside a closed shape.
+
+GitHub's own validation is not rebuilt to refuse earlier. What only GitHub can judge, such as the regular-expression dialect of a secret scanning custom pattern, GitHub refuses at apply, and the failure names the key, the repository, and GitHub's reason.
 
 Under `private-repos: redact` the multi-repo flow reads and validates the shared `defaults-file` first when one is given, then resolves the visibility of every target but the workflow's own repository, before it reads any target's settings file. Then it reads each target's file: a remote target's from that repository, a `repos-dir` target's from the local directory. Those are the flow's own reads; no section has run for that target.
 
@@ -91,7 +93,7 @@ Rate limits (429 and secondary limits) and transient 5xx or network failures are
 
 ## The preflight barrier
 
-Before the barrier, and in every mode, document validation runs every check that reads only the settings file: the section shapes, unknown keys, two entries naming one resource, a malformed deploy key. A settings-file mistake fails the run before any section runs, with the collected issues listed by path, so nothing is written.
+Before the barrier, and in every mode, document validation runs every check that reads only the settings file: the section shapes, unknown keys, two entries naming one resource, a malformed deploy key. A mistake those checks find fails the run before any section runs, with the collected issues listed by path, so nothing is written.
 
 A section's shape reports every mistake it finds in that one run, like a compiler: its cross-field rules (a contradictory pair, a key that belongs elsewhere) are judged even when a sibling value already failed its type.
 A rule meeting such a raw sibling reports what it can and passes over what it cannot read; the sibling's own type issue is the report there.
