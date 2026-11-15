@@ -3,8 +3,7 @@
  * gives, the assets it carries before anything publishes, and the rename that hands it to the publish stage.
  */
 
-import { spawnSync } from "node:child_process";
-import { capture, run } from "../lib/workflow-step.js";
+import { command, STREAMED } from "../lib/command.js";
 import { FULL_SHA } from "./git.js";
 import { versionTagOf } from "./tags.js";
 
@@ -23,23 +22,23 @@ interface SourceView {
   targetCommitish: string;
 }
 
-/** The release named `marker` as gh reads it, or null when none carries the name. Any other failure ends the step with gh's stderr and status. */
-function viewSource(marker: string): SourceView | null {
-  const view = spawnSync("gh", ["release", "view", marker, "--json", "isDraft,targetCommitish"], {
-    stdio: ["inherit", "pipe", "pipe"],
-    encoding: "utf8",
-  });
-  if (view.error !== undefined) {
-    throw view.error;
-  }
+/** A gh call that failed, its stderr already on the step's log: the step ends with gh's own status. */
+export interface GhFailed {
+  ghStatus: number;
+}
 
+/** The release named `marker` as gh reads it, or null when none carries the name; any other failure is gh's. */
+function viewSource(marker: string): SourceView | GhFailed | null {
+  const view = command(["gh", "release", "view", marker, "--json", "isDraft,targetCommitish"], {
+    stdin: "inherit",
+  });
   if (view.status !== 0 && view.stderr.trim() === NO_RELEASE) {
     return null;
   }
 
   if (view.status !== 0) {
     process.stderr.write(view.stderr);
-    process.exit(view.status ?? 1);
+    return { ghStatus: view.status };
   }
 
   return JSON.parse(view.stdout) as SourceView;
@@ -52,7 +51,9 @@ function viewSource(marker: string): SourceView | null {
  *   a published release        -> refused: release-please published the marker's name itself (`"draft": false`)
  *   a target that is no sha    -> refused before a checkout or a tag could name it (a branch name on a hand-made draft)
  */
-export function resolveSource(marker: string): { sha: string; tag: string } | { refusal: string } {
+export function resolveSource(
+  marker: string,
+): { sha: string; tag: string } | { refusal: string } | GhFailed {
   const tag = versionTagOf(marker);
   const view = viewSource(marker);
   if (view === null) {
@@ -61,6 +62,10 @@ export function resolveSource(marker: string): { sha: string; tag: string } | { 
         `no release is named ${marker}.\n` +
         `If the release ${tag} exists, the hook already renamed the draft and this job is done: do not re-run it.`,
     };
+  }
+
+  if ("ghStatus" in view) {
+    return view;
   }
 
   if (!view.isDraft) {
@@ -82,10 +87,15 @@ export function resolveSource(marker: string): { sha: string; tag: string } | { 
 
 /** The draft's asset names beside attestation.json, sorted. Publishing freezes the asset list, so an incomplete one
  * must stop while the release is still a draft (v2.0.0 shipped assetless exactly this way). */
-export function releaseAssets(marker: string): string[] {
-  const view = JSON.parse(capture(["gh", "release", "view", marker, "--json", "assets"])) as {
-    assets: { name: string }[];
-  };
+export function releaseAssets(marker: string): string[] | GhFailed {
+  const gh = command(["gh", "release", "view", marker, "--json", "assets"], {
+    stdin: "inherit",
+    stderr: "inherit",
+  });
+  if (gh.status !== 0) {
+    return { ghStatus: gh.status };
+  }
+  const view = JSON.parse(gh.stdout) as { assets: { name: string }[] };
   return view.assets
     .map((asset) => asset.name)
     .filter((name) => name !== "attestation.json")
@@ -94,6 +104,9 @@ export function releaseAssets(marker: string): string[] {
 
 /** The draft takes the version tag as its tag and title and stays a draft, which the managed publish stage publishes.
  * --verify-tag refuses a tag origin lacks: GitHub would create it on main, at the draft's target, on publish. */
-export function renameDraft(marker: string, tag: string): void {
-  run(["gh", "release", "edit", marker, "--tag", tag, "--title", tag, "--verify-tag"]);
+export function renameDraft(marker: string, tag: string): number {
+  return command(
+    ["gh", "release", "edit", marker, "--tag", tag, "--title", tag, "--verify-tag"],
+    STREAMED,
+  ).status;
 }

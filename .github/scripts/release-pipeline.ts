@@ -67,6 +67,9 @@ export const COMMANDS: Record<string, Handler> = {
   },
   "resolve-source": () => {
     const source = resolveSource(requireEnv("MARKER"));
+    if ("ghStatus" in source) {
+      return source.ghStatus;
+    }
     if ("refusal" in source) {
       console.log(`::error::${source.refusal}`);
       return 1;
@@ -78,6 +81,9 @@ export const COMMANDS: Record<string, Handler> = {
   "verify-assets": () => {
     const marker = requireEnv("MARKER");
     const assets = releaseAssets(marker);
+    if ("ghStatus" in assets) {
+      return assets.ghStatus;
+    }
     if (assets.join(" ") !== RELEASE_ASSETS.join(" ")) {
       console.log(
         `::error::release ${marker} carries assets [${assets.join(" ")}], expected ` +
@@ -89,7 +95,10 @@ export const COMMANDS: Record<string, Handler> = {
   "rename-draft": () => {
     const marker = requireEnv("MARKER");
     const tag = requireEnv("TAG");
-    renameDraft(marker, tag);
+    const failed = renameDraft(marker, tag);
+    if (failed !== 0) {
+      return failed;
+    }
     console.error(`release ${marker} now carries tag ${tag} and title ${tag}`);
   },
 };
