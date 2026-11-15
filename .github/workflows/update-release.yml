@@ -9,14 +9,14 @@
 #   package        -> the marker held to the merge commit, then its packaged commit found or minted under its build tag, vX.Y.Z minted there ONCE, latest moved forward
 #   retag-major    -> move vX there (forward only), then upload bundle and schema to the draft (a published release freezes its assets)
 #   verify-release -> confirm the draft's assets, then give the draft vX.Y.Z as its tag and title; the managed publish stage attests and publishes it
-#   publish-npm    -> publish the library build to npm as the stable version through trusted publishing, once the assets check out
 #
 # Only ci.yml reaches this workflow, with the tag release-please just cut from its own merged PR, so a hand-edited
-# manifest never mints a tag. A rerun of the failed jobs converges: a version npm already holds is skipped, and once a
-# NEWER release shipped, the major stays on it. The draft answers to source-vX.Y.Z until the rename, to vX.Y.Z after.
+# manifest never mints a tag. A rerun of the failed jobs converges: once a NEWER release shipped, the major stays on
+# it. The draft answers to source-vX.Y.Z until the rename, to vX.Y.Z after. The npm publish is not this hook's: the
+# managed ci.yml's npm-latest leg runs after it, through the platform's npm module.
 
 # Finishing a dead run by hand (prefer re-running its FAILED jobs: a hand run has no attestation.json, a packaged
-# commit it mints carries no run trailer, and only the workflow's OIDC identity may publish to npm). NEVER rename or
+# commit it mints carries no run trailer, and only ci.yml's OIDC identity may publish to npm). NEVER rename or
 # publish the draft before `package` has minted the tag: GitHub creates a missing vX.Y.Z on main when the draft publishes.
 #   git checkout <merge sha>                    (the draft's target commitish)
 #   bun install --frozen-lockfile --ignore-scripts && bun run build
@@ -45,7 +45,6 @@ jobs:
       # file against its parent, so the default token needs no workflows grant. Also what makes the draft visible to gh.
       contents: write
     outputs:
-      source-sha: ${{ steps.source.outputs.sha }}
       tag: ${{ steps.source.outputs.tag }}
     steps:
       # The run's own head, on main, supplies the script that resolves the release; the checkout below replaces it
@@ -54,8 +53,7 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           install: "false"
-      # The release's identity is the draft's target commitish, never this run's GITHUB_SHA: the managed head-check
-      # lets a newer push's run recover an older merge's pending release.
+      # The release's identity is the draft's target commitish, where release-please recorded the merge commit it cut.
       - name: Resolve the release's merge commit from the draft
         id: source
         env:
@@ -120,53 +118,3 @@ jobs:
           MARKER: ${{ inputs.tag }}
           TAG: ${{ needs.package-release.outputs.tag }}
         run: bun .github/scripts/release-pipeline.ts rename-draft
-
-  # Publishes the release's library build to npm as the stable version through trusted publishing: no registry
-  # token, provenance attached by npm. Behind verify-release, so nothing reaches the registry before the draft's
-  # assets check out. Until the owner's one-time npm setup exists this job fails and holds the draft; a rerun converges.
-  # package-release sits in needs for its outputs alone (a job reads outputs only from its direct dependencies).
-  # The lane is the one update-release-pr.yml's publish-next takes: the registry has no compare-and-set, so the two
-  # publishers never overlap and a verdict still holds when its publish lands; queue: max keeps every queued
-  # publish (a lane drops all but one pending job by default).
-  publish-npm:
-    if: github.repository == 'Vivswan/github-settings-as-code'
-    needs: [package-release, verify-release]
-    concurrency:
-      group: npm-publish
-      queue: max
-      cancel-in-progress: false
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.package-release.outputs.source-sha }}
-          persist-credentials: false
-      - uses: ./.github/actions/setup
-      # registry-url writes the .npmrc npm publishes through; with no
-      # NODE_AUTH_TOKEN the action leaves a placeholder there, which npm's
-      # OIDC exchange replaces.
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24
-          registry-url: https://registry.npmjs.org
-      # Trusted publishing (and its provenance) exists from npm 11.5.1 on; an
-      # older bundled npm is upgraded once, then held to the floor.
-      - name: Require an npm that publishes through OIDC
-        run: bun .github/scripts/release-pipeline.ts npm-floor
-      # The tarball's files list names the schema beside lib/pkg/.
-      - name: Build the library
-        run: bun run build:schema && bun run build:lib
-      # The verdict holds the built package.json to the tag and reads the registry: a version already there (a rerun) or
-      # a latest that is a newer release (an older release's job rerun after it) publishes nothing, so no release displaces
-      # a newer one from latest (the first publish's placeholder or pre-release there is taken over). GITHUB_SHA sets only
-      # the SLSA predicate's source digest; the sigstore certificate still carries this run's own head, so a release
-      # recovered by a newer push's run has provenance naming two commits.
-      - name: Publish the release to npm
-        env:
-          TAG: ${{ needs.package-release.outputs.tag }}
-          SOURCE_SHA: ${{ needs.package-release.outputs.source-sha }}
-        run: GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts npm-publish stable

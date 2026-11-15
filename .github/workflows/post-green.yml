@@ -1,8 +1,7 @@
 # Repo-owned, never overwritten by sync; ci.yml calls it after the all-green gate, before the release, with the
 # judged sha. Main runs are keyed by sha (ci.yml's concurrency group), so runs for different shas never coalesce
 # and successive merges can overlap; the job here reconciles current state and stays idempotent. Its one job packages
-# the judged commit; the npm pre-release publishes from update-release-pr.yml, on release-please's refresh of the
-# release PR, not from every green push.
+# the judged commit.
 
 name: Post Green
 

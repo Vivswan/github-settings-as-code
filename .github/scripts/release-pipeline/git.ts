@@ -35,7 +35,7 @@ function gitFailure(args: string[], error: unknown): Error {
 
 /** git's stdout, or null when it exited 1 (a "no" from --verify, --is-ancestor, and the like); any other failure
  * is thrown, so a repository git cannot read never passes for one without the object. */
-export function gitOrNo(cwd: string, ...args: string[]): string | null {
+function gitOrNo(cwd: string, ...args: string[]): string | null {
   try {
     return execFileSync("git", args, {
       cwd,
@@ -101,7 +101,7 @@ export function isAncestor(cwd: string, ancestor: string, descendant: string): b
 }
 
 /** The commit a name resolves to, or null for none (a sha the checkout lacks, or a short one naming several objects). */
-export function resolveCommit(cwd: string, name: string): string | null {
+function resolveCommit(cwd: string, name: string): string | null {
   return gitOrNo(cwd, "rev-parse", "--verify", "--quiet", `${name}^{commit}`);
 }
 
@@ -114,24 +114,13 @@ export function manifestVersionAt(cwd: string, treeish: string): string {
   return String(manifest["."]);
 }
 
-export interface MainPosition {
-  /** Commits reachable from it along first parents: one more per merge to main, whatever a merged PR's branch held. */
-  count: number;
-
-  /** Its committer date in UTC, YYYYMMDD. */
-  date: string;
-}
-
-/** Refused on a shallow checkout: it would count to its boundary and mint a truncated count, so the version would
- * sort below ones minted from the full history for older commits. */
-export function mainPosition(cwd: string, sourceSha: string): MainPosition {
+/** The commits reachable from `sourceSha` along first parents: one more per merge to main, whatever a merged PR's
+ * branch held. Refused on a shallow checkout, which would count to its boundary and name a build tag by a truncated count. */
+export function mainCount(cwd: string, sourceSha: string): number {
   if (git(cwd, "rev-parse", "--is-shallow-repository") === "true") {
     throw new Error(
-      "the pre-release version needs the full history (fetch-depth: 0) and this checkout is shallow: the count of commits under the source would stop at the shallow boundary.",
+      "a build tag's position needs the full history (fetch-depth: 0) and this checkout is shallow: the count of commits under the source would stop at the shallow boundary.",
     );
   }
-  const count = Number(git(cwd, "rev-list", "--count", "--first-parent", sourceSha));
-  const committed = Number(git(cwd, "show", "-s", "--format=%ct", sourceSha));
-  const date = new Date(committed * 1000).toISOString().slice(0, 10).replaceAll("-", "");
-  return { count, date };
+  return Number(git(cwd, "rev-list", "--count", "--first-parent", sourceSha));
 }

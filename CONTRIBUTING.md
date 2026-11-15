@@ -69,8 +69,13 @@ The in-process property tests run their fixed seeds plus fresh ones on every run
 - release-please tags each release merge on `main` as `source-vX.Y.Z` and finds its previous release by that tag. It is a marker, not a pin: `main` carries no built action. The `source-tags` ruleset freezes it.
 - Every ref a `uses:` pin can name (`vX.Y.Z`, the moving major, `latest`) points at a packaged commit: the child of one `main` commit, carrying its tree plus the built bundle, schema, and library; every green push mints one under a `build/<position>.<sha7>` tag, the ten newest kept. The tags up to v2.0.0 point at `main` commits from when `main` committed the bundle.
 
-Three repo-owned hooks share the ref work; the git topology lives in `.github/scripts/release-pipeline/tags.ts` and its test.
+Two repo-owned hooks share the ref work; the git topology lives in `.github/scripts/release-pipeline/tags.ts` and its test.
 
 - `post-green.yml` packages every green push under its `build/` tag, prunes the window, and moves `latest`.
-- `update-release.yml` checks the release's `source-vX.Y.Z` marker, mints `vX.Y.Z`, and moves the major. It packages the merge commit when no build tag does, and reconciles `latest` and the build-tag window as post-green does. It then renames the draft release to `vX.Y.Z` and, last, publishes the release to npm.
-- `update-release-pr.yml` publishes the `next` pre-release to npm.
+- `update-release.yml` checks the release's `source-vX.Y.Z` marker, mints `vX.Y.Z`, and moves the major. It packages the merge commit when no build tag does, and reconciles `latest` and the build-tag window as post-green does. It then renames the draft release to `vX.Y.Z`.
+
+The npm package publishes through the platform's npm module, not from a hook: ci.yml's `npm-next` leg on a release-PR refresh, its `npm-latest` leg after `update-release.yml` and before the release goes live.
+
+- `.github/actions/npm-build/action.yml` is this repository's part: it builds the schema and the library and drops `scripts.prepare` from the published manifest.
+- The version, the verdicts, the publish, and the dist-tags are the module's ([Versioning](docs/reference/library.md#versioning)).
+- `update-release-pr.yml` is the platform's no-op starter.

@@ -11,7 +11,9 @@ import { ROOT } from "../root.js";
 import { withTempDir } from "../temp-dir.js";
 import { runStep } from "./step-fixture.js";
 
-test.each<[name: string, script: string, args: string[], stderr: string]>([
+test.each<
+  [name: string, script: string, args: string[], stderr: string, env?: Record<string, string>]
+>([
   ["no subcommand", "post-green-steps", [], "post-green-steps: no command given; expected probe\n"],
   [
     "a mistyped subcommand",
@@ -28,16 +30,20 @@ test.each<[name: string, script: string, args: string[], stderr: string]>([
   [
     "a handler's thrown refusal",
     "release-pipeline",
-    ["npm-publish", "canary"],
-    'release-pipeline npm-publish: npm-publish takes the channel, next or stable, not "canary"\n',
+    ["resolve-source"],
+    'release-pipeline resolve-source: the handed tag "v2.1.0" is not source-vX.Y.Z, the name release-please gives a release here; refusing to derive a version tag from it.\n' +
+      'Fix release-please-config.json by PR: "include-component-in-tag": true at the top, "component": "source" on package ".".\n',
+    { MARKER: "v2.1.0" },
   ],
-])("%s ends the step red with the refusal alone on stderr", (_name, script, args, stderr) =>
-  withTempDir("entry-", (dir) => {
-    expect(runStep(script, ROOT, join(dir, "runner-temp"), {}, ...args)).toEqual({
-      stdout: "",
-      stderr,
-      status: 1,
-      outputs: [],
-    });
-  }),
+])(
+  "%s ends the step red with the refusal alone on stderr",
+  (_name, script, args, stderr, env = {}) =>
+    withTempDir("entry-", (dir) => {
+      expect(runStep(script, ROOT, join(dir, "runner-temp"), env, ...args)).toEqual({
+        stdout: "",
+        stderr,
+        status: 1,
+        outputs: [],
+      });
+    }),
 );

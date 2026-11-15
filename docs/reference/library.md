@@ -12,7 +12,7 @@ Three ways in, one package:
 
 ```bash
 npm install @vivswan/github-settings-as-code          # the released version (npm dist-tag latest)
-npm install @vivswan/github-settings-as-code@next     # the pre-release of the main commit the release PR was last refreshed on
+npm install @vivswan/github-settings-as-code@next     # the newest build: the pre-release of main, or the release right after one
 npm install github:Vivswan/github-settings-as-code#<packaged sha>   # one packaged commit: a build tag's or a release tag's
 ```
 
@@ -420,13 +420,15 @@ The package's `bin` entries, `github-settings-as-code` and `gsac`, run the same 
 
 The package and the action share one version, the one in `.release-please-manifest.json` (release-please rewrites `package.json` from it), so a settings file that validates on the library validates on the action of the same version. An added name is a minor (a `feat` commit), and a rename or a removal is a major, listed in the [upgrading guide](../upgrading/README.md).
 
-| npm dist-tag | Publishes on                                                                                                                                                     | Version                                                                                            | Install                                                             |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| `next`       | Every refresh of the release PR: release-please creates or refreshes it when a releasable commit (feat, fix, perf, revert, or a breaking marker) lands on `main` | The manifest's next patch, then `-main.<count>.<date>.g<sha7>`: `2.0.1-main.446.20260913.g95d081d` | `npm install @vivswan/github-settings-as-code@next`                 |
-| `latest`     | Every release cut                                                                                                                                                | The released version: `2.1.0`                                                                      | `npm install @vivswan/github-settings-as-code`                      |
-| none         | Every green push to `main` (`build/<position>.<sha7>`, the ten newest kept) and every release tag                                                                | The commit itself                                                                                  | `npm install github:Vivswan/github-settings-as-code#<packaged sha>` |
+| npm dist-tag | Publishes on                                                                                                                                                     | Version                                                                                                                | Install                                                             |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `next`       | Every refresh of the release PR: release-please creates or refreshes it when a releasable commit (feat, fix, perf, revert, or a breaking marker) lands on `main` | The next patch after `package.json`'s version, then `-main.<count>.<date>.g<sha7>`: `2.0.1-main.446.20260913.g95d081d` | `npm install @vivswan/github-settings-as-code@next`                 |
+| `latest`     | Every release cut                                                                                                                                                | The released version: `2.1.0`                                                                                          | `npm install @vivswan/github-settings-as-code`                      |
+| none         | Every green push to `main` (`build/<position>.<sha7>`, the ten newest kept) and every release tag                                                                | The commit itself                                                                                                      | `npm install github:Vivswan/github-settings-as-code#<packaged sha>` |
 
 The npm dist-tag `latest` is not the git tag `latest`: the git tag names the packaged commit of the newest `main` commit (every green push moves it forward, never back), the dist-tag names the newest release on the registry.
+
+Both channels publish through the platform's npm module, from the `npm-next` and `npm-latest` legs of `ci.yml`; its [guide](https://github.com/Vivswan/repo-platform/blob/stable/docs/modules/npm.md) owns every verdict. The rules a consumer sees:
 
 - A pre-release version is a pure function of its main commit. `2.0.1-main.446.20260913.g95d081d` reads:
   - `446`: the commits reachable from it along first parents (`git rev-list --count --first-parent <sha>`), one more per merge to main.
@@ -434,26 +436,26 @@ The npm dist-tag `latest` is not the git tag `latest`: the git tag names the pac
   - `g95d081d`: its short sha; the `g` marks a git object id, as `git describe` writes it (a bare all-digit sha such as `0123456` would be read by npm as the number 123456).
   - Two runs for one commit mint the same string, whenever they run.
 - A pre-release sorts above the last release and below the next one whatever its bump, and later commits on main sort later: npm compares the count first, and it grows by one with each merge (the date is for the reader; two merges on one day share it).
-  - A release merge refreshes no release PR, so it publishes no pre-release: after `2.1.0` publishes, `next` names the last pre-release below it (`2.0.1-main...`) until the first releasable commit of the next cycle opens the next release PR, whose refresh publishes `2.1.1-main.<count>.<date>.g<sha7>`. `npm install ...@next` resolves the dist-tag whatever the ordering.
-- `next` moves only to a descendant. The pre-publish guard resolves the sha in every published `-main.` version in its full checkout and places it against this run's commit:
-  - a pre-release whose source is a strict descendant: this run is stale and publishes nothing, whatever order the two runs finished in;
-  - a sha the checkout cannot resolve, or one that is neither ancestor nor descendant (off main): ignored, with a notice in the log;
-  - the run's own version already on the registry (a rerun of that commit): publishes nothing.
-- A `next` build appears when release-please creates or refreshes the release PR, and nowhere else: the release hook `update-release-pr.yml` publishes in the run that refreshed it, from the commit the refresh was built on.
+- `next` is never older than `latest`: a release moves `next` to itself.
+  - After `2.1.0` publishes, `next` names `2.1.0` until the first releasable commit of the next cycle refreshes the release PR, which publishes `2.1.1-main.<count>.<date>.g<sha7>`.
+  - A release moves `next` only when it is the release `latest` names and `next` is missing or below it. A rerun of a release that a newer one overtook, or one that finds `next` already ahead, leaves `next` where it is.
+- `next` never moves back. The publish reads the registry's record before the build and again before the publish:
+  - the version already on the registry (a rerun): publishes nothing, and fails when `next` is behind that version;
+  - a release on the registry at or above this version: the run fails, since the `package.json` on `main` is behind the registry;
+  - `next` already at or above this commit's version (a stale run): publishes nothing, with a notice.
+- A `next` build appears when release-please creates or refreshes the release PR, and on no other push: the `npm-next` leg publishes in the run that refreshed it, from that run's commit.
   - release-please refreshes the PR only when the release notes change (`always-update` is off in `release-please-config.json`), which a releasable commit does: feat, fix, perf, revert, or a breaking marker. A merge of hidden types alone (chore, build, ci, test, docs, refactor) refreshes nothing and publishes nothing, a dependency bump under `build(deps)` included.
-  - No check of the repository's own decides a publish. The guard above is a safety on registry state: a rerun of the run, or a stale retry after a newer commit published, publishes nothing, so `next` never moves backward; a published source the checkout cannot place is ignored with a notice.
-- `latest` publishes nothing when the version is already there or when the dist-tag `latest` names a newer release (a rerun of an older release's job); it does not look at `next`.
-- Every registry read misses the CDN cache (a cached packument lags a publish by up to 300 s), and a `next` publish job holds the npm-publish lane until the registry's record shows its version (up to 15 reads, 20 s apart: three of the first five publishes were still unreadable after 80 s, so the hold covers that lag with margin).
-  - So the run after it judges against a record that carries it. Neither dist-tag moves backward on what its run could see.
-- The residual window: a publish the registry has not made readable within that bound is invisible to the run after it, which then moves `next` back to its older version.
-  - That run fails with an error naming the drift once the record shows both versions; it warns if its own never shows within the bound.
-  - It passes without naming the drift if its own shows while the overtaken one still does not.
-  - A rerun of it publishes nothing and passes, and the next release-PR refresh moves `next` forward again (its commit descends from every published one).
-  - No run moves a dist-tag by hand: trusted publishing authenticates `npm publish` alone, not `npm dist-tag add`.
-- Both channels publish through npm trusted publishing (OIDC) from this repository's CI workflow: no registry token exists anywhere.
+  - No check of the repository's own decides a publish.
+- `latest` never moves back: a release publishes nothing when its version is already there (a rerun, which fails when `latest` is behind that version), and fails before any publish when the registry holds a release at or above it.
+- The channel alone decides the dist-tag, and registry.npmjs.org is the one registry. The publish refuses a `package.json` that is `private: true` or sets `tag`, `publishConfig.tag`, or a registry in `publishConfig`, and an npm configuration (an `.npmrc` or a variable) with a non-default tag or another registry.
+- Every registry read misses the CDN cache (a cached packument lags a publish by up to 300 s), and a publish ends only once the registry's record shows its version: a version that does not show within two minutes fails the job, and a rerun finds what did land.
+  - Both channels share one lane, so one publish at a time judges and lands.
+- Both channels publish through npm trusted publishing (OIDC): no registry token exists anywhere.
   - npm attaches a provenance attestation to every version CI publishes, which `npm audit signatures` checks in a project that installs it.
 - The `github:` form installs a packaged commit's `lib/pkg/`, built from its source commit by the same workflow run that built its `lib/index.js`, with no registry and no build step on your side.
 
 ## Publishing setup
 
-The package exists on the registry and every version on it is CI-published through the trusted publisher: GitHub Actions, owner `Vivswan`, repository `github-settings-as-code`, workflow `ci.yml` (the caller of both hooks), no environment. Publishing access is "Require two-factor authentication and disallow tokens", so the workflow's OIDC identity is the only thing that can publish; nothing is published by hand.
+The package exists on the registry and every version on it is CI-published through the trusted publisher: GitHub Actions, owner `Vivswan`, repository `github-settings-as-code`, workflow `ci.yml` (the caller of both npm legs), no environment. It allows "npm publish" and "Allow npm dist-tag": a release moves `next` with `npm dist-tag add`.
+
+Publishing access is "Require two-factor authentication and disallow tokens", so the workflow's OIDC identity is the only thing that can publish; nothing is published by hand.

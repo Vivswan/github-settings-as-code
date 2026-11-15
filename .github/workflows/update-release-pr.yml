@@ -1,13 +1,8 @@
-# The release-PR hook of the release pipeline: repo-owned (a generated-once starter, never overwritten by sync),
-# called by the managed ci.yml whenever release-please creates or refreshes the release PR, independently of any
-# release cut. Inside a called workflow github.sha is the caller's: the push to main that release-please judged, the
-# head the refresh was built on. Its one job, publish-next, publishes that commit's library pre-release to npm under
-# the `next` dist-tag.
+# Regenerate here the files that must ride in the release commit, on the release PR's branch.
 #
-# The publish lives here because release-please's refresh IS the releasable signal: release-please-config.json leaves
-# always-update off, so the PR is refreshed only when the release notes change, i.e. when a commit of a type its
-# changelog shows lands (feat, fix, perf, revert, or a breaking marker). A push of hidden types alone (test, docs, chore,
-# build, ci, refactor) refreshes nothing and publishes nothing; no check of this repository's own decides a publish.
+# This file is repo-owned, seeded once by the fleet sync and never overwritten by a later sync.
+#
+# Releases never wait on this path. A push made with github.token does not re-trigger the PR's checks.
 
 name: Update Release PR
 
@@ -15,83 +10,30 @@ on:
   workflow_call:
     inputs:
       pr_number:
-        description: The release PR's number, declared because the managed ci.yml passes it and read by no job here
+        description: The release PR's number
         required: true
         type: string
       head_branch:
-        description: The release PR's head branch, declared because the managed ci.yml passes it and read by no job here
+        description: The release PR's head branch (push updates back to it)
         required: true
         type: string
 
 jobs:
-  # The npm-publish lane exists because the registry has no compare-and-set: the pre-publish guard's read still holds
-  # when its publish lands, whichever publisher (this job, update-release.yml's) took the lane before it.
-  #   no ACTIONS_ID_TOKEN_REQUEST_URL -> the caller granted none (a fork, a ceiling change); step one skips the rest
-  #   shared lane                     -> update-release.yml's publish takes the same lane; no caller holds it
-  #   queue: max                      -> a lane keeps ONE pending job by default; a dropped job fails the call
-  #   guard reads the record          -> the lane serializes but does not order; GitHub promises no queue order
-  #   confirm holds the lane          -> a job ends once the registry shows its publish, so the next holder's guard sees it
-  # No permissions key: a job asking above the caller's ceiling fails the whole call, so the OIDC
-  # grant arrives by inheritance from the id-token: write the managed ci.yml gives this call, and a ceiling without
-  # it reaches step one's warn-and-skip instead of a validation failure.
-  publish-next:
-    if: github.repository == 'Vivswan/github-settings-as-code'
-    concurrency:
-      group: npm-publish
-      queue: max
-      cancel-in-progress: false
+  update-release-pr:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
+    permissions:
+      contents: write # enough to push regenerated files back to the PR branch
     steps:
-      - name: Check the caller grants an OIDC token
-        id: oidc
-        run: |
-          if [ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ]; then
-            echo "proceed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::this run has no OIDC token (the update-release-pr call in the managed ci.yml grants no id-token: write);" \
-              "the library pre-release was not published to npm." \
-              "Add id-token: write to that call's permissions in Vivswan/repo-platform to publish every release-PR refresh to @next."
-            echo "proceed=false" >> "$GITHUB_OUTPUT"
-          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: steps.oidc.outputs.proceed == 'true'
         with:
-          ref: ${{ github.sha }}
-          # The version counts main's commits under this one and the guard places published sources by ancestry; a shallow checkout can do neither.
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: ./.github/actions/setup
-        if: steps.oidc.outputs.proceed == 'true'
-      # registry-url writes the .npmrc npm publishes through; with no
-      # NODE_AUTH_TOKEN the action leaves a placeholder there, which npm's
-      # OIDC exchange replaces.
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        if: steps.oidc.outputs.proceed == 'true'
-        with:
-          node-version: 24
-          registry-url: https://registry.npmjs.org
-      # Trusted publishing (and its provenance) exists from npm 11.5.1 on; an
-      # older bundled npm is upgraded once, then held to the floor.
-      - name: Require an npm that publishes through OIDC
-        if: steps.oidc.outputs.proceed == 'true'
-        run: bun .github/scripts/release-pipeline.ts npm-floor
-      # The tarball's files list names the schema beside lib/pkg/.
-      - name: Build the library
-        if: steps.oidc.outputs.proceed == 'true'
-        run: bun run build:schema && bun run build:lib
-      # The verdict is a safety on npm state, not the decision to publish (the refresh that called this workflow made
-      # that); the publish then holds the lane until the record shows the version, so the next holder's verdict sees it.
-      # GITHUB_SHA is the commit npm's provenance names. npmPublish in .github/scripts/release-pipeline/npm.ts answers:
-      #   the version already on the record (a rerun)                 -> skip
-      #   a pre-release of a descendant on the record (a stale retry)  -> skip, so next never moves back
-      #   a source the checkout cannot place                           -> ignored with a notice
-      #   a registry error                                             -> the job stops instead of publishing blind
-      #   published; the record shows it, or not within the bound      -> a notice, or a warning (a run judged meanwhile may move next back)
-      #   published; next sits behind a descendant's pre-release       -> an error: OIDC authenticates npm publish alone, not npm dist-tag
-      #                                                                   add, so the next release-PR refresh moves it forward instead
-      - name: Publish the pre-release under the next dist-tag
-        if: steps.oidc.outputs.proceed == 'true'
+          ref: ${{ inputs.head_branch }}
+      - name: Update the release PR
         env:
-          SOURCE_SHA: ${{ github.sha }}
-        run: GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts npm-publish next
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          HEAD_BRANCH: ${{ inputs.head_branch }}
+        # Repository-specific release-PR preparation goes here, e.g.:
+        #   ./regenerate-versioned-files.sh
+        #   git commit -am "chore: regenerate for release" && git push origin "$HEAD_BRANCH"
+        run: echo "nothing to add to release PR $PR_NUMBER yet"

@@ -1,0 +1,31 @@
+# This file is repo-owned, seeded once by the fleet sync and never overwritten by a later sync.
+
+name: npm Build
+description: |
+  Builds this repository's npm package for the fleet's publish.
+
+  It runs as the npm-build hook of ci.yml's `npm-next` and `npm-latest` legs, on the judged commit, after the fleet
+  stamped the version into package.json and before it runs `npm publish`. It does not run when there is nothing to
+  publish.
+
+  The tarball is package.json's `files`: the library build in lib/pkg/ and the schema beside it, both built here
+  and never committed on main.
+
+  The contract and examples are the fleet's docs/modules/npm.md.
+
+inputs:
+  version:
+    description: The version being published, already in package.json; nothing built here carries it, so no step reads it
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/setup
+    - name: Build the schema and the library
+      shell: bash
+      run: bun run build:schema && bun run build:lib
+    # prepare installs lefthook, a devDependency the tarball does not carry, and `npm publish` would run it here.
+    - name: Drop the preparation script from the published manifest
+      shell: bash
+      run: npm pkg delete scripts.prepare

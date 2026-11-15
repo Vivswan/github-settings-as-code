@@ -46,8 +46,7 @@ function viewSource(marker: string): SourceView | null {
 }
 
 /** The version tag the draft's marker name gives, and the draft's target commitish, where release-please records the
- * merge commit. The release's identity is read from the draft and never from the run's own sha, so a newer push's
- * run can recover an older merge's pending release.
+ * merge commit. The release's identity is read from the draft, never from the run's own sha.
  *
  *   no release under the name  -> refused, the state the hook's rename leaves: nothing proceeds under the new name
  *   a published release        -> refused: release-please published the marker's name itself (`"draft": false`)

@@ -3,6 +3,7 @@ modules:
   - bun
   - site
   - release-please
+  - npm
   - pr-title
   - fuzzer
   - nightly
