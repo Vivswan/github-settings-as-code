@@ -1,3 +1,9 @@
+/**
+ * The grammar used to read the output back is micromark's, which is weaker than GitHub's cmark-gfm on two points:
+ * it does not decode a character reference inside an angle autolink's target, and it does not autolink an uppercase scheme or a
+ * host without a dot. The rows for those two cases therefore assert the emitted text, not the parsed tree.
+ */
+
 import { describe, expect, test } from "bun:test";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { gfmAutolinkLiteralFromMarkdown } from "mdast-util-gfm-autolink-literal";
@@ -7,6 +13,7 @@ import { toString as nodeText } from "mdast-util-to-string";
 import { gfmAutolinkLiteral } from "micromark-extension-gfm-autolink-literal";
 import { gfmStrikethrough } from "micromark-extension-gfm-strikethrough";
 import { gfmTable } from "micromark-extension-gfm-table";
+import { visitParents } from "unist-util-visit-parents";
 import { markdownCell, markdownText, renderTable } from "../../src/report/markdown.js";
 
 /** The content of a parsed node as type and value pairs: what the GFM grammar reads, positions aside. */
@@ -33,10 +40,13 @@ function rendered(node: { children: ReadonlyArray<{ type: string }> }): unknown 
   return { text: nodeText(node), marks };
 }
 
-/** Every link target under a node, in order. */
-function hrefs(node: { type: string; url?: string; children?: readonly unknown[] }): string[] {
-  const own = node.type === "link" && node.url !== undefined ? [node.url] : [];
-  return [...own, ...(node.children ?? []).flatMap((child) => hrefs(child as never))];
+/** Every link target under a tree, in order. */
+function hrefs(tree: ReturnType<typeof parse>): string[] {
+  const found: string[] = [];
+  visitParents(tree, "link", (link) => {
+    found.push(link.url);
+  });
+  return found;
 }
 
 /** Free text that GitHub would read as markup, a second cell, or a second line. */
@@ -129,6 +139,39 @@ describe("free text in a summary renders literally under the GFM grammar", () =>
         [href],
         `see ${text} now`,
       ]);
+    },
+  );
+
+  test.each([
+    [
+      "a named character reference in a URL",
+      "see https://example.com/hook?a=1&amp;b=2 now",
+      "see https\\://example.com/hook?a=1\\&amp;b=2 now",
+    ],
+    [
+      "a numeric character reference in a URL",
+      "https://example.com/hook?x=&#124;y",
+      "https\\://example.com/hook?x=\\&#124;y",
+    ],
+    [
+      "a numeric character reference padded past the CommonMark digit limit, which GitHub still decodes",
+      "https://example.com/hook?x=&#00000124;y",
+      "https\\://example.com/hook?x=\\&#00000124;y",
+    ],
+    [
+      "an uppercase scheme and a host without a dot",
+      "HTTPS://localhost/_admin_/end",
+      "HTTPS\\://localhost/\\_admin\\_/end",
+    ],
+    [
+      "an uppercase scheme with a port and brackets",
+      "HTTP://localhost:8080/hook?x=[1]",
+      "HTTP\\://localhost:8080/hook?x=\\[1]",
+    ],
+  ])(
+    "%s is written unlinkable: GitHub decodes a reference inside a link target and keeps a backslash inside a URL it links itself, so either would point somewhere the text does not say",
+    (_what, text, emitted) => {
+      expect([markdownCell(text), markdownText(text)]).toEqual([emitted, emitted]);
     },
   );
 });

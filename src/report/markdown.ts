@@ -8,6 +8,7 @@
  *                      tableFault() before rendering, tableBody() when the committed page is read back
  */
 
+import { decodeHTMLStrict } from "entities";
 import {
   gfmAutolinkLiteralFromMarkdown,
   gfmAutolinkLiteralToMarkdown,
@@ -17,9 +18,19 @@ import { gfmTableToMarkdown } from "mdast-util-gfm-table";
 import { toMarkdown } from "mdast-util-to-markdown";
 import { err, ok, type Result } from "neverthrow";
 
+/** The autolink extension's own rules for what the serializer must escape so text is not linked by accident. */
+const AUTOLINK = gfmAutolinkLiteralToMarkdown();
+
+/** Its colon rule covers lowercase `http:/` and `https:/` alone; GitHub also links an uppercase scheme, so the same rule is repeated for any letter before the colon. */
+const ANY_SCHEME = {
+  unsafe: (AUTOLINK.unsafe ?? [])
+    .filter((pattern) => pattern.character === ":")
+    .map((pattern) => ({ ...pattern, before: "[A-Za-z]" })),
+};
+
 /** The GFM constructs GitHub reads beyond CommonMark that free text could open: a table cell boundary, a strikethrough, and a bare URL or address. */
 const GFM = {
-  extensions: [gfmTableToMarkdown(), gfmStrikethroughToMarkdown(), gfmAutolinkLiteralToMarkdown()],
+  extensions: [gfmTableToMarkdown(), gfmStrikethroughToMarkdown(), AUTOLINK, ANY_SCHEME],
 };
 
 /** The same, with every link in the `[text](target)` form: a table escapes a pipe as `\|`, which an angle autolink would show percent-encoded in its text. */
@@ -28,19 +39,33 @@ const GFM_PIPED = { ...GFM, resourceLink: true };
 /** The grammar's own finder of the bare URLs and addresses GitHub links in text: it turns each into a link node, so the serializer writes the target whole and escapes nothing inside it. */
 const LINK_BARE_URLS = gfmAutolinkLiteralFromMarkdown().transforms?.[0];
 
-/** The serializer ends a non-empty node with one line feed; a line break in the text becomes a space first, so the text stays on its row or its line. */
-function serialized(type: "tableCell" | "paragraph", text: string): string {
+/** The content of one line of running text, as the serializer takes it. */
+type Phrasing = Extract<Parameters<typeof toMarkdown>[0], { type: "paragraph" }>["children"];
+
+/**
+ * `value` as text and links: each bare URL the grammar finds is a link to itself. One holding a character
+ * reference (`&amp;`) stays text, since GitHub decodes a reference inside a link target and the link would
+ * point at another URL than the one written.
+ */
+function linked(value: string): Phrasing {
   if (LINK_BARE_URLS === undefined) {
     throw new Error(
       "BUG: mdast-util-gfm-autolink-literal exposes no transform that finds bare URLs in text",
     );
   }
 
+  const children: Phrasing = [{ type: "text", value }];
+  LINK_BARE_URLS({ type: "root", children: [{ type: "paragraph", children }] });
+  return children.flatMap((node) =>
+    node.type === "link" && decodeHTMLStrict(node.url) !== node.url ? node.children : [node],
+  );
+}
+
+/** The serializer ends a non-empty node with one line feed; a line break in the text becomes a space first, so the text stays on its row or its line. */
+function serialized(type: "tableCell" | "paragraph", text: string): string {
   const value = text.replace(/\r\n?|\n/g, " ");
-  const line = { type: "paragraph" as const, children: [{ type: "text" as const, value }] };
-  LINK_BARE_URLS({ type: "root", children: [line] });
   const piped = type === "tableCell" && value.includes("|");
-  return toMarkdown({ type, children: line.children }, piped ? GFM_PIPED : GFM).replace(/\n$/, "");
+  return toMarkdown({ type, children: linked(value) }, piped ? GFM_PIPED : GFM).replace(/\n$/, "");
 }
 
 /** `text` as the content of one table cell that renders literally: markup characters, pipes, and backslashes escaped. */

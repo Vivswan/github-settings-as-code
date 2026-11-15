@@ -21,9 +21,11 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fromMarkdown } from "mdast-util-from-markdown";
+import { gfmAutolinkLiteralFromMarkdown } from "mdast-util-gfm-autolink-literal";
 import { gfmStrikethroughFromMarkdown } from "mdast-util-gfm-strikethrough";
 import { gfmTableFromMarkdown } from "mdast-util-gfm-table";
 import { toString as nodeText } from "mdast-util-to-string";
+import { gfmAutolinkLiteral } from "micromark-extension-gfm-autolink-literal";
 import { gfmStrikethrough } from "micromark-extension-gfm-strikethrough";
 import { gfmTable } from "micromark-extension-gfm-table";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
@@ -701,8 +703,12 @@ export function stripDebugLines(text: string): string {
  */
 function renderedSummary(summary: string): string {
   const tree = fromMarkdown(summary, {
-    extensions: [gfmTable(), gfmStrikethrough()],
-    mdastExtensions: [gfmTableFromMarkdown(), gfmStrikethroughFromMarkdown()],
+    extensions: [gfmTable(), gfmStrikethrough(), gfmAutolinkLiteral()],
+    mdastExtensions: [
+      gfmTableFromMarkdown(),
+      gfmStrikethroughFromMarkdown(),
+      gfmAutolinkLiteralFromMarkdown(),
+    ],
   });
   return tree.children
     .map((block) =>

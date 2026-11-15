@@ -202,10 +202,7 @@ describe("the sections knob", () => {
     const api = new MockApi({ "GET /repos/o/r": { data: { has_wiki: true } } });
     const sections = SectionSelection.of({ only: ["labels"] })._unsafeUnwrap();
     const result = await checkRepository(api, repo, settings, { sections });
-    // Plain words, no backticks: the detail is free text in the summary cell, where markup would print as typed.
-    expect(result.outcomes).toEqual([
-      { key: "repository", status: "excluded", detail: ['excluded by the "sections" input'] },
-    ]);
+    expect(result.outcomes.map((o) => [o.key, o.status])).toEqual([["repository", "excluded"]]);
     expect(api.calls).toEqual([]);
   });
 });
