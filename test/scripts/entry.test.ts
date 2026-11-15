@@ -16,21 +16,21 @@ test.each<
 >([
   [
     "no subcommand",
-    "auto-format-steps",
+    "nightly-steps",
     [],
-    "auto-format-steps: no command given; expected format | push\n",
+    "nightly-steps: no command given; expected probe-schema | probe-types | refresh-openapi\n",
   ],
   [
     "a mistyped subcommand",
-    "auto-format-steps",
-    ["lint"],
-    'auto-format-steps: unknown command "lint"; expected format | push\n',
+    "nightly-steps",
+    ["probe"],
+    'nightly-steps: unknown command "probe"; expected probe-schema | probe-types | refresh-openapi\n',
   ],
   [
     "a subcommand that is a key every object inherits",
-    "auto-format-steps",
+    "nightly-steps",
     ["constructor"],
-    'auto-format-steps: unknown command "constructor"; expected format | push\n',
+    'nightly-steps: unknown command "constructor"; expected probe-schema | probe-types | refresh-openapi\n',
   ],
   [
     "a handler's thrown refusal",
