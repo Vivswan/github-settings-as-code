@@ -3,14 +3,10 @@ import { err } from "neverthrow";
 import picomatch from "picomatch";
 import {
   compileExcludePattern,
-  compileHiddenExcludePattern,
-  type ExcludeFlaw,
   type ExcludePattern,
   excludeMatches,
-  HIDDEN_FLAW,
 } from "../../src/discovery/exclude-pattern.js";
 import { describeProblem } from "../../src/problem.js";
-import { expectSealed } from "../io/leak-sweep.js";
 
 /** The compiled form of a pattern the test knows to be valid; a refusal is a test bug, named. */
 const compiled = (pattern: string): ExcludePattern =>
@@ -364,68 +360,4 @@ describe("compileExcludePattern", () => {
       }
     },
   );
-});
-
-// A hidden refusal is printed where a private name must not be, and a flaw sentence that quotes a fragment of the pattern (a class, a stray character) prints part of it.
-describe("compileHiddenExcludePattern", () => {
-  /** A pattern with only this kind of flaw and the fragments its shown sentence quotes; null where no pattern the grammar's earlier steps let through reaches the kind. */
-  const SPECIMENS: Record<ExcludeFlaw["kind"], readonly [string, [string, ...string[]]] | null> = {
-    whitespace: [" secret-repo ", ["secret-repo"]],
-    strays: ["secret-repo$", ["secret-repo", '"$"']],
-    "unpaired-brackets": ["secret-repo[", ["secret-repo", '"["']],
-    "misplaced-marks": ["secret!repo", ["secret!repo", '"!" at 6']],
-    "class-operators": ["secret-[a*]repo", ["secret-", '"[a*]"', '"[a]"']],
-    "class-empty": ["secret-repo[]", ["secret-repo", '"[]"']],
-    "class-hyphen": ["[0a--]secret-repo", ["secret-repo", '"[0a--]"', '"[0a-]"']],
-    "class-backwards": ["[secret-repo]", ["[secret-repo]", '"t-r"']],
-    "dot-slash": ["./secret-repo", ["secret-repo"]],
-    "star-run": ["secret-repo**", ["secret-repo"]],
-    "too-long": [`secret-repo${"a".repeat(65_536)}`, ["secret-repo", "65547"]],
-    empty: ["", ['""']],
-    "bare-negation": ["!", ['pattern "!"']],
-    "slash-sides": ["o/secret-repo/", ["secret-repo"]],
-    "dots-only": ["secret-repo/..", ["secret-repo", '".."']],
-    "not-a-glob": null,
-    "engine-refused": null,
-  };
-  const kinds = Object.keys(SPECIMENS) as ExcludeFlaw["kind"][];
-
-  test.each(
-    kinds.flatMap((kind) => {
-      const specimen = SPECIMENS[kind];
-      return specimen === null ? [] : [[kind, ...specimen] as const];
-    }),
-  )(
-    "a %s flaw is told by its kind and its place, with no fragment of the pattern",
-    (kind, pattern, needles) => {
-      const hidden = compileHiddenExcludePattern(pattern, 7, true)._unsafeUnwrapErr();
-      const shown = compileExcludePattern(pattern)._unsafeUnwrapErr();
-      expect(hidden).toEqual({
-        code: "input-exclude-pattern-invalid-hidden",
-        position: 7,
-        reason: HIDDEN_FLAW[kind],
-        revealable: true,
-      });
-      expectSealed(
-        { refusal: describeProblem(hidden) },
-        { refusal: describeProblem(shown) },
-        needles,
-      );
-    },
-  );
-
-  // The reported input: two flaws in one class, where the shown refusal quotes the class twice and both suggested rewrites.
-  test("a class with two flaws is told by both kinds, quoting neither the class nor a rewrite of it", () => {
-    const hidden = compileHiddenExcludePattern("[secret-repo?]", 1, true)._unsafeUnwrapErr();
-    const shown = compileExcludePattern("[secret-repo?]")._unsafeUnwrapErr();
-    expect(hidden.reason).toBe(
-      `${HIDDEN_FLAW["class-operators"]}, and ${HIDDEN_FLAW["class-backwards"]}`,
-    );
-    expectSealed({ refusal: describeProblem(hidden) }, { refusal: describeProblem(shown) }, [
-      '"[secret-repo?]"',
-      '"[secret-repo]"',
-      '"t-r"',
-      "secre",
-    ]);
-  });
 });

@@ -4,7 +4,6 @@ import {
   type ConfigEnv,
   DEFAULT_API_VERSION,
   DEFAULT_DISCOVERY_FILTERS,
-  describeProblem,
   type Problem,
   parseConfig,
   type RunConfig,
@@ -12,7 +11,6 @@ import {
   SectionSelection,
 } from "../../src/index.js";
 import { INPUT_DECLS, type InputName } from "../../src/internal.js";
-import { expectSealed } from "../io/leak-sweep.js";
 
 /** Parse a step's inputs (unset ones read as empty, as the runner reports them) under `env`, as the action's face does. */
 function parse(inputs: Partial<Record<InputName, string>>, env: ConfigEnv = {}) {
@@ -266,7 +264,7 @@ describe("the mode input", () => {
   });
 
   test("a repository that is not an owner/name slug is rejected with the value", () => {
-    expect(rejection(single({ repository: "not-a-slug", "private-repos": "show" }))).toEqual({
+    expect(rejection(single({ repository: "not-a-slug" }))).toEqual({
       code: "input-repository-not-slug",
       value: "not-a-slug",
     });
@@ -556,70 +554,6 @@ describe("mode: snapshot", () => {
   });
 });
 
-// A refusal is printed before any repository is listed, so under private-repos: redact it cannot know a quoted entry is public.
-describe("a refused entry that may name a private repository", () => {
-  const AT_MOST_ONE_SLASH = 'it takes at most one "/", with a non-empty glob on each side of it';
-  test.each<[string, Partial<Record<InputName, string>>, Problem, Problem, [string, ...string[]]]>([
-    [
-      "an exclude pattern is named by its place in the list",
-      { repos: "*", exclude: "tmp-*, e2e-owner/secret-repo/" },
-      {
-        code: "input-exclude-pattern-invalid-hidden",
-        position: 2,
-        reason: "it takes at most one slash, with a glob on each side of it",
-        revealable: true,
-      },
-      {
-        code: "input-exclude-pattern-invalid",
-        pattern: "e2e-owner/secret-repo/",
-        reason: AT_MOST_ONE_SLASH,
-      },
-      ["secret-repo"],
-    ],
-    [
-      "a repos entry is named by its place in the list",
-      { repos: "o/a, secret-repo, o/vault, O/Vault, secret-repo" },
-      {
-        code: "repos-input-invalid-entries-hidden",
-        invalid: [2, 5],
-        duplicated: [4],
-        revealable: true,
-      },
-      {
-        code: "repos-input-invalid-entries",
-        invalid: ["secret-repo"],
-        duplicated: ["O/Vault"],
-      },
-      ["secret-repo", "O/Vault"],
-    ],
-    [
-      "the repository input is not quoted",
-      { repository: "secret-repo" },
-      { code: "input-repository-not-slug-hidden", revealable: true },
-      { code: "input-repository-not-slug", value: "secret-repo" },
-      ["secret-repo"],
-    ],
-  ])("%s under redact, quoted under show", (_case, inputs, hidden, shown, needles) => {
-    const env = { GITHUB_REPOSITORY: "admin/fleet" };
-    const refused = rejection(parse({ token: "t", ...inputs }, env));
-    const quoted = rejection(parse({ token: "t", "private-repos": "show", ...inputs }, env));
-    expect(refused).toEqual(hidden);
-    expect(quoted).toEqual(shown);
-    expectSealed(
-      { refusal: describeProblem(refused) },
-      { refusal: describeProblem(quoted) },
-      needles,
-    );
-  });
-
-  test("the workflow's own repository is quoted: it is never hidden, so its text names nothing private", () => {
-    expect(rejection(parse({ token: "t" }, { GITHUB_REPOSITORY: "not-a-slug" }))).toEqual({
-      code: "input-repository-not-slug",
-      value: "not-a-slug",
-    });
-  });
-});
-
 describe("target inputs the file system cannot change", () => {
   // Before, these were refused inside resolveTargets after the repos directory was read, so an unreadable directory
   // reported itself and hid the input error; parseConfig never touches the directory.
@@ -633,12 +567,7 @@ describe("target inputs the file system cannot change", () => {
     [
       "a repos list with a bad entry",
       { repos: "o/r,not-a-slug" },
-      {
-        code: "repos-input-invalid-entries-hidden",
-        invalid: [2],
-        duplicated: [],
-        revealable: true,
-      },
+      { code: "repos-input-invalid-entries", invalid: ["not-a-slug"], duplicated: [] },
     ],
     [
       "discovery filters beside explicit repos",

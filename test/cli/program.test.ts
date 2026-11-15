@@ -11,7 +11,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CliHost } from "../../src/cli/commands.js";
-import { main, parseErrorLine } from "../../src/cli/program.js";
+import { main } from "../../src/cli/program.js";
 import { type ConfigEnv, type GitHubClient, sectionGrant, sectionModule } from "../../src/index.js";
 import { MockApi } from "../mock-api.js";
 import { ROOT } from "../root.js";
@@ -66,10 +66,7 @@ describe("check and apply", () => {
 
   test("a config problem fails before any API call, the action's line on stderr", async () => {
     const api = new MockApi({});
-    const result = await cli(
-      ["check", "--repository", "not-a-slug", "--private-repos", "show", "--token", TOKEN],
-      api,
-    );
+    const result = await cli(["check", "--repository", "not-a-slug", "--token", TOKEN], api);
     expect(result.code).toBe(1);
     expect(api.calls).toHaveLength(0);
     expect(result.stderr).toBe(
@@ -80,102 +77,8 @@ describe("check and apply", () => {
     );
   });
 
-  // commander wraps an argument parser's refusal with the value it refused, which under the default policy may name a private repository.
-  test.each<[string, string[]]>([
-    ["on stderr", []],
-    ["in the --json problem", ["--json"]],
-    ["ahead of a --help that would end the parse without a refusal", ["--help"]],
-  ])(
-    "a repeated single-value flag is refused without its value, %s",
-    async (_where, extraFlags) => {
-      const api = new MockApi({});
-      const result = await cli(
-        [
-          "check",
-          "--repository",
-          "o/public",
-          "--repository",
-          "o/zq-secret-zq",
-          "--token",
-          TOKEN,
-          ...extraFlags,
-        ],
-        api,
-      );
-      expect(result.code).toBe(1);
-      expect(api.calls).toHaveLength(0);
-      expect(result.stderr).toBe(
-        "error: --repository takes one value and was given more than once\n",
-      );
-      expect(result.stdout).toBe(
-        extraFlags[0] === "--json"
-          ? '{"result":"failed","problem":"--repository takes one value and was given more than once"}\n'
-          : "",
-      );
-    },
-  );
-
-  // commander words its parse errors around what was typed, and a typed argument may name a private repository.
-  describe("a parse error is worded from its kind and the program's own names, never from argv", () => {
-    const COMMANDS = "check, apply, render, snapshot, init, validate and permissions";
-    test.each<[string, string[], string]>([
-      [
-        "an argument a command does not take",
-        ["check", "o/zq-secret-zq"],
-        "the command was given more arguments than it takes; run it with --help for its usage",
-      ],
-      [
-        "an argument after the option terminator",
-        ["check", "--repository", "o/a", "--", "--repository", "o/zq-secret-zq"],
-        "the command was given more arguments than it takes; run it with --help for its usage",
-      ],
-      [
-        "a second argument to a file command",
-        ["validate", "a.yml", "o/zq-secret-zq"],
-        "the command was given more arguments than it takes; run it with --help for its usage",
-      ],
-      [
-        "an unknown option carrying a value",
-        ["check", "--target=o/zq-secret-zq"],
-        "an option is not one the command takes; run it with --help for its options",
-      ],
-      [
-        "an unknown command",
-        ["o/zq-secret-zq"],
-        `the first argument is not a command; the commands are ${COMMANDS}`,
-      ],
-    ])("%s", async (_case, argv, line) => {
-      const plain = await cli(argv, new MockApi({}));
-      expect(plain).toEqual({ code: 1, stdout: "", stderr: `error: ${line}\n` });
-      // Ahead of the command, so the row with a terminator still reads it as the flag.
-      const json = await cli(["--json", ...argv], new MockApi({}));
-      expect(json).toEqual({
-        code: 1,
-        stdout: `${JSON.stringify({ result: "failed", problem: line })}\n`,
-        stderr: `error: ${line}\n`,
-      });
-    });
-
-    test("an error code the table does not hold gets the generic line, so a code commander adds later cannot leak", () => {
-      expect(parseErrorLine("commander.addedLater", "o/zq-secret-zq", ["check"])).toBe(
-        "the command line could not be read; run with --help for the usage",
-      );
-    });
-  });
-
-  // init has no --private-repos flag, so a refusal that tells its reader to set one sends them to an unknown option.
-  test("init hides a refused --repository and names no flag it does not accept", async () => {
-    const result = await cli(
-      ["init", "--repository", "zq-secret-zq", "--token", TOKEN],
-      new MockApi({}),
-    );
-    expect(result.code).toBe(1);
-    expect(result.stderr).toBe(
-      'error: cannot target a repository: the "repository" input is not an owner/name slug (its text is hidden, since it may name a private repository). Set it (--repository on the command line) to a value like "octocat/hello-world"\n',
-    );
-  });
-
   test.each<[string, string[], ConfigEnv]>([
+    ["the parser's unknown-option message", ["check", `--tokn=${TOKEN}`], { GITHUB_TOKEN: TOKEN }],
     [
       "a file-only command's argument, --json",
       ["validate", TOKEN, "--json"],
@@ -183,14 +86,10 @@ describe("check and apply", () => {
     ],
     [
       "a config error echoing a padded --token",
-      ["check", "--token", ` ${TOKEN} `, "--repository", TOKEN, "--private-repos", "show"],
+      ["check", "--token", ` ${TOKEN} `, "--repository", TOKEN],
       {},
     ],
-    [
-      "a config error echoing --token=",
-      ["check", `--token=${TOKEN}`, "--repository", TOKEN, "--private-repos", "show"],
-      {},
-    ],
+    ["a config error echoing --token=", ["check", `--token=${TOKEN}`, "--repository", TOKEN], {}],
   ])("the token is masked in %s", async (_where, args, env) => {
     // Every writer goes through one boundary registered before the parse, so
     // a message no code of ours words (the parser's, a path echo) is masked too.
@@ -384,7 +283,7 @@ describe("the --json failure envelope", () => {
     expect(result.stderr).toStartWith("error: ");
     expect(result.stdout).toBe(
       envelope
-        ? `${JSON.stringify({ result: "failed", problem: "the command is missing an argument it requires; run it with --help for its usage" })}\n`
+        ? `${JSON.stringify({ result: "failed", problem: "missing required argument 'file'" })}\n`
         : "",
     );
   });
@@ -397,24 +296,15 @@ describe("the --json failure envelope", () => {
     expect(result.stdout).not.toContain('"result"');
   });
 
-  // commander ends both the same way, so one line has to be true of both, and the second argv names what it must not repeat.
-  test.each<[string, string[]]>([
-    ["no subcommand", ["--json"]],
-    ["help for a command the program lacks", ["--json", "help", "o/zq-secret-zq"]],
-  ])(
-    "%s under --json: the usage on stderr, an envelope that says so, exit 1",
-    async (_case, argv) => {
-      const result = await cli(argv);
-      expect(result.code).toBe(1);
-      expect(result.stderr).toStartWith("Usage: github-settings-as-code");
-      expect(result.stderr).not.toContain("zq-secret-zq");
-      expect(JSON.parse(result.stdout)).toEqual({
-        result: "failed",
-        problem:
-          "no command was given, or the one given is not a command; the usage above lists them",
-      });
-    },
-  );
+  test("no subcommand under --json: the usage on stderr, an envelope naming the missing subcommand, exit 1", async () => {
+    const result = await cli(["--json"]);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toStartWith("Usage: github-settings-as-code");
+    expect(JSON.parse(result.stdout)).toEqual({
+      result: "failed",
+      problem: "no subcommand was given; the usage above lists them",
+    });
+  });
 
   test("a mode command's failed envelope still carries the three outputs", async () => {
     const result = await cli(["render", "--settings-file", SINGLE, "--json"]);
