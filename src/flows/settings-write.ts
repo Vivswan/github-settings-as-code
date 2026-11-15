@@ -14,6 +14,7 @@ import { randomBytes } from "node:crypto";
 import {
   closeSync,
   fchmodSync,
+  fsyncSync,
   lstatSync,
   mkdirSync,
   openSync,
@@ -200,6 +201,8 @@ export function writeReplacing(path: string, text: string): Result<void, string>
       fchmodSync(fd, mode);
     }
     writeFileSync(fd, text);
+    // Flushed before the rename: a power loss after it could otherwise leave an empty file under the destination's name.
+    fsyncSync(fd);
     closeSync(fd);
     fd = undefined;
     renameSync(staging, path);
