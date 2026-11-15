@@ -13,7 +13,7 @@ import { fromMarkdown } from "mdast-util-from-markdown";
 import { gfmTableFromMarkdown } from "mdast-util-gfm-table";
 import { gfmTable } from "micromark-extension-gfm-table";
 import { visitParents } from "unist-util-visit-parents";
-import { CST, Lexer } from "yaml";
+import { Parser } from "yaml";
 import { formatted } from "./biome-format.js";
 
 /** Which comment syntax a file's markers use: a complete `<!-- -->` comment, or a whole-line YAML `#` comment. */
@@ -54,26 +54,35 @@ function markerText(kind: "BEGIN" | "END", name: string): string {
   return `${kind} GENERATED: ${name}${hint}`;
 }
 
-/** The tokens the lexer emits as signals, which hold no byte of the source. */
-const LEXER_SIGNALS: ReadonlySet<string> = new Set([CST.DOCUMENT, CST.FLOW_END, CST.SCALAR]);
-
 // Every comment the YAML lexer sees, so a marker-shaped line inside a block or quoted scalar
-// (content, not a comment) can never pass as a marker. The token after the scalar signal is the
-// scalar's own source, whatever it opens with.
+// (content, not a comment) can never pass as a marker.
 function yamlComments(text: string): Array<{ offset: number; source: string }> {
   const comments: Array<{ offset: number; source: string }> = [];
-  let offset = 0;
-  let scalar = false;
-  for (const source of new Lexer().lex(text)) {
-    if (LEXER_SIGNALS.has(source)) {
-      scalar = source === CST.SCALAR;
-      continue;
+  const walk = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        walk(item);
+      }
+      return;
     }
-    if (!scalar && CST.tokenType(source) === "comment") {
-      comments.push({ offset, source });
+    if (typeof node !== "object" || node === null) {
+      return;
     }
-    scalar = false;
-    offset += source.length;
+    const token = node as { type?: unknown; offset?: unknown; source?: unknown };
+    if (
+      token.type === "comment" &&
+      typeof token.offset === "number" &&
+      typeof token.source === "string"
+    ) {
+      comments.push({ offset: token.offset, source: token.source });
+      return;
+    }
+    for (const value of Object.values(node)) {
+      walk(value);
+    }
+  };
+  for (const token of new Parser().parse(text)) {
+    walk(token);
   }
   return comments;
 }
