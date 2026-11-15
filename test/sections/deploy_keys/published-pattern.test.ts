@@ -1,7 +1,7 @@
 /**
  * The published schema's `pattern` for a deploy key line and parsePublicKey are two spellings of one acceptance
- * rule: the pattern is a hand-spelled grammar for editors, the parse judges the blob with zod's base64 check.
- * Nothing but this test ties them, so a zod release that moved its base64 semantics, or an edit to one spelling
+ * rule: the pattern is a hand-spelled grammar for editors, the parse judges the blob with zod's base64 check and
+ * the canonical decode. Nothing but this test ties them, so a zod release that moved its base64 semantics, or an edit to one spelling
  * alone, would otherwise split what an editor accepts from what the run accepts. The corpus is the keys the e2e
  * generators declare, a seeded sweep over every axis of the line, and the hand-made invalid set the pattern must
  * refuse the way the parse does: bad padding, a non-base64 character, an empty blob, a wrong length class.
@@ -38,7 +38,11 @@ const NOT_BASE64 = /^the key's second field is not base64/;
 const FEWER_FIELDS = /^the key has fewer than two fields/;
 const ODD_WHITESPACE = /^the key contains whitespace other than a space or tab/;
 
+const NOT_CANONICAL = /^the key's second field is not canonical base64/;
+
 const INVALID: readonly [what: string, key: string, reason: RegExp][] = [
+  ["padding bits set, one =", "ssh-ed25519 AAB=", NOT_CANONICAL],
+  ["padding bits set, two =", "ssh-ed25519 AB==", NOT_CANONICAL],
   ["bad padding, = after a full quartet", "ssh-ed25519 AAAAAAAA=", NOT_BASE64],
   ["bad padding, three =", "ssh-ed25519 AAAAA===", NOT_BASE64],
   ["bad padding, = mid-way", "ssh-ed25519 AAAA=AAA", NOT_BASE64],

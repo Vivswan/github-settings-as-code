@@ -25,6 +25,9 @@ coverage:
         GitHub may strip or rewrite comments on storage - a raw-string compare would replace the key
         on every apply.
       - >-
+        A declared blob that is not canonical base64 (padding bits set, which no ssh-keygen output
+        has) could never equal the stored key, so it is refused when the settings file is read.
+      - >-
         A live key under an algorithm the settings file cannot declare is outside the section: GitHub
         accepted it, so it is never matched, deleted, or aborted on, and a snapshot leaves it out with
         a note.

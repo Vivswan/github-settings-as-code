@@ -4,14 +4,16 @@
  * accepting it on 2022-03-15, so a DSA key passing the parse would only fail at the create.
  *
  * PUBLIC_KEY_PATTERN is the published JSON Schema twin of parsePublicKey, which judges the blob with zod's base64
- * check; test/sections/deploy_keys/published-pattern.test.ts holds the two to one verdict. Its base64 grammar is
- * spelled by hand because zod's own published pattern opens with `^$|`, which no larger pattern can embed.
+ * check and then the canonical decode; test/sections/deploy_keys/published-pattern.test.ts holds the two to one
+ * verdict. Its base64 grammar is spelled by hand because zod's own published pattern opens with `^$|`, which no
+ * larger pattern can embed.
  * PRIVATE_KEY_FRAMING is assembled at runtime so no source line holds the string a secret scanner flags.
  */
 
 import { err, ok, type Result } from "neverthrow";
 import { z } from "zod";
 import { open, rule } from "../shared/schema-helpers.js";
+import { decodeBase64 } from "../shared/secrets-and-variables/sealed-box.js";
 
 export const PUBLIC_KEY_ALGORITHMS = [
   "ssh-ed25519",
@@ -33,7 +35,10 @@ const LINE_BREAK = /[\r\n]/;
 const ODD_WHITESPACE = /[^\S \t\r\n]/;
 
 const BASE64_QUARTET = "[A-Za-z0-9+/]{4}";
-const BASE64_PATTERN = `(?:${BASE64_QUARTET})*(?:${BASE64_QUARTET}|[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)`;
+
+/** The character before the padding carries 2 data bits before `==` and 4 before `=`; canonical base64 zeroes the rest. */
+const BASE64_CANONICAL_TAIL = "[A-Za-z0-9+/][AQgw]==|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=";
+const BASE64_PATTERN = `(?:${BASE64_QUARTET})*(?:${BASE64_QUARTET}|${BASE64_CANONICAL_TAIL})`;
 const PUBLIC_KEY_PATTERN = new RegExp(
   `^${FIELD_SEPARATOR}*(?:${ALGORITHM_ALTERNATION})${FIELD_SEPARATOR}+${BASE64_PATTERN}(?:${FIELD_SEPARATOR}[^\\r\\n]*)?$`,
 );
@@ -48,6 +53,9 @@ const HAS_ODD_WHITESPACE =
   "the key contains whitespace other than a space or tab (a non-breaking space, for one)";
 const BLOB_NOT_BASE64 =
   "the key's second field is not base64 (the alphabet A-Z a-z 0-9 + / with = padding to a multiple of four)";
+const BLOB_NOT_CANONICAL =
+  "the key's second field is not canonical base64 (the character before the = padding carries bits past the key's last byte), " +
+  "so it can never equal the key GitHub stores; copy the key again from the .pub file";
 
 /** `material` is the comparable form, algorithm + blob: GitHub may strip or rewrite the comment on storage. */
 export interface PublicKeyMaterial {
@@ -83,6 +91,12 @@ function formRejection(
   return blob === "" ? FEWER_THAN_TWO_FIELDS : undefined;
 }
 
+/** What a side refuses beyond the shared form: undefined is acceptance. */
+interface SideRules {
+  readonly algorithm: (algorithm: string) => string | undefined;
+  readonly blob: (blob: string) => string | undefined;
+}
+
 /** Why the settings file cannot declare a key under `algorithm`, or undefined when it can. */
 function declaredAlgorithmRejection(algorithm: string): string | undefined {
   if (algorithm === "ssh-dss") {
@@ -94,15 +108,26 @@ function declaredAlgorithmRejection(algorithm: string): string | undefined {
 }
 
 /**
+ * Why the settings file cannot declare `blob`, which zod's check already took as base64. Material is compared as
+ * text with what GitHub stores, the canonical encoding, so a blob with padding bits set would never match and the
+ * key would be deleted and recreated on every run.
+ */
+function declaredBlobRejection(blob: string): string | undefined {
+  return decodeBase64(blob).isErr() ? BLOB_NOT_CANONICAL : undefined;
+}
+
+const DECLARED: SideRules = { algorithm: declaredAlgorithmRejection, blob: declaredBlobRejection };
+
+/** GitHub is the authority on what it stored: any algorithm, and the blob as it returned it. */
+const STORED: SideRules = { algorithm: () => undefined, blob: () => undefined };
+
+/**
  * The reading both sides share: the form, the algorithm under the side's rule, then the blob under zod's base64
  * check, which takes the empty string too; the form check ahead of it is what makes an empty blob a missing field.
  * A reason never quotes the input: it may be a pasted PRIVATE key, and a refusal that echoed it would put it in
  * the log and the step summary.
  */
-function parseMaterial(
-  raw: string,
-  algorithmRejection: (algorithm: string) => string | undefined,
-): Result<PublicKeyMaterial, string> {
+function parseMaterial(raw: string, side: SideRules): Result<PublicKeyMaterial, string> {
   const fields = fieldsOf(raw);
   const [algorithm = "", blob = ""] = fields;
 
@@ -111,13 +136,18 @@ function parseMaterial(
     return err(form);
   }
 
-  const refusedAlgorithm = algorithmRejection(algorithm);
+  const refusedAlgorithm = side.algorithm(algorithm);
   if (refusedAlgorithm !== undefined) {
     return err(refusedAlgorithm);
   }
 
   if (!base64Blob.safeParse(blob).success) {
     return err(BLOB_NOT_BASE64);
+  }
+
+  const refusedBlob = side.blob(blob);
+  if (refusedBlob !== undefined) {
+    return err(refusedBlob);
   }
 
   return ok({ algorithm, material: `${algorithm} ${blob}` });
@@ -140,14 +170,14 @@ export function parsePublicKey(raw: string): Result<PublicKeyMaterial, string> {
       `${HAS_LINE_BREAK} (a YAML | block keeps its trailing newline; |- drops it); a public SSH key reads ${PUBLIC_KEY_FORM}`,
     );
   }
-  return parseMaterial(raw, declaredAlgorithmRejection).mapErr(
+  return parseMaterial(raw, DECLARED).mapErr(
     (reason) => `${reason}; a public SSH key reads ${PUBLIC_KEY_FORM}`,
   );
 }
 
 /** The reading of material GitHub returned: the same comparable form, with GitHub the authority on the algorithm. */
 export function parseStoredKey(raw: string): Result<PublicKeyMaterial, string> {
-  return parseMaterial(raw, () => undefined);
+  return parseMaterial(raw, STORED);
 }
 
 /** The check is entry-level so the refusal can name the entry by title; a field-level one would know only the index. */

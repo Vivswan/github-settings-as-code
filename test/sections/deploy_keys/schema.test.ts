@@ -84,8 +84,23 @@ describe("deploy key material GitHub's create would reject is refused at parse, 
         "ecdsa-sha2-nistp256, ecdsa-sha2-nistp384, ecdsa-sha2-nistp521, sk-ssh-ed25519@openssh.com, " +
         "sk-ecdsa-sha2-nistp256@openssh.com",
     ],
+    [
+      // GitHub stores the canonical text, so this blob would never compare equal: a delete and recreate on every run.
+      "a base64 field whose last character carries bits past the key's last byte",
+      "ssh-ed25519 AAB=",
+      'deploy_keys[0].key: entry "ci": the key\'s second field is not canonical base64 (the character before the = ' +
+        "padding carries bits past the key's last byte), so it can never equal the key GitHub stores; " +
+        "copy the key again from the .pub file; a public SSH key reads one line, " +
+        '"<algorithm> <base64> [comment]", with the algorithm one of ssh-ed25519, ssh-rsa, ' +
+        "ecdsa-sha2-nistp256, ecdsa-sha2-nistp384, ecdsa-sha2-nistp521, sk-ssh-ed25519@openssh.com, " +
+        "sk-ecdsa-sha2-nistp256@openssh.com",
+    ],
   ])("%s", (_what, key, expected) => {
     expect(issues([{ title: "ci", key }])).toEqual([expected]);
+  });
+
+  test.each(["AAA=", "AA=="])("the canonical padded blob %s parses", (blob) => {
+    expect(issues([{ title: "ci", key: `ssh-ed25519 ${blob}` }])).toBeNull();
   });
 
   test("an entry without a string title is named as this entry, beside the title's own type issue", () => {
