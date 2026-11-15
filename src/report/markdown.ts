@@ -5,7 +5,7 @@
  * One renderer, two kinds of cell:
  *   step summary    -> free text the caller escapes with markdownCell(), or markdownText() outside a table; never refused
  *   generated page  -> authored prose refused rather than escaped, since an escape would change the author's text:
- *                      tableFault() before rendering, tableBody() when the committed page is read back
+ *                      tableFault() before rendering
  */
 
 import { decodeHTMLStrict } from "entities";
@@ -16,7 +16,6 @@ import {
 import { gfmStrikethroughToMarkdown } from "mdast-util-gfm-strikethrough";
 import { gfmTableToMarkdown } from "mdast-util-gfm-table";
 import { toMarkdown } from "mdast-util-to-markdown";
-import { err, ok, type Result } from "neverthrow";
 
 /** The autolink extension's own rules for what the serializer must escape so text is not linked by accident. */
 const AUTOLINK = gfmAutolinkLiteralToMarkdown();
@@ -102,16 +101,9 @@ export function cellFault(text: string): string | undefined {
     : undefined;
 }
 
-/** The cells of one tableRow() line; a line of another shape yields the wrong count or fails the byte compare. */
-function rowCells(line: string): string[] {
-  return line
-    .split("|")
-    .slice(1, -1)
-    .map((cell) => cell.slice(1, -1));
-}
-
+/** The cell count of a header's first line, a tableRow() line: one more pipe than cells. */
 function columnsOf(header: string): number {
-  return rowCells(header.split("\n")[0] ?? "").length;
+  return (header.split("\n")[0] ?? "").split("|").length - 2;
 }
 
 /** A settings key in a code span: the cell every registry table opens its rows with. */
@@ -124,7 +116,7 @@ const KEY_SPAN = /^`([a-z_]+)`$/;
 export type TableRule = "cells" | "keyed";
 
 /** The first row a TableRule refuses: its index among the rows, and why. */
-export interface RowFault {
+interface RowFault {
   readonly row: number;
   readonly fault: string;
 }
@@ -159,7 +151,7 @@ function rowFault(
 
 /**
  * The one statement of what a table under `header` may hold, naming the first faulty row: a generator throws it
- * before rendering and tableBody() refuses by the same rule, so a test can hold both sides to it.
+ * before rendering.
  */
 export function tableFault(
   header: string,
@@ -171,54 +163,4 @@ export function tableFault(
     return undefined;
   }
   return `row ${faulty.row + 1} of the table ${faulty.fault}: ${tableRow(rows[faulty.row] ?? [])}`;
-}
-
-/** `lines` read back as the rows of a table under `header`, split the way tableRow() joined them, or the first row `rule` refuses. */
-export function tableRows(
-  header: string,
-  lines: readonly string[],
-  rule: TableRule,
-): Result<ReadonlyArray<readonly string[]>, RowFault> {
-  const cells = lines.map(rowCells);
-  const faulty = rowFault(columnsOf(header), cells, rule);
-  return faulty === undefined ? ok(cells) : err(faulty);
-}
-
-/** The key of a row under `rule`: the span the keyed rule found, or the first cell itself. */
-function rowKey(cells: readonly string[], rule: TableRule): string {
-  const first = cells[0] ?? "";
-  return rule === "keyed" ? (KEY_SPAN.exec(first)?.[1] ?? "") : first;
-}
-
-/**
- * The parse of a block region that is one table: the body splits into rows and cells, the rows pass `rule`,
- * and `parseRow` turns each row's cells into the record it renders from (`key` as rowKey() reads it), each
- * refusal naming the row's line below the BEGIN marker. A body not opening with `header` parses to no rows,
- * so the region's byte compare names its first line.
- */
-export function tableBody<Row>(
-  header: string,
-  rule: TableRule,
-  parseRow: (cells: readonly string[], key: string) => Result<Row, string>,
-): (body: string) => Result<Row[], string> {
-  const headerLines = header.split("\n").length;
-  const line = (row: number): number => row + headerLines + 1;
-  return (body) => {
-    if (!(body.startsWith(`\n${header}\n`) && body.endsWith("\n"))) {
-      return ok([]);
-    }
-    return tableRows(header, body.split("\n").slice(headerLines + 1, -1), rule)
-      .mapErr((faulty) => `line ${line(faulty.row)} ${faulty.fault}`)
-      .andThen((rows) => {
-        const parsed: Row[] = [];
-        for (const [index, cells] of rows.entries()) {
-          const row = parseRow(cells, rowKey(cells, rule));
-          if (row.isErr()) {
-            return err(`line ${line(index)} ${row.error}`);
-          }
-          parsed.push(row.value);
-        }
-        return ok(parsed);
-      });
-  };
 }
