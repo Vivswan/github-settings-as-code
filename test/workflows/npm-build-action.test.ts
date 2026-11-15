@@ -20,7 +20,6 @@ const PKG = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
 };
 const RUNS = HOOK.runs.steps.flatMap((step) => (step.run === undefined ? [] : [step.run]));
 
-/** The package scripts the hook runs, as `bun run <name>`. */
 const scriptsRun = RUNS.flatMap((run) => [...run.matchAll(/\bbun run ([\w:-]+)/g)]).map(
   (match) => match[1] ?? "",
 );
