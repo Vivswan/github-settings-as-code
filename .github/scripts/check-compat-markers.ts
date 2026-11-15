@@ -15,6 +15,7 @@
 import { execFileSync } from "node:child_process";
 import { lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { parseArgs } from "node:util";
 import { runMain } from "./lib/entry.js";
 
 /** A trailing slash skips a directory, anything else one exact path; CHANGELOG.md quotes PR titles, so a removal PR's title would outlive the marker it deleted, and the last two spell the syntax to define and test it. */
@@ -224,21 +225,23 @@ function renderTable(
 }
 
 function parseTargetMajor(argv: string[]): number | undefined {
-  const [flag, value, ...rest] = argv;
-  if (flag === undefined) {
+  const usage = `usage: check-compat-markers.ts [--target-major <major>]; got ${JSON.stringify(argv)}`;
+  let majors: string[];
+  try {
+    const options = { "target-major": { type: "string", multiple: true } } as const;
+    majors = parseArgs({ args: argv, options }).values["target-major"] ?? [];
+  } catch {
+    // parseArgs throws on an unknown flag, a positional, or a flag without its value.
+    throw new Error(usage);
+  }
+  if (majors.length === 0) {
     return undefined;
   }
-  if (
-    flag !== "--target-major" ||
-    value === undefined ||
-    !/^(0|[1-9]\d*)$/.test(value) ||
-    rest.length > 0
-  ) {
-    throw new Error(
-      `usage: check-compat-markers.ts [--target-major <major>]; got ${JSON.stringify(argv)}`,
-    );
+  const [major] = majors;
+  if (major === undefined || majors.length > 1 || !/^(0|[1-9]\d*)$/.test(major)) {
+    throw new Error(usage);
   }
-  return Number(value);
+  return Number(major);
 }
 
 if (import.meta.main) {

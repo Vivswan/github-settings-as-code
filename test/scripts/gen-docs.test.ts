@@ -684,6 +684,15 @@ describe("the committed pages", () => {
         .replace(`${definition}\n`, "")
         .replace(`\n${lastHeading}\n`, `\n${definition}\n\n${lastHeading}\n`);
       expect(() => renderPage(path, moved)).toThrow("found 1 and 2");
+      // Without these, a page that only shows the label as code is refused: code is text, never a reference.
+      expect(renderPage(path, before("write the label as `[pat-form]` in prose"))).toContain(
+        "`[pat-form]` in prose",
+      );
+      const fenced = "```markdown\nsee the [form][pat-form]\n[pat-form]: https://example.com\n```";
+      expect(renderPage(path, before(fenced))).toContain(fenced);
+      // A table is split into cells before its code spans are read, as GitHub does: each half is a reference.
+      const row = "| A | B |\n| --- | --- |\n| `[pat-form] | [pat-form]` |";
+      expect(() => renderPage(path, before(row))).toThrow("found 3 and 1");
     },
   );
 
