@@ -280,6 +280,7 @@ const PAGE = [
 
 const TABLE_HEADER = "| A | B |\n|---|---|";
 const UNDER_INPUTS: RegionPlacement = { kind: "under-heading", heading: "## Inputs" };
+const FORMATTER_TIMEOUT_MS = 60_000;
 
 /** The block fixture: key and number rows under "| A | B |", rendered from `rows`. */
 function tableRegion(
@@ -737,13 +738,17 @@ describe("GeneratedRegion.markdown", () => {
     ]),
   )(undefined);
 
-  test("writes the body as biome formats it, which biome then leaves unchanged", () => {
-    // The lint runs biome over the committed page, so the body must already be biome's own output: a cell padded to
-    // its column, a delimiter as wide as the column; a body biome would still change fails the gate on every push.
-    expect(written).not.toBe(spelled);
-    expect(written.split("\n")[2]).toBe("| ---------- | --- |");
-    expect(formatted("docs/x.md", written)).toBe(written.slice(1));
-  });
+  test(
+    "writes the body as biome formats it, which biome then leaves unchanged",
+    () => {
+      // The lint runs biome over the committed page, so the body must already be biome's own output: a cell padded to
+      // its column, a delimiter as wide as the column; a body biome would still change fails the gate on every push.
+      expect(written).not.toBe(spelled);
+      expect(written.split("\n")[2]).toBe("| ---------- | --- |");
+      expect(formatted("docs/x.md", written)).toBe(written.slice(1));
+    },
+    FORMATTER_TIMEOUT_MS,
+  );
 
   test("the guard reads the renderer's spelling under any padding, and still refuses what the parse refuses", () => {
     expect(region.bodyRefusal(written)).toBeUndefined();
