@@ -230,6 +230,17 @@ describe("deltas", () => {
       ).toThrow(/list "items" by "id"/);
     },
   );
+  test("a mixed list pairs a mapping with its live twin whatever the key order: GitHub returns keys in its own order, so text equality would report a missing and an undeclared item on every run", () => {
+    expect(deltas({ list: ["x", { a: 1, b: 2 }] }, { list: [{ b: 2, a: 1 }, "x"] })).toEqual([]);
+    expect(
+      deltas({ list: ["x", { a: 1, b: 2 }, "x"] }, { list: [{ b: 3, a: 1 }, "y", "y"] }),
+    ).toEqual([
+      { kind: "missing", path: ["list"], desired: "x", match: "value" },
+      { kind: "missing", path: ["list"], desired: { a: 1, b: 2 }, match: "value" },
+      { kind: "undeclared", path: ["list"], live: { b: 3, a: 1 }, match: "value" },
+      { kind: "undeclared", path: ["list"], live: "y", match: "value" },
+    ]);
+  });
 });
 
 describe("replace-style writes", () => {

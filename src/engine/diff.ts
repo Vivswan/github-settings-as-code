@@ -9,6 +9,7 @@
  * omits into an `omitted` delta, because that write would remove it.
  */
 
+import { isDeepStrictEqual } from "node:util";
 import { err, type Result } from "neverthrow";
 import { isPlainObject, isZeroValue } from "../plain-data.js";
 import { type SectionFailure, sectionFailure } from "../sections/contract/errors.js";
@@ -387,18 +388,16 @@ function walkByValue(
   path: readonly PathStep[],
   out: Delta[],
 ): void {
-  const desiredSet = new Set(desired.map((v) => JSON.stringify(v)));
-  const liveSet = new Set(live.map((v) => JSON.stringify(v)));
+  const firstOf = (items: unknown[], value: unknown): number =>
+    items.findIndex((item) => isDeepStrictEqual(item, value));
   for (const [index, value] of desired.entries()) {
-    const json = JSON.stringify(value);
-    if (!liveSet.has(json) && desired.findIndex((v) => JSON.stringify(v) === json) === index) {
+    if (firstOf(live, value) === -1 && firstOf(desired, value) === index) {
       out.push({ kind: "missing", path, desired: value, match: "value" });
     }
   }
 
   for (const [index, value] of live.entries()) {
-    const json = JSON.stringify(value);
-    if (!desiredSet.has(json) && live.findIndex((v) => JSON.stringify(v) === json) === index) {
+    if (firstOf(desired, value) === -1 && firstOf(live, value) === index) {
       out.push({ kind: "undeclared", path, live: value, match: "value" });
     }
   }
