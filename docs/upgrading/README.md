@@ -20,10 +20,10 @@ The tags up to v2.0.0 point at release commits on `main` from when main still co
 
 ## The guides
 
-| From | To  | Guide                                                                                                                                                                                                                                                        |
-| ---- | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| v1   | v2  | [v1 to v2](v1-to-v2.md): the repository rename in `uses:`, and four keys that went from inert to acting                                                                                                                                                      |
-| v2   | v3  | [v2 to v3](v2-to-v3.md): `defaults-file` becomes a fallback, `undeclared` becomes `_undeclared`, layering arrives in `mode: render`, a declaration GitHub would reject fails at parse, and the library gets a documented public entry beside an internal one |
+| From | To  | Guide                                                                                                                                                                                                                                                           |
+| ---- | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| v1   | v2  | [v1 to v2](v1-to-v2.md): the repository rename in `uses:`, and four keys that went from inert to acting                                                                                                                                                         |
+| v2   | v3  | [v2 to v3](v2-to-v3.md): `defaults-file` becomes a fallback, `undeclared` becomes `_undeclared`, layering arrives in `mode: render`, many declarations GitHub would reject fail at parse, and the library gets a documented public entry beside an internal one |
 
 ## Additions inside a major
 

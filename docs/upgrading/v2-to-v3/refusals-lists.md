@@ -127,21 +127,21 @@ For `@vivswan/github-settings-as-code` consumers, under `SectionInput<"webhooks"
 
 Fix: an absolute URL, `json` or `form`, `"0"` or `"1"`, and event names from GitHub's repository list. The list is pinned to `@octokit/openapi-webhooks`, so an event GitHub adds later is refused until the release that bumps that package.
 
-## 48. Secret scanning patterns must compile
+## 48. Secret scanning patterns: GitHub's refusal names the pattern
 
 ```text
 v2   secret_scanning_custom_patterns:
        - name: internal-api-token
-         pattern: "([a-z"           # parsed clean; check saw only a missing pattern; apply -> bulk create 422
-         must_match: ["[0-9]", "*prod"]
+         pattern: "int_[a-z0-9]{32}"
+       - name: vendor-license-key
+         pattern: "(?<=lic-)[0-9]{6}"   # apply -> bulk create 422; the line named both patterns and dropped GitHub's reason
 
-v3   secret_scanning_custom_patterns[0].pattern: cannot be compiled as a regular expression (Invalid regular expression: missing terminating ] for character class); fix the expression, or report a documentation issue if Hyperscan accepts it as written - ...
-     secret_scanning_custom_patterns[0].must_match[1]: cannot be compiled as a regular expression (quantifier does not follow a repeatable item); ...
+v3   secret_scanning_custom_patterns: creating secret scanning patterns "internal-api-token", "vendor-license-key" failed - POST /repos/octocat/example/secret-scanning/custom-patterns: 422 Validation failed for one or more patterns. GitHub refused secret_scanning_custom_patterns[vendor-license-key] (invalid): <GitHub's message>. Fix each named pattern in the settings file to satisfy GitHub's message
 ```
 
-The five regex fields pass a syntax check at parse. The check first translates the PCRE-only spellings Hyperscan accepts (named groups, comments, modifiers, atomic and possessive forms, quoted literals, code point escapes, POSIX classes), then compiles the result as a flagless JavaScript `RegExp`, so a pattern GitHub already holds is never refused.
+Not a parse-time refusal: the five regex fields are sent as written. Their dialect is GitHub's to judge, and the REST API has no validate call, so an expression GitHub rejects is reported when apply reaches the section; check mode cannot report it.
 
-Fix the expression. A snapshot leaves out a live pattern the check cannot verify, with a note naming it, and writes the rest; Hyperscan can still refuse at apply what it alone refuses (lookbehind, backreferences).
+v3 releases from 3.0.0 on refused some expressions at parse, with a local syntax check, until that check was withdrawn: a second implementation of GitHub's dialect could only drift from it. A snapshot writes every live pattern as GitHub holds it.
 
 ## 49. Rulesets: enforcement, actors, tokens, and parameters
 

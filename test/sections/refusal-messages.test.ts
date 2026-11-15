@@ -5,7 +5,7 @@
  * regex over source text, and each must appear, cooked, inside a string of some test under test/ (a .ts literal or
  * template, or a scenario's expect lists). The failure names the source file, the line, and the literal.
  *
- * Every string literal in a section schema slice, a shared schema helper, or compilable-form.ts is a refusal message
+ * Every string literal in a section schema slice or a shared schema helper is a refusal message
  * unless its position is in the listed exclusions (DATA_CONSTANTS by name, keys, specifiers, type positions,
  * vocabulary calls); in section modules, module.ts, declared.ts, repo-secrets.ts, and problem.ts, every literal inside a
  * message-shaped object ({path, message}), an error:/consequence: property, or an issue-builder body is a message.
@@ -125,9 +125,6 @@ const DATA_FIELDS: ReadonlySet<string> = new Set([
 /** The calls whose object argument is a JSON Schema twin of a refinement: keys and enum values, never text. */
 const SCHEMA_TWIN_CALLS: ReadonlySet<string> = new Set(["meta", "conditional"]);
 
-/** The functions of compilable-form.ts that assemble regex source: every literal in them is a pattern piece. */
-const DATA_FUNCTIONS: ReadonlySet<string> = new Set(["render", "codePointEscape"]);
-
 /** Helpers whose string arguments at these indexes are data (a key name, a rule type, a wrapper kind, a noun); a key that renders inside a message is data too, since a containment pin would hold wherever a test spells it. */
 const DATA_ARGUMENTS: Readonly<Record<string, readonly number[]>> = {
   actorList: [0, 1],
@@ -190,12 +187,6 @@ const DATA_CONSTANTS: ReadonlySet<string> = new Set([
   // code_quality_setup, code_scanning_default_setup
   "CODE_QUALITY_LANGUAGES",
   "CODE_SCANNING_LANGUAGES",
-  // compilable-form.ts
-  "GROUP_NAME",
-  "GROUP_REWRITES",
-  "CODE_POINT_ESCAPES",
-  // secret_scanning_custom_patterns/schema.ts
-  "REGEX_SYNTAX",
 ]);
 
 /** A list section's `noun:` at the top level of its declaration names the resource in its duplicate refusal ("names the same label as"). */
@@ -369,7 +360,7 @@ function isConstVocabulary(step: Step, ancestors: readonly Step[]): boolean {
   });
 }
 
-/** Why an ancestor of the literal makes it data, or undefined: a schema twin call, an `as const` vocabulary, a type position, a data constant, a data function. */
+/** Why an ancestor of the literal makes it data, or undefined: a schema twin call, an `as const` vocabulary, a type position, a data constant. */
 function ancestorExclusion(step: Step, ancestors: readonly Step[]): string | undefined {
   if (isSchemaTwinArgument(step, ancestors)) {
     return "schema twin";
@@ -395,9 +386,6 @@ function ancestorExclusion(step: Step, ancestors: readonly Step[]): string | und
       !holdsProse(step.node)
     ) {
       return `data constant ${declaredName(node)}`;
-    }
-    if (node.type === "FunctionDeclaration" && DATA_FUNCTIONS.has(functionName(node) ?? "")) {
-      return `data function ${functionName(node)}`;
     }
   }
   return undefined;
@@ -925,8 +913,6 @@ export function refusalSources(root: string): Source[] {
   for (const helper of SHARED_REFUSAL_HELPERS) {
     add(`src/sections/shared/${helper}.ts`, "every-literal");
   }
-  // The regex check's own reasons render inside the pattern refusal; the RegExp engine's messages pass through unread.
-  add("src/sections/secret_scanning_custom_patterns/compilable-form.ts", "every-literal");
   // The one rule check the descriptor cannot express lives beside the generated rows.
   add("src/sections/rulesets/rule-overrides.ts", "every-literal");
   // The environments section's nested lists validate in their own files.
@@ -1024,7 +1010,6 @@ describe("every parse-refusal message a user can read is pinned by a test", () =
       'const PLANTED_KINDS = { knobbed: { directives: "a planted directive sentence inside an as const table", renamed: true } } as const;',
       'const twin = z.object({}).meta({ anyOf: [{ required: ["contexts"] }] });',
       'const pattern = new RegExp("^[a-z]+$"); const names = new Set(["a", "b"]); const ok = !"(|^$".includes(previous);',
-      'function render(): string { return "[^"; }',
       'const knob = knobbedList(entry, "knobbed", (knobs) => knobs);',
       'throw new Error("BUG: a planted invariant names no user");',
       // messages, every spelling
@@ -1110,33 +1095,33 @@ describe("every parse-refusal message a user can read is pinned by a test", () =
     );
     expect(unpinnedMessages(planted, prose)).toEqual([
       'src/sections/planted/schema.ts:13: "a planted directive sentence inside an as const table"',
-      'src/sections/planted/schema.ts:19: "probe"',
-      'src/sections/planted/schema.ts:20: "probe2"',
-      'src/sections/planted/schema.ts:21: "Missing"',
-      'src/sections/planted/schema.ts:21: "Bad"',
-      'src/sections/planted/schema.ts:22: "too long"',
-      'src/sections/planted/schema.ts:23: "probe3"',
-      'src/sections/planted/schema.ts:23: "a planted table entry read by property"',
-      'src/sections/planted/schema.ts:25: "probe4"',
-      'src/sections/planted/schema.ts:26: "probe5"',
-      'src/sections/planted/schema.ts:28: "probe6"',
-      'src/sections/planted/schema.ts:29: ": !!!"',
-      'src/sections/planted/schema.ts:30: "Color required"',
-      'src/sections/planted/schema.ts:31: "probe7"',
-      'src/sections/planted/schema.ts:32: "probe8"',
-      'src/sections/planted/schema.ts:32: "probe9"',
-      'src/sections/planted/schema.ts:33: "probe10"',
-      'src/sections/planted/schema.ts:34: ": too short"',
-      'src/sections/planted/schema.ts:35: "Please "',
-      'src/sections/planted/schema.ts:35: "enter text"',
-      'src/sections/planted/schema.ts:36: "probe tagged"',
-      'src/sections/planted/schema.ts:37: "a planted rule message"',
-      'src/sections/planted/schema.ts:38: "Please pick a planted state"',
-      'src/sections/planted/schema.ts:38: "probe lit"',
-      'src/sections/planted/schema.ts:39: "a planted key holds only "',
-      'src/sections/planted/schema.ts:39: "; remove the other characters"',
-      'src/sections/planted/schema.ts:40: "a planted reason for a q escape"',
-      'src/sections/planted/schema.ts:41: "a planted sentence inside a data constant"',
+      'src/sections/planted/schema.ts:18: "probe"',
+      'src/sections/planted/schema.ts:19: "probe2"',
+      'src/sections/planted/schema.ts:20: "Missing"',
+      'src/sections/planted/schema.ts:20: "Bad"',
+      'src/sections/planted/schema.ts:21: "too long"',
+      'src/sections/planted/schema.ts:22: "probe3"',
+      'src/sections/planted/schema.ts:22: "a planted table entry read by property"',
+      'src/sections/planted/schema.ts:24: "probe4"',
+      'src/sections/planted/schema.ts:25: "probe5"',
+      'src/sections/planted/schema.ts:27: "probe6"',
+      'src/sections/planted/schema.ts:28: ": !!!"',
+      'src/sections/planted/schema.ts:29: "Color required"',
+      'src/sections/planted/schema.ts:30: "probe7"',
+      'src/sections/planted/schema.ts:31: "probe8"',
+      'src/sections/planted/schema.ts:31: "probe9"',
+      'src/sections/planted/schema.ts:32: "probe10"',
+      'src/sections/planted/schema.ts:33: ": too short"',
+      'src/sections/planted/schema.ts:34: "Please "',
+      'src/sections/planted/schema.ts:34: "enter text"',
+      'src/sections/planted/schema.ts:35: "probe tagged"',
+      'src/sections/planted/schema.ts:36: "a planted rule message"',
+      'src/sections/planted/schema.ts:37: "Please pick a planted state"',
+      'src/sections/planted/schema.ts:37: "probe lit"',
+      'src/sections/planted/schema.ts:38: "a planted key holds only "',
+      'src/sections/planted/schema.ts:38: "; remove the other characters"',
+      'src/sections/planted/schema.ts:39: "a planted reason for a q escape"',
+      'src/sections/planted/schema.ts:40: "a planted sentence inside a data constant"',
       'src/sections/planted/index.ts:1: "the key "',
       'src/sections/planted/index.ts:1: " would silently do nothing on this endpoint"',
       'src/sections/planted/index.ts:6: "an optional planted directive"',
@@ -1199,7 +1184,7 @@ describe("every parse-refusal message a user can read is pinned by a test", () =
       "settings:\n  planted:\n    - key: probe\nexpect:\n  outcomes:\n    planted: probe2\n",
     );
     expect(unpinnedMessages([plantedSlice], inputsOnly)).toContain(
-      'src/sections/planted/schema.ts:19: "probe"',
+      'src/sections/planted/schema.ts:18: "probe"',
     );
     const scenario = [
       "expect:",
@@ -1210,8 +1195,8 @@ describe("every parse-refusal message a user can read is pinned by a test", () =
     ].join("\n");
     const pins = testStrings("test/planted/scenarios/planted.yml", scenario);
     const left = unpinnedMessages([plantedSlice], pins);
-    expect(left).not.toContain('src/sections/planted/schema.ts:19: "probe"');
-    expect(left).not.toContain('src/sections/planted/schema.ts:20: "probe2"');
+    expect(left).not.toContain('src/sections/planted/schema.ts:18: "probe"');
+    expect(left).not.toContain('src/sections/planted/schema.ts:19: "probe2"');
   });
 
   test("a source that does not parse fails naming it instead of reading as pinned (control)", () => {

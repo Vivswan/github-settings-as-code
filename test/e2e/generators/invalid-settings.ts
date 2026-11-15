@@ -4,7 +4,6 @@ import {
   type SectionKey,
   UNDECLARED_POLICY_SECTIONS,
 } from "../../../src/schema.js";
-import { compileFailure } from "../../../src/sections/secret_scanning_custom_patterns/compilable-form.js";
 import { MAX_VARIABLE_VALUE_BYTES } from "../../../src/sections/shared/schema-helpers.js";
 import type { MustBeNever } from "../../../src/types.js";
 import { PULL_REQUEST_PARAMETERS } from "../../sections/rulesets/generators.js";
@@ -466,45 +465,6 @@ export const INVALID_SETTINGS_CASES: ReadonlyArray<{
       return {
         doc: { [key]: { [UNDECLARED_KEY]: rng.pick(["detele", "kep", true]), entries } },
         offendingToken: `${key}.${UNDECLARED_KEY}`,
-      };
-    },
-  },
-  {
-    name: "secret-scanning-pattern-uncompilable",
-    build: (rng) => {
-      // Each field is a regex GitHub compiles as Hyperscan; the schema refuses what no dialect parses,
-      // and the oracle here is the section's own check, so a pool value the check accepts fails the draw loudly.
-      const { value, entries, index, itemToken } = validItems(
-        rng,
-        "secret_scanning_custom_patterns",
-      );
-      const field = rng.pick([
-        "pattern",
-        "start_delimiter",
-        "end_delimiter",
-        "must_match",
-        "must_not_match",
-      ]);
-      // The last two are PCRE refusals a flagless RegExp alone would take: a quantified anchor, a group name declared twice.
-      const broken = rng.pick([
-        "([a-z",
-        "*token",
-        "key_[0-9]{6}\\",
-        "(?P<t>key_[0-9",
-        "\\A+",
-        "(?<t>x)|(?<t>y)",
-      ]);
-      if (compileFailure(broken) === undefined) {
-        throw new Error(
-          `the refused draw ${JSON.stringify(broken)} passes the syntax check; pick another`,
-        );
-      }
-      const entry = entries[index] as Json;
-      const listField = field === "must_match" || field === "must_not_match";
-      entry[field] = listField ? ["[0-9]", broken] : broken;
-      return {
-        doc: { secret_scanning_custom_patterns: value },
-        offendingToken: `${itemToken}.${field}${listField ? "[1]" : ""}`,
       };
     },
   },
