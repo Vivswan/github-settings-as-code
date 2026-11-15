@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { err, ok } from "neverthrow";
 import { parseSettingsDoc } from "../../src/flows/settings-read.js";
 
@@ -14,11 +14,10 @@ async function captureOutput<T>(
   const onWarning = (warning: Error) => {
     warnings.push(`${warning.name}: ${warning.message}`);
   };
-  const originalWrite = process.stderr.write.bind(process.stderr);
-  process.stderr.write = ((chunk: string | Uint8Array) => {
+  const write = spyOn(process.stderr, "write").mockImplementation((chunk: string | Uint8Array) => {
     stderr += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
     return true;
-  }) as typeof process.stderr.write;
+  });
   process.on("warning", onWarning);
   try {
     const result = fn();
@@ -26,7 +25,7 @@ async function captureOutput<T>(
     return { result, warnings, stderr };
   } finally {
     process.off("warning", onWarning);
-    process.stderr.write = originalWrite;
+    write.mockRestore();
   }
 }
 
@@ -109,6 +108,22 @@ describe("parseSettingsDoc", () => {
       });
     },
   );
+
+  test("every syntax error of a file is reported in one run, in source order: the parser lists a failed tag after the errors inside the tagged node, and one error per run would cost a run each", async () => {
+    const raw = "a: !!set\n  b: 1\n  b: 2\nc: [\n";
+    expect(await captureOutput(() => parseSettingsDoc(raw))).toEqual({
+      result: err({
+        code: "yaml-invalid",
+        reason: [
+          "YAMLParseError: Set items must all have null values at line 1, column 4:\n\na: !!set\n   ^^^^^\n",
+          "YAMLParseError: Map keys must be unique at line 3, column 3:\n\n  b: 1\n  b: 2\n  ^\n",
+          "YAMLParseError: Flow sequence in block collection must be sufficiently indented and end with a ] at line 5, column 1:\n\nc: [\n\n^\n",
+        ].join(""),
+      }),
+      warnings: [],
+      stderr: "",
+    });
+  });
 
   // The parser resolves an alias into the node its own anchor opens as a cyclic object; the refusal names that anchor.
   test.each([

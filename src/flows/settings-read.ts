@@ -5,7 +5,7 @@
 
 import { readFileSync } from "node:fs";
 import { err, ok, type Result } from "neverthrow";
-import { type Document, isAlias, type Node, parseDocument, visit } from "yaml";
+import { type Document, isAlias, type Node, parseDocument, visit, type YAMLError } from "yaml";
 import type { ProblemOf, SettingsFileRole } from "../problem.js";
 
 /**
@@ -36,6 +36,11 @@ function openAnchorAliased(doc: Document): string | null {
   return cyclic[0] ?? null;
 }
 
+/** The parser lists a node's own error (a failed tag) after the errors found inside it, so its list is not in source order. */
+function bySourcePosition(a: YAMLError, b: YAMLError): number {
+  return a.pos[0] - b.pos[0];
+}
+
 /**
  * `logLevel: "error"` is load-bearing: at its default, building the object reports a collection used as a mapping
  * key through process.emitWarning, quoting its values straight to stderr, which nothing here redacts. The document's
@@ -49,9 +54,8 @@ export function parseSettingsDoc(raw: string): Result<unknown, ProblemOf<"yaml-i
   const invalid = (reason: string): Result<never, ProblemOf<"yaml-invalid">> =>
     err({ code: "yaml-invalid", reason });
   const doc = parseDocument(raw, { logLevel: "error", merge: true });
-  const [syntaxError] = doc.errors;
-  if (syntaxError !== undefined) {
-    return invalid(String(syntaxError));
+  if (doc.errors.length > 0) {
+    return invalid(doc.errors.toSorted(bySourcePosition).map(String).join(""));
   }
   const anchor = openAnchorAliased(doc);
   if (anchor !== null) {
