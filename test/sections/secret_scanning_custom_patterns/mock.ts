@@ -5,7 +5,7 @@
  * create or update               -> mints a fresh version
  * stale version on a write       -> 412
  * PATCH version: null            -> accepted (the key is required but nullable upstream)
- * create with a look-behind      -> 422, a validation_errors map keyed by the pattern's index
+ * create with a look-behind      -> 422 keyed by the pattern's index; shape from the API description, message text the mock's own
  * DELETE entry without a version -> accepted (optional upstream)
  */
 
@@ -22,10 +22,6 @@ import {
   secretScanningPatternFromCreate,
 } from "../../e2e/mock/support.js";
 
-/**
- * The one dialect refusal the mock stands in for: a look-behind, which GitHub's engine (Hyperscan) has none of.
- * The status and the body shape are the API description's; the message text is the mock's own.
- */
 const LOOK_BEHIND = /\(\?<[=!]/;
 
 export const secretScanningCustomPatternsMockHandlers: SectionRestHandlers<"secret_scanning_custom_patterns"> =

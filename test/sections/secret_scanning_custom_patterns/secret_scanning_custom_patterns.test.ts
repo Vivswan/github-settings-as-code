@@ -339,6 +339,61 @@ describe("secret_scanning_custom_patterns", () => {
         "Fix each named pattern in the settings file to satisfy GitHub's message",
     ],
     [
+      "an index outside the request, beside one inside it",
+      {
+        validation_errors: {
+          "1": { errors: [{ code: "invalid", message: "unsupported" }] },
+          "7": { errors: [{ code: "invalid", message: "stray" }] },
+        },
+      },
+      "GitHub refused secret_scanning_custom_patterns[vendor-key] (invalid): unsupported. " +
+        "Fix each named pattern in the settings file to satisfy GitHub's message. " +
+        'GitHub also answered, tied to no pattern of the request: validation_errors["7"]: {"errors":[{"code":"invalid","message":"stray"}]}',
+    ],
+    [
+      "an empty key, which is no index",
+      { validation_errors: { "": { errors: [{ message: "unsupported" }] } } },
+      'GitHub answered, tied to no pattern of the request: validation_errors[""]: {"errors":[{"message":"unsupported"}]}. ' +
+        "Check the regular expressions of the patterns named above",
+    ],
+    [
+      "an entry outside the described shape, under an index of the request",
+      { validation_errors: { "0": ["unsupported"], "1": { errors: ["look-behind"] } } },
+      'GitHub refused secret_scanning_custom_patterns[internal-token]: ["unsupported"]; ' +
+        'secret_scanning_custom_patterns[vendor-key]: {"errors":["look-behind"]}. ' +
+        "Fix each named pattern in the settings file to satisfy GitHub's message",
+    ],
+    [
+      "an entry carrying a field the description does not name",
+      { validation_errors: { "1": { message: "unsupported" } } },
+      'GitHub refused secret_scanning_custom_patterns[vendor-key]: {"message":"unsupported"}. ' +
+        "Fix each named pattern in the settings file to satisfy GitHub's message",
+    ],
+    [
+      "a key the object prototype also holds",
+      JSON.parse('{"validation_errors":{"__proto__":{"errors":[{"message":"stray"}]}}}'),
+      'GitHub answered, tied to no pattern of the request: validation_errors["__proto__"]: {"errors":[{"message":"stray"}]}. ' +
+        "Check the regular expressions of the patterns named above",
+    ],
+    [
+      "an empty validation_errors map",
+      { validation_errors: {} },
+      "GitHub answered, tied to no pattern of the request: validation_errors: {}. " +
+        "Check the regular expressions of the patterns named above",
+    ],
+    [
+      "validation_errors that is no map",
+      { validation_errors: "every pattern is unsupported" },
+      'GitHub answered, tied to no pattern of the request: validation_errors: "every pattern is unsupported". ' +
+        "Check the regular expressions of the patterns named above",
+    ],
+    [
+      "an answer longer than the line carries",
+      { validation_errors: { "7": "x".repeat(400) } },
+      `GitHub answered, tied to no pattern of the request: validation_errors["7"]: "${"x".repeat(299)}... (cut at 300 characters). ` +
+        "Check the regular expressions of the patterns named above",
+    ],
+    [
       "a body that names no pattern",
       { message: "Validation failed for one or more patterns" },
       "GitHub did not say which pattern it refused; check the regular expressions of the patterns named above",
@@ -354,6 +409,7 @@ describe("secret_scanning_custom_patterns", () => {
             status: 422,
             message: "Validation failed for one or more patterns",
             body: JSON.stringify(body),
+            documentationUrl: "https://docs.github.com/rest/secret-scanning/custom-patterns",
           },
         },
       });
@@ -368,7 +424,8 @@ describe("secret_scanning_custom_patterns", () => {
       expect(execution.status).toBe("failed");
       expect((execution as { failure: SectionFailure }).failure.message).toBe(
         'secret_scanning_custom_patterns: creating secret scanning patterns "internal-token", "vendor-key" failed - ' +
-          `POST /repos/o/r/secret-scanning/custom-patterns: 422 Validation failed for one or more patterns. ${told}`,
+          `POST /repos/o/r/secret-scanning/custom-patterns: 422 Validation failed for one or more patterns. ${told}. ` +
+          "The fields and values this endpoint accepts are documented at https://docs.github.com/rest/secret-scanning/custom-patterns",
       );
     },
   );

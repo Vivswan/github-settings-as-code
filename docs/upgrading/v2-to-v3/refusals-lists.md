@@ -134,7 +134,7 @@ v2   secret_scanning_custom_patterns:
        - name: internal-api-token
          pattern: "int_[a-z0-9]{32}"
        - name: vendor-license-key
-         pattern: "(?<=lic-)[0-9]{6}"   # apply -> bulk create 422, and the line named neither pattern
+         pattern: "(?<=lic-)[0-9]{6}"   # apply -> bulk create 422; the line named both patterns and dropped GitHub's reason
 
 v3   secret_scanning_custom_patterns: creating secret scanning patterns "internal-api-token", "vendor-license-key" failed - POST /repos/octocat/example/secret-scanning/custom-patterns: 422 Validation failed for one or more patterns. GitHub refused secret_scanning_custom_patterns[vendor-license-key] (invalid): <GitHub's message>. Fix each named pattern in the settings file to satisfy GitHub's message
 ```
