@@ -15,7 +15,6 @@
  */
 
 import { parseArgs } from "node:util";
-import { quote } from "../../src/text.js";
 import { corpusUnwitnessedExemptEndpoints } from "./runner/apply-idempotence-proof.js";
 import { indentedStdout, runScenario, type ScenarioReport } from "./runner/runner.js";
 import { loadScenarios, type Scenario, scenarioRoots } from "./scenario.js";
@@ -35,12 +34,6 @@ interface Flags {
 
 type ParsedFlags = { ok: true; flags: Flags } | { ok: false; error: string };
 
-/** parseArgs's option token, which node:util declares but does not export. */
-type OptionToken = Extract<
-  ReturnType<typeof parseArgs<{ tokens: true; strict: false }>>["tokens"][number],
-  { kind: "option" }
->;
-
 /** The run's result table and counts, grown one scenario at a time. */
 interface Tally {
   table: string[];
@@ -53,65 +46,39 @@ function refuse(error: string): ParsedFlags {
   return { ok: false, error: `e2e: ${error}; ${USAGE}` };
 }
 
-/** `all` clears an earlier list, so the last `--sections` wins whichever word it carries. */
-function applySections(flags: Flags, value: string): string | undefined {
-  if (value === "all") {
-    flags.sections = undefined;
-    return undefined;
-  }
-  const keys = value
+/** The section keys a comma list names, blanks dropped. */
+function sectionKeys(value: string): string[] {
+  return value
     .split(",")
     .map((key) => key.trim())
     .filter((key) => key !== "");
-  if (keys.length === 0) {
-    return "--sections got an empty list; name at least one section, or all";
-  }
-  flags.sections = keys;
-  return undefined;
 }
 
-/** One flag applied to `flags`, or the refusal it earns. */
-function applyFlag(flags: Flags, token: OptionToken): string | undefined {
-  if (!Object.hasOwn(FLAGS, token.name)) {
-    return `unknown flag ${token.rawName}`;
-  }
-  if (token.name === "print-stdout") {
-    if (token.value !== undefined) {
-      return "--print-stdout takes no value";
-    }
-    flags.printStdout = true;
-    return undefined;
-  }
-  // parseArgs hands a string flag the next word whatever it is, so a flag or "--" standing where the value
-  // belongs is the value missing, not a value; an inline "--scenario=-name" keeps its dash.
-  if (token.value === undefined || (!token.inlineValue && token.value.startsWith("-"))) {
-    return `${token.rawName} needs a value`;
-  }
-  if (token.name === "scenario") {
-    flags.scenario = token.value;
-    return undefined;
-  }
-  return applySections(flags, token.value);
-}
-
+/** Strict parseArgs refuses an unknown flag, a stray argument, and a missing or surplus value itself; a repeated flag keeps its last value. */
 function parseFlags(argv: readonly string[]): ParsedFlags {
-  const { tokens } = parseArgs({
-    args: [...argv],
-    options: FLAGS,
-    strict: false,
-    allowPositionals: true,
-    tokens: true,
-  });
+  let values: ReturnType<typeof parseArgs<{ options: typeof FLAGS }>>["values"];
+  try {
+    ({ values } = parseArgs({ args: [...argv], options: FLAGS, strict: true }));
+  } catch (error) {
+    // parseArgs reports a command line it refuses by throwing a TypeError that carries its own code.
+    if (error instanceof TypeError && "code" in error) {
+      return refuse(error.message);
+    }
+    throw error;
+  }
   const flags: Flags = {};
-  for (const token of tokens) {
-    if (token.kind !== "option") {
-      const argument = token.kind === "positional" ? token.value : "--";
-      return refuse(`unexpected argument ${quote(argument)}`);
+  if (values.scenario !== undefined) {
+    flags.scenario = values.scenario;
+  }
+  if (values["print-stdout"] === true) {
+    flags.printStdout = true;
+  }
+  if (values.sections !== undefined && values.sections !== "all") {
+    const keys = sectionKeys(values.sections);
+    if (keys.length === 0) {
+      return refuse("--sections got an empty list; name at least one section, or all");
     }
-    const problem = applyFlag(flags, token);
-    if (problem !== undefined) {
-      return refuse(problem);
-    }
+    flags.sections = keys;
   }
   return { ok: true, flags };
 }
