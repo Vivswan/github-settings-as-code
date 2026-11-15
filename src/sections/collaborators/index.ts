@@ -14,7 +14,7 @@ import {
   undeclaredPolicy,
   valueDrift,
 } from "../contract/drift.js";
-import type { EndpointDecl } from "../contract/endpoints.js";
+import { type EndpointDecl, isDotSegment } from "../contract/endpoints.js";
 import { type SectionFailure, sectionFailure } from "../contract/errors.js";
 import { identifiedBy } from "../contract/keyed-list.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
@@ -27,7 +27,7 @@ import type { SectionPermission } from "../contract/permissions.js";
 import type { PlanContext, PlannedOp, Read, SectionPlan } from "../contract/plan.js";
 import { DEFAULT_ROLE, readBackPermission, roleForPermission } from "../shared/roles.js";
 import { knobbed, routed } from "../shared/schema-helpers.js";
-import { knobbedSnapshot, leftOutOfSnapshot } from "../shared/snapshot-helpers.js";
+import { dotSegmentNote, knobbedSnapshot, leftOutOfSnapshot } from "../shared/snapshot-helpers.js";
 import { CollaboratorConfig } from "./schema.js";
 
 const LiveCollaborator = z.looseObject({
@@ -316,6 +316,7 @@ function planUndeclaredCollaborators(
           add: "them",
           manage: "their access",
           action: "REMOVE them",
+          undeclarable: isDotSegment(collaborator.login),
         }),
       );
       continue;
@@ -390,6 +391,12 @@ function collaboratorEntries(
     const entries: CollaboratorConfig[] = [];
     for (const collaborator of collaborators) {
       const label = `collaborators[${collaborator.login}]`;
+      const undeclarable = dotSegmentNote(label, [collaborator.login]);
+      if (undeclarable !== null) {
+        notes.push(undeclarable);
+        continue;
+      }
+
       if (isOwner(ctx, loginKey(collaborator.login))) {
         notes.push(
           leftOutOfSnapshot(label, "the repository owner's access is implicit and never managed"),
@@ -429,6 +436,17 @@ function invitationEntries(
     for (const invitation of invitations) {
       const login = invitation.invitee.login;
       const label = `collaborators[${login}]`;
+      if (isDotSegment(login)) {
+        // Cancelled by its id, never by the login, so apply can still remove it; only the declaration is impossible.
+        notes.push(
+          leftOutOfSnapshot(
+            label,
+            'the settings file cannot declare a username of "." or ".."; the invitation is addressed by its id, so a delete policy still cancels it when this section is applied',
+          ),
+        );
+        continue;
+      }
+
       if (invitation.expired === true) {
         expired.push(label);
         continue;

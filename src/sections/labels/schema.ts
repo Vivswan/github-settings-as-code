@@ -6,7 +6,7 @@
  */
 
 import { z } from "zod";
-import { boundedString, open } from "../shared/schema-helpers.js";
+import { boundedString, open, pathSegmentName } from "../shared/schema-helpers.js";
 
 const LabelColor = z
   .string()
@@ -25,10 +25,10 @@ const LabelDescription = boundedString(
 );
 
 export const LabelConfig = open({
-  name: z.string(),
+  name: pathSegmentName("the name of a label"),
   color: LabelColor.optional(),
   description: LabelDescription.optional(),
-  new_name: z.string().optional(),
+  new_name: pathSegmentName("the name of a label").optional(),
 }).meta({ id: "LabelConfig" });
 
 export type LabelConfig = z.infer<typeof LabelConfig>;

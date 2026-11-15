@@ -3,7 +3,7 @@
  * admin repository under repos-dir.
  */
 
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { type Dirent, existsSync, readdirSync, statSync } from "node:fs";
 import { extname, join, parse } from "node:path";
 import { err, ok, type Result } from "neverthrow";
 import { type SlugKey, slugKey } from "../github/slug.js";
@@ -11,6 +11,42 @@ import type { CentralFileProblem, ProblemOf } from "../problem.js";
 import { type CentralTarget, parseRepoSlug } from "./targets.js";
 
 const YAML_EXTENSIONS = new Set([".yml", ".yaml"]);
+
+/** What a repos-dir entry is once a symbolic link is followed; `broken-link` is a link whose target is gone or cannot be read. */
+type EntryKind = "directory" | "file" | "broken-link";
+
+/** Only a link costs a stat: the listing already carries every other entry's type. */
+function entryKind(entry: Dirent, path: string): EntryKind {
+  if (!entry.isSymbolicLink()) {
+    return entry.isDirectory() ? "directory" : "file";
+  }
+
+  try {
+    return statSync(path).isDirectory() ? "directory" : "file";
+  } catch {
+    return "broken-link";
+  }
+}
+
+interface Entry {
+  readonly name: string;
+  readonly path: string;
+  readonly kind: EntryKind;
+}
+
+/** The entries of `dir` in code-unit order of their names, the order `readdirSync(dir).sort()` gave, so targets and warnings keep theirs. */
+function entriesOf(dir: string): Entry[] {
+  return readdirSync(dir, { withFileTypes: true })
+    .sort((a, b) => Number(a.name > b.name) - Number(a.name < b.name))
+    .map((entry) => {
+      const path = join(dir, entry.name);
+      return { name: entry.name, path, kind: entryKind(entry, path) };
+    });
+}
+
+function brokenLinkWarning(path: string): string {
+  return `ignoring ${path}: a symbolic link whose target cannot be read, so it defines no target repository. Repair the link or remove it`;
+}
 
 export function resolveCentralTargets(
   reposDir: string,
@@ -45,9 +81,12 @@ export function resolveCentralTargets(
   };
 
   const scanOwnerDir = (dirPath: string, owner: string): void => {
-    for (const inner of readdirSync(dirPath).sort()) {
-      const innerPath = join(dirPath, inner);
-      if (statSync(innerPath).isDirectory()) {
+    for (const { name: inner, kind, path: innerPath } of entriesOf(dirPath)) {
+      if (kind === "broken-link") {
+        warnings.push(brokenLinkWarning(innerPath));
+        continue;
+      }
+      if (kind === "directory") {
         warnings.push(
           `ignoring ${innerPath}: repos-dir supports only <name>.yml and <owner>/<name>.yml, nothing deeper. Move the files up or remove the directory`,
         );
@@ -66,9 +105,12 @@ export function resolveCentralTargets(
   try {
     // Top-level files needing an unknown owner share ONE root cause and are reported as one error below.
     const ownerlessFiles: string[] = [];
-    for (const entry of readdirSync(reposDir).sort()) {
-      const entryPath = join(reposDir, entry);
-      if (statSync(entryPath).isDirectory()) {
+    for (const { name: entry, kind, path: entryPath } of entriesOf(reposDir)) {
+      if (kind === "broken-link") {
+        warnings.push(brokenLinkWarning(entryPath));
+        continue;
+      }
+      if (kind === "directory") {
         scanOwnerDir(entryPath, entry);
         continue;
       }

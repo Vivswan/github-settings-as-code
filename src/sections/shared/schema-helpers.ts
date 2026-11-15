@@ -431,3 +431,16 @@ export const secretName = githubName("secret");
 
 /** The same rule under the variable noun. */
 const variableName = githubName("variable");
+
+/**
+ * A name GitHub's API takes as one URL path segment. "." and ".." are refused: a URL resolves either away, so a
+ * request for /labels/.. lands on the repository route. `noun` opens the message ("the name of a label").
+ */
+export function pathSegmentName(noun: string) {
+  return z
+    .string()
+    .regex(
+      /^(?!\.{1,2}$)/,
+      `${noun} cannot be "." or "..": a URL path resolves either to another API route. Rename it on GitHub and here`,
+    );
+}

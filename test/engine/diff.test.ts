@@ -230,6 +230,38 @@ describe("deltas", () => {
       ).toThrow(/list "items" by "id"/);
     },
   );
+  test("a mixed list pairs a mapping with its live twin whatever the key order: GitHub returns keys in its own order, so text equality would report a missing and an undeclared item on every run", () => {
+    expect(deltas({ list: ["x", { a: 1, b: 2 }] }, { list: [{ b: 2, a: 1 }, "x"] })).toEqual([]);
+    expect(
+      deltas({ list: ["x", { a: 1, b: 2 }, "x"] }, { list: [{ b: 3, a: 1 }, "y", "y"] }),
+    ).toEqual([
+      { kind: "missing", path: ["list"], desired: "x", match: "value" },
+      { kind: "missing", path: ["list"], desired: { a: 1, b: 2 }, match: "value" },
+      { kind: "undeclared", path: ["list"], live: { b: 3, a: 1 }, match: "value" },
+      { kind: "undeclared", path: ["list"], live: "y", match: "value" },
+    ]);
+  });
+
+  test("list items pair as JSON would carry them: a library caller's undefined member or null-prototype mapping is the same item GitHub returns without either, and a stricter equality would report it missing and undeclared", () => {
+    const bare = Object.assign(Object.create(null), { a: 1 });
+    expect(
+      deltas({ list: ["x", { a: 1, optional: undefined }] }, { list: ["x", { a: 1 }] }),
+    ).toEqual([]);
+    expect(deltas({ list: ["x", bare] }, { list: [{ a: 1 }, "x"] })).toEqual([]);
+    // JSON has one zero: a declared -0 is the 0 GitHub returns.
+    expect(deltas({ list: [-0] }, { list: [0] })).toEqual([]);
+  });
+
+  test("a value repeated on one side is one delta when the other side lacks it, and none when the other side has it once", () => {
+    expect(deltas({ list: ["x", "x", { a: 1 }, { a: 1 }] }, { list: [{ a: 1 }] })).toEqual([
+      { kind: "missing", path: ["list"], desired: "x", match: "value" },
+    ]);
+  });
+
+  test("a long list with no drift reports none: 2,000 identical allowlist entries on each side", () => {
+    const patterns = Array.from({ length: 2000 }, (_, i) => `octo-org/action-${i}@*`);
+    expect(deltas({ patterns_allowed: patterns }, { patterns_allowed: [...patterns] })).toEqual([]);
+  });
 });
 
 describe("replace-style writes", () => {

@@ -6,6 +6,7 @@
  *   adding a section: create sections/<key>/ -> add the key to SECTION_KEYS in schema.ts -> add one line here
  */
 
+import { err, ok } from "neverthrow";
 import type { z } from "zod";
 import { type ListSection, SECTION_KEYS, type SectionKey } from "../schema.js";
 import type { DeepReadonly, MustBeNever } from "../types.js";
@@ -36,6 +37,7 @@ import {
 } from "./contract/module.js";
 import { gatedByOwner } from "./contract/owner.js";
 import type { PlanContext, SnapshotContext } from "./contract/plan.js";
+import { plannedPathRefusal } from "./contract/requests.js";
 import { customPropertiesSection } from "./custom_properties/index.js";
 import { dependabotSecretsSection } from "./dependabot_secrets/index.js";
 import { deployKeysSection } from "./deploy_keys/index.js";
@@ -212,14 +214,15 @@ export type SectionGraphqlKey<K extends SectionKey = SectionKey> = {
 const byKeyErased: { [K in SectionKey]: SectionModule<K> } = byKey;
 
 /**
- * The runtime twin of PlanContext's key brand, for a JavaScript consumer and the erased roster (SECTIONS
- * is homogeneous, so the brand cannot tell two of its members apart): a handler given another section's
- * context would otherwise fail on its first read with an undefined port.
+ * The two refusals every handler passes at the registry door. A foreign context: the runtime twin of PlanContext's
+ * key brand, for a JavaScript consumer and the erased roster (SECTIONS is homogeneous, so the brand cannot tell two
+ * members apart); a handler given another section's context would fail on its first read with an undefined port.
+ * A plan holding a write whose path cannot be built (plannedPathRefusal), so the section is refused whole.
  *
  *   refusal as a rejection         -> a synchronous throw would escape a consumer's `.catch()`
  *   module property read per call  -> handlers read `this`, and a test stubs the module while the engine holds this
  */
-function refusingForeignContexts<K extends SectionKey>(module: SectionModule<K>): SectionModule<K> {
+function refusingAtTheDoor<K extends SectionKey>(module: SectionModule<K>): SectionModule<K> {
   const foreign = (ctx: PlanContext, handler: "plan" | "snapshot"): string | null =>
     ctx.section === module.key
       ? null
@@ -229,9 +232,16 @@ function refusingForeignContexts<K extends SectionKey>(module: SectionModule<K>)
     ...module,
     plan: (ctx, desired) => {
       const problem = foreign(ctx, "plan");
-      return problem === null
-        ? module.plan(ctx, desired)
-        : Promise.reject(new Error(`BUG: ${problem}`));
+      if (problem !== null) {
+        return Promise.reject(new Error(`BUG: ${problem}`));
+      }
+
+      return module.plan(ctx, desired).then((planned) =>
+        planned.andThen((plan) => {
+          const refusal = plannedPathRefusal(module, ctx, plan.ops);
+          return refusal === undefined ? ok(plan) : err(refusal);
+        }),
+      );
     },
     ...(hasSnapshot(module)
       ? {
@@ -252,11 +262,11 @@ function hasSnapshot<K extends SectionKey>(
   return module.snapshot !== undefined;
 }
 
-// The one door out of src/sections, so the owner gate, the foreign-context refusal, and the freeze are applied here once, not in 26 handlers: modules arrive by several routes (literals, listSection, the factories), so no definition helper sees them all.
+// The one door out of src/sections: the owner gate, the door refusals, and the freeze are applied here once, not in 26 handlers, since modules arrive by several routes (literals, listSection, the factories) and no definition helper sees them all.
 const guarded: { [K in SectionKey]: SectionModule<K> } = Object.fromEntries(
   SECTION_KEYS.map((key) => [
     key,
-    freezeDeclarations(refusingForeignContexts(gatedByOwner(byKeyErased[key]))),
+    freezeDeclarations(refusingAtTheDoor(gatedByOwner(byKeyErased[key]))),
   ]),
 ) as { [K in SectionKey]: SectionModule<K> };
 

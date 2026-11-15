@@ -13,7 +13,7 @@ import { z } from "zod";
 import { type Delta, deltas, phantomNote, renderPath, subsetDiff } from "../../engine/diff.js";
 import { isPlainObject, isZeroValue } from "../../plain-data.js";
 import { listEntries, type PlainTyped } from "../contract/declared.js";
-import { matchesRejection } from "../contract/endpoints.js";
+import { isDotSegment, matchesRejection } from "../contract/endpoints.js";
 import { type SectionFailure, sectionFailure } from "../contract/errors.js";
 import { identifiedBy } from "../contract/keyed-list.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
@@ -21,6 +21,7 @@ import type { SectionModule } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import type { PlainData, Read } from "../contract/plan.js";
 import { layeredList, routed, rule } from "../shared/schema-helpers.js";
+import { dotSegmentNote } from "../shared/snapshot-helpers.js";
 import { ENDPOINTS, MISSING_BRANCH } from "./endpoints.js";
 import {
   type BranchesContext,
@@ -877,15 +878,19 @@ export const branchesSection = {
         (branch) => branch.name,
         (branch) => liveIdentity(branch.name),
       );
+      // A branch named "." or ".." is set aside before the read by its name, and counts as written so the rules walk adds no second note.
+      const undeclarable = listed.filter((branch) => isDotSegment(branch.name));
+      const declarable = listed.filter((branch) => !isDotSegment(branch.name));
       const rules = yield* fetchRulesForSnapshot(ctx);
-      const literal = yield* await literalSnapshotEntries(ctx, listed, rules);
-      const written = new Set(literal.map((entry) => entry.name));
+      const literal = yield* await literalSnapshotEntries(ctx, declarable, rules);
+      const written = new Set([...literal, ...undeclarable].map((entry) => entry.name));
       const wildcard = wildcardSnapshotEntries(rules, written);
       const entries = [...literal, ...wildcard.entries];
-      if (entries.length === 0) {
-        return ok({ value: undefined, notes: wildcard.notes });
-      }
-      return ok({ value: entries, notes: wildcard.notes });
+      const leftOut = undeclarable.flatMap(
+        (branch) => dotSegmentNote(`branches[${branch.name}]`, [branch.name]) ?? [],
+      );
+      const notes = [...leftOut, ...wildcard.notes];
+      return ok({ value: entries.length === 0 ? undefined : entries, notes });
     });
   },
 } satisfies SectionModule<"branches", typeof ENDPOINTS, typeof GRAPHQL>;

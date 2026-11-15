@@ -5,6 +5,7 @@
  */
 
 import type { Endpoints } from "@octokit/types";
+import { err, ok, type Result } from "neverthrow";
 import type { RepoRef } from "../../discovery/targets.js";
 import type { SupplementalRoute } from "../../generated/upstream-gaps.js";
 import type { SectionPermission } from "./permissions.js";
@@ -217,18 +218,41 @@ export function matchesTemplate(template: string, concretePath: string): boolean
   return true;
 }
 
+/** Whether a live name is "." or "..", which can never be a URL path segment: read by expand() and by the snapshot's left-out note. A declared name is refused by the schema's own pattern, the form a JSON Schema can carry. */
+export function isDotSegment(name: string): boolean {
+  return name === "." || name === "..";
+}
+
 /**
  * The one place a SECTION's path values are URL-encoded (github/repo-file.ts encodes its own). Only the
  * RepoRef half of the context is read, so non-section callers (the private-report module) can pass a bare `{ repo }`.
+ *
+ * A "." or ".." value is an error, never a path: a URL resolves either away and the request would land on another
+ * route (/labels/.. is the repository itself), and percent-encoding does not help. The settings file's names are
+ * refused at parse, so what reaches here is live state, such as an undeclared label GitHub returned. Without
+ * params the path is a plain string: a RepoRef already refuses both.
  */
+export function expand(
+  endpoint: EndpointDecl,
+  ctx: { repo: RepoRef },
+  params?: undefined,
+  query?: Readonly<Record<string, string>>,
+): string;
+export function expand(
+  endpoint: EndpointDecl,
+  ctx: { repo: RepoRef },
+  params: Readonly<Record<string, string>>,
+  query?: Readonly<Record<string, string>>,
+): Result<string, string>;
 export function expand(
   endpoint: EndpointDecl,
   ctx: { repo: RepoRef },
   params?: Readonly<Record<string, string>>,
   query?: Readonly<Record<string, string>>,
-): string {
+): string | Result<string, string> {
   const route = endpoint.route;
   const supplied = new Set(Object.keys(params ?? {}));
+  const dotSegments: string[] = [];
   const path = endpointPath(route).replace(/{([a-z_]+)}/g, (_match, token: string) => {
     if (token === "owner") {
       return encodeURIComponent(ctx.repo.owner);
@@ -241,6 +265,9 @@ export function expand(
       throw new Error(`BUG: ${route} needs a "${token}" param, but none was supplied`);
     }
     supplied.delete(token);
+    if (isDotSegment(value)) {
+      dotSegments.push(`${token} "${value}"`);
+    }
     return encodeURIComponent(value);
   });
   if (supplied.size > 0) {
@@ -248,10 +275,19 @@ export function expand(
       `BUG: ${route} was given unused param(s) [${[...supplied].join(", ")}]; they match no {token} in the route`,
     );
   }
-  if (query && Object.keys(query).length > 0) {
-    return `${path}?${new URLSearchParams(query)}`;
+
+  const full =
+    query && Object.keys(query).length > 0 ? `${path}?${new URLSearchParams(query)}` : path;
+  if (params === undefined) {
+    return full;
   }
-  return path;
+  if (dotSegments.length > 0) {
+    return err(
+      `${route} cannot be sent for ${dotSegments.join(" and ")}: as a URL path segment "." and ".." resolve to another API route. Rename or remove it on GitHub`,
+    );
+  }
+
+  return ok(full);
 }
 
 /** Read off the parsed RepoRef where expand() reads the REST halves, so no GraphQL section re-derives them. */

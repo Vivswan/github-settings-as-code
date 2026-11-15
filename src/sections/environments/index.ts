@@ -27,7 +27,7 @@ import { reportedKeyNote } from "../shared/reported-key-note.js";
 import { layeredList, routed } from "../shared/schema-helpers.js";
 import { upperKey } from "../shared/secrets-and-variables/named-scope.js";
 import { listSecretValues } from "../shared/secrets-and-variables/secrets-engine.js";
-import { projectOntoSchema, replaceSweep } from "../shared/snapshot-helpers.js";
+import { dotSegmentNote, projectOntoSchema, replaceSweep } from "../shared/snapshot-helpers.js";
 import { ENDPOINTS } from "./endpoints.js";
 import {
   NESTED_KEYS,
@@ -367,6 +367,12 @@ export const environmentsSection = {
       const notes: string[] = [];
       const entries: EnvironmentConfig[] = [];
       for (const live of listed) {
+        const undeclarable = dotSegmentNote(`environments[${live.name}]`, [live.name]);
+        if (undeclarable !== null) {
+          notes.push(undeclarable);
+          continue;
+        }
+
         const settings = projectOntoSchema(EnvironmentConfig, flattenEnvironment(live));
         const { nested, notes: nestedNotes } = yield* await snapshotNested(
           ctx,
@@ -377,6 +383,10 @@ export const environmentsSection = {
         entries.push({ ...settings, ...nested });
         notes.push(...nestedNotes);
       }
+      if (entries.length === 0) {
+        return ok({ value: undefined, notes });
+      }
+
       const pinned = withPins(entries, yield* snapshotPins(ctx));
       notes.push(...pinned.notes, ...sharedSecretNotes(pinned.entries));
       return ok({ value: pinned.entries, notes });

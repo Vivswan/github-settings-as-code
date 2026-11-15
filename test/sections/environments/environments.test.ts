@@ -1739,6 +1739,10 @@ describe("environments snapshot", () => {
           'the pins ranked after it ("web") are left without the pinned key too, since declared pins must lead the live list',
       ],
     });
+    // A listed environment the snapshot left out for its name is not "missing from the listing".
+    expect(withPins(entries, [".."]).notes).toEqual([
+      'environments: the pinned environment ".." is left out of the snapshot, so its pin cannot be declared',
+    ]);
     expect(withPins(entries, ["ghost"])).toEqual({
       entries,
       notes: [

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ok, type Result } from "neverthrow";
+import { err, ok, type Result } from "neverthrow";
 import {
   LIST_SECTIONS,
   type SECTION_KEYS,
@@ -596,7 +596,7 @@ describe("matchesTemplate", () => {
         .map((m) => m[1])
         .filter((t) => t !== "owner" && t !== "repo");
       const params = Object.fromEntries(tokens.map((t) => [t as string, "x"]));
-      const concrete = expand(endpoint, ctx, params);
+      const concrete = expand(endpoint, ctx, params)._unsafeUnwrap();
       if (!matchesTemplate(endpointPath(endpoint.route), concrete)) {
         mismatches.push(
           `${endpoint.section}.${endpoint.role}: expanded path "${concrete}" does not match its own template "${endpointPath(endpoint.route)}"`,
@@ -626,7 +626,7 @@ describe("expand", () => {
       endpoint: EndpointDecl,
       params: Record<string, string> | undefined,
       query: Record<string, string> | undefined,
-      expected: string | RegExp,
+      expected: string | RegExp | { refused: string },
     ]
   >([
     [
@@ -642,6 +642,23 @@ describe("expand", () => {
       { name: "needs review/100%" },
       undefined,
       "/repos/octo/repo/labels/needs%20review%2F100%25",
+    ],
+    [
+      'a live value of ".." is an error, never a path: a URL resolves the segment away, and the DELETE would land on the repository itself',
+      { route: "DELETE /repos/{owner}/{repo}/labels/{name}", statuses: { 204: "x" } },
+      { name: ".." },
+      undefined,
+      {
+        refused:
+          'DELETE /repos/{owner}/{repo}/labels/{name} cannot be sent for name "..": as a URL path segment "." and ".." resolve to another API route. Rename or remove it on GitHub',
+      },
+    ],
+    [
+      "three dots, and dots beside other characters, are ordinary names",
+      { route: "PATCH /repos/{owner}/{repo}/labels/{name}", statuses: { 200: "x" } },
+      { name: "..." },
+      undefined,
+      "/repos/octo/repo/labels/...",
     ],
     [
       "a missing param throws",
@@ -665,10 +682,16 @@ describe("expand", () => {
       "/repos/octo/repo/milestones?state=all",
     ],
   ])("%s", (_label, endpoint, params, query, expected) => {
-    if (typeof expected === "string") {
-      expect(expand(endpoint, ctx(), params, query)).toBe(expected);
+    const expanded = (): unknown =>
+      params === undefined
+        ? ok(expand(endpoint, ctx(), undefined, query))
+        : expand(endpoint, ctx(), params, query);
+    if (expected instanceof RegExp) {
+      expect(expanded).toThrow(expected);
     } else {
-      expect(() => expand(endpoint, ctx(), params, query)).toThrow(expected);
+      expect(expanded()).toEqual(
+        typeof expected === "string" ? ok(expected) : err(expected.refused),
+      );
     }
   });
 });
