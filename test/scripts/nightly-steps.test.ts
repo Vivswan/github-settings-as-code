@@ -151,7 +151,17 @@ function probe(
 }
 
 const SCHEMA_ADD =
-  "add --no-save --ignore-scripts @octokit/openapi@latest @octokit/graphql-schema@latest";
+  "add --no-save --ignore-scripts @octokit/openapi@latest @octokit/openapi-webhooks@latest @octokit/graphql-schema@latest";
+const SCHEMA_INFO = [
+  "info @octokit/openapi version",
+  "info @octokit/openapi-webhooks version",
+  "info @octokit/graphql-schema version",
+];
+const SCHEMA_LATEST = {
+  "@octokit/openapi": "20.1.0",
+  "@octokit/openapi-webhooks": "12.1.0",
+  "@octokit/graphql-schema": "15.26.0",
+};
 const LOCKSTEP_TESTS = [
   "test",
   "test/e2e/openapi/validate.test.ts",
@@ -161,49 +171,49 @@ const LOCKSTEP_TESTS = [
 ].join(" ");
 
 describe("probe-schema", () => {
-  test("both packages at their latest: each is reported and the lockstep tests run", () =>
+  test("every package at its latest: each is reported and the lockstep tests run", () =>
     withTempDir("nightly-steps-", (dir) => {
       const result = probe(
         dir,
-        {
-          installed: { "@octokit/openapi": "20.1.0", "@octokit/graphql-schema": "15.26.0" },
-          latest: { "@octokit/openapi": "20.1.0", "@octokit/graphql-schema": "15.26.0" },
-        },
+        { installed: SCHEMA_LATEST, latest: SCHEMA_LATEST },
         "probe-schema",
       );
       expect(result).toMatchObject({
         status: 0,
-        stdout: "@octokit/openapi@20.1.0\n@octokit/graphql-schema@15.26.0\n",
-        calls: [
-          SCHEMA_ADD,
-          "info @octokit/openapi version",
-          "info @octokit/graphql-schema version",
-          LOCKSTEP_TESTS,
-        ],
+        stdout:
+          "@octokit/openapi@20.1.0\n@octokit/openapi-webhooks@12.1.0\n@octokit/graphql-schema@15.26.0\n",
+        calls: [SCHEMA_ADD, ...SCHEMA_INFO, LOCKSTEP_TESTS],
       });
     }));
 
-  test("a package the install left behind its latest fails the probe naming both versions, before the tests run", () =>
-    withTempDir("nightly-steps-", (dir) => {
-      const result = probe(
-        dir,
-        {
-          installed: { "@octokit/openapi": "20.1.0", "@octokit/graphql-schema": "15.25.0" },
-          latest: { "@octokit/openapi": "20.1.0", "@octokit/graphql-schema": "15.26.0" },
-        },
-        "probe-schema",
-      );
-      expect(result).toMatchObject({
-        status: 1,
-        stdout:
-          "@octokit/openapi@20.1.0\n::error::@octokit/graphql-schema@15.25.0 is installed but 15.26.0 is the latest; the probe is testing the pin\n",
-        calls: [
-          SCHEMA_ADD,
-          "info @octokit/openapi version",
-          "info @octokit/graphql-schema version",
-        ],
-      });
-    }));
+  // src/generated/spec-webhooks.ts is rendered from the webhooks package: left out of the probe, a newer webhooks
+  // description passes every night unread.
+  test.each<[pkg: keyof typeof SCHEMA_LATEST, latest: string, reported: string, infoCalls: number]>(
+    [
+      ["@octokit/openapi-webhooks", "12.2.0", "@octokit/openapi@20.1.0\n", 2],
+      [
+        "@octokit/graphql-schema",
+        "15.27.0",
+        "@octokit/openapi@20.1.0\n@octokit/openapi-webhooks@12.1.0\n",
+        3,
+      ],
+    ],
+  )(
+    "%s left behind its latest by the install fails the probe naming both versions, before the tests run",
+    (pkg, latest, reported, infoCalls) =>
+      withTempDir("nightly-steps-", (dir) => {
+        const result = probe(
+          dir,
+          { installed: SCHEMA_LATEST, latest: { ...SCHEMA_LATEST, [pkg]: latest } },
+          "probe-schema",
+        );
+        expect(result).toMatchObject({
+          status: 1,
+          stdout: `${reported}::error::${pkg}@${SCHEMA_LATEST[pkg]} is installed but ${latest} is the latest; the probe is testing the pin\n`,
+          calls: [SCHEMA_ADD, ...SCHEMA_INFO.slice(0, infoCalls)],
+        });
+      }),
+  );
 
   // Without the escape the registry's second line starts a line of the log, where the runner reads it as a command.
   test("a registry answer carrying a newline stays inside the one error annotation, escaped", () =>
@@ -211,7 +221,7 @@ describe("probe-schema", () => {
       const result = probe(
         dir,
         {
-          installed: { "@octokit/openapi": "20.1.0", "@octokit/graphql-schema": "15.26.0" },
+          installed: SCHEMA_LATEST,
           latest: { "@octokit/openapi": "20.2.0\n::add-mask::forged" },
         },
         "probe-schema",

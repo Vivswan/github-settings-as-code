@@ -38,8 +38,9 @@ jobs:
       - uses: ./.github/actions/setup
         id: setup
 
-      # The lockstep tests PR CI runs against the pinned @octokit/openapi and
-      # @octokit/graphql-schema, here against each package's latest release:
+      # The lockstep tests PR CI runs against the pinned @octokit/openapi,
+      # @octokit/openapi-webhooks, and @octokit/graphql-schema, here against
+      # each package's latest release:
       # a used path removed, an upstream gap now documented, or a selected
       # field retired fails the night before Dependabot's bump PR does.
       # Both probes are .github/scripts/nightly-steps.ts.

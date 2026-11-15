@@ -1,9 +1,8 @@
 /**
  * The descriptor-derived files against the installed @octokit/openapi and @octokit/openapi-webhooks: a bump moves a
  * fresh render while the committed copy stays, and nothing else reads the two side by side. The nightly runs this
- * file after installing @octokit/openapi at @latest, so a release GitHub makes fails the night before Dependabot's
- * bump PR does; the webhooks descriptor stays at its pin there. The generator's own refusals are pinned on
- * hand-written descriptors.
+ * file after installing both at @latest, so a release GitHub makes fails the night before Dependabot's bump PR
+ * does. The generator's own refusals are pinned on hand-written descriptors.
  */
 
 import { describe, expect, test } from "bun:test";
