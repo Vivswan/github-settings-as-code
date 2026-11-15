@@ -758,22 +758,26 @@ describe("GeneratedRegion.markdown", () => {
     );
   });
 
-  test("a cell holding a Unicode line separator, which cellFault() admits, still round-trips", () => {
-    // biome keeps U+2028 inside the cell, and the respelling must see the row as one line: a `.` without dotAll
-    // skipped it, and the generator then refused its own formatted output.
-    const prose = GeneratedRegion.markdown<readonly string[]>({
-      name: "table",
-      placement: UNDER_INPUTS,
-      data: () => ["y\u2028z"],
-      render: (cells) =>
-        renderTable(
-          TABLE_HEADER,
-          cells.map((cell) => ["`k`", cell]),
-        ),
-      parse: tableBody(TABLE_HEADER, "cells", (cells) => ok(cells[1] ?? "")),
-    });
-    expect(prose.bodyRefusal(prose.render())).toBeUndefined();
-  });
+  test(
+    "a cell holding a Unicode line separator, which cellFault() admits, still round-trips",
+    () => {
+      // biome keeps U+2028 inside the cell, and the respelling must see the row as one line: a `.` without dotAll
+      // skipped it, and the generator then refused its own formatted output.
+      const prose = GeneratedRegion.markdown<readonly string[]>({
+        name: "table",
+        placement: UNDER_INPUTS,
+        data: () => ["y\u2028z"],
+        render: (cells) =>
+          renderTable(
+            TABLE_HEADER,
+            cells.map((cell) => ["`k`", cell]),
+          ),
+        parse: tableBody(TABLE_HEADER, "cells", (cells) => ok(cells[1] ?? "")),
+      });
+      expect(prose.bodyRefusal(prose.render())).toBeUndefined();
+    },
+    FORMATTER_TIMEOUT_MS,
+  );
 
   test("a bare carriage return inside a cell is still refused, not trimmed away", () => {
     // A respelling that trimmed every whitespace erased the CR and admitted the row; regeneration then rewrote the
