@@ -81,6 +81,16 @@ export function parseReposInputUnder(
     : parseReposInput(raw);
 }
 
+/** Appends in place: copying the places at each repeat costs quadratic time on a long list of one bad entry. */
+function notePlace(pool: Map<string, number[]>, item: string, place: number): void {
+  const places = pool.get(item);
+  if (places) {
+    places.push(place);
+  } else {
+    pool.set(item, [place]);
+  }
+}
+
 function readReposList(raw: string): ReposList {
   const items = splitList(raw);
   if (items.includes("*")) {
@@ -98,12 +108,12 @@ function readReposList(raw: string): ReposList {
   for (const [index, item] of items.entries()) {
     const parsed = parseRepoSlug(item);
     if (parsed.isErr()) {
-      invalid.set(item, [...(invalid.get(item) ?? []), index + 1]);
+      notePlace(invalid, item, index + 1);
       continue;
     }
     const key = slugKey(item);
     if (seen.has(key)) {
-      duplicated.set(item, [...(duplicated.get(item) ?? []), index + 1]);
+      notePlace(duplicated, item, index + 1);
     }
     seen.add(key);
     repos.push(parsed.value);

@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ROOT } from "../root.js";
 import { withTempDir } from "../temp-dir.js";
@@ -319,11 +319,11 @@ export function rejectsTheCatchBinding(run: () => Promise<void>): Promise<void> 
 /** A module whose one throw the rule flags, planted where the plugin must and must not reach. */
 const OUTSIDE_THE_RULE = 'export function outside(): never {\n  throw new Error("x");\n}\n';
 
-/** The one throw the rule admits by suppression: commander's argParser can only refuse a value by throwing. */
-const CONTRACT_FILE = "src/cli/inputs.ts";
+/** A second src/ module beside the fixture of throws: the rule reaches every file under src/, not one. */
+const SECOND_MODULE = "src/cli/inputs.ts";
 
-/** The suppression comment the contract file carries over that throw. */
-const SUPPRESSION = /^\s*\/\/ biome-ignore lint\/plugin: .*\n/m;
+/** A suppression of the plugin in any of Biome's forms: one line, a whole file (`-all`), a range (`-start`), with or without the plugin's name. */
+const SUPPRESSION = /biome-ignore(?:-all|-start)?\s+lint\/plugin\b/;
 
 describe("the never-throw plugin", () => {
   test("flags exactly the throws and rejections outside the rule, and nothing outside src/", () =>
@@ -336,7 +336,7 @@ describe("the never-throw plugin", () => {
       expect(
         lint(dir, {
           "src/throws.ts": THROWS,
-          [CONTRACT_FILE]: OUTSIDE_THE_RULE,
+          [SECOND_MODULE]: OUTSIDE_THE_RULE,
           // The generated index is exempt from the formatter only, so the rule still reaches it.
           "src/generated/upstream-gaps.ts": OUTSIDE_THE_RULE,
           "test/src/fixture.ts": OUTSIDE_THE_RULE,
@@ -344,17 +344,16 @@ describe("the never-throw plugin", () => {
         }),
       ).toEqual({
         ...expected,
-        [`${CONTRACT_FILE}:2`]: `plugin: ${MESSAGE}`,
+        [`${SECOND_MODULE}:2`]: `plugin: ${MESSAGE}`,
         "src/generated/upstream-gaps.ts:2": `plugin: ${MESSAGE}`,
       });
     }));
 
-  test("the contract file's one suppression covers a throw the rule would flag, so it is not stale", () =>
-    withTempDir("never-throw-", (dir) => {
-      const contract = readFileSync(join(ROOT, CONTRACT_FILE), "utf8");
-      expect(contract.match(new RegExp(SUPPRESSION.source, "gm"))).toHaveLength(1);
-      expect(lint(dir, { [CONTRACT_FILE]: contract })).toEqual({});
-      const flagged = lint(dir, { [CONTRACT_FILE]: contract.replace(SUPPRESSION, "") });
-      expect(Object.values(flagged)).toEqual([`plugin: ${MESSAGE}`]);
-    }));
+  // A suppression hides a throw from the rule, and one left behind after its throw is gone hides the next one written under it.
+  test("no file under src/ suppresses the rule, so no suppression can go stale", () => {
+    const suppressed = readdirSync(join(ROOT, "src"), { recursive: true, encoding: "utf8" })
+      .filter((file) => file.endsWith(".ts"))
+      .filter((file) => SUPPRESSION.test(readFileSync(join(ROOT, "src", file), "utf8")));
+    expect(suppressed).toEqual([]);
+  });
 });
