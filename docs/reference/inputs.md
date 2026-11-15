@@ -8,7 +8,7 @@ Every `with:` input the action accepts, and the outputs it sets for the steps af
 
 A list input (`sections`, `required-sections`, `repos`, `exclude`, `topics`, `affiliation`, and `settings-file` in `mode: render`) takes newline- or comma-separated values. `settings-file` is split the same way in every mode, so no settings file path can contain a comma.
 
-<!-- The inputs table is a generated region (bun run build:inputs-table) rendered from the declarations in src/flows/inputs.ts; the markers stay around the table, and the generator refuses to regenerate over anything else. The v-pre div keeps the site's Vue renderer from evaluating the token default's expression. -->
+<!-- The inputs table is a generated region (bun run build:inputs-table) rendered from the declarations in src/flows/inputs.ts; the markers stay around the table, and the generator overwrites whatever sits between them. The v-pre div keeps the site's Vue renderer from evaluating the token default's expression. -->
 <div v-pre>
 
 ## Inputs

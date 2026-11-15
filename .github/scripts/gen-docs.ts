@@ -2,25 +2,17 @@
  * The generated regions of the docs pages (bun run build:docs): the whole coverage page, the Sections table, the
  * pre-filled token-form link in the README and the getting-started page, the outputs list, and the module map.
  *
- * Each is read back and re-rendered before it is written, so a marker moved over authored text is refused instead
- * of regenerated over. Authored prose that would break a table row stops the build, and so does a coverage
- * paragraph or bullet past the word cap.
+ * Each is overwritten, unread, on every run. Authored prose that would break a table row stops the build, and so
+ * does a coverage paragraph or bullet past the word cap.
  */
 
 import { join } from "node:path";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { gfmTableFromMarkdown } from "mdast-util-gfm-table";
 import { gfmTable } from "micromark-extension-gfm-table";
-import { err, ok, Result, safeTry } from "neverthrow";
 import { visitParents } from "unist-util-visit-parents";
 import { RUN_RESULTS } from "../../src/engine/outcome.js";
-import {
-  cellFault,
-  renderTable,
-  tableBody,
-  tableFault,
-  tableRows,
-} from "../../src/report/markdown.js";
+import { cellFault, renderTable, tableFault } from "../../src/report/markdown.js";
 import type { CoverageRow, SectionDocs } from "../../src/sections/contract/docs.js";
 import type { SectionMeta } from "../../src/sections/contract/module.js";
 import {
@@ -32,11 +24,11 @@ import { RESOURCE_SLUGS } from "../../src/sections/contract/permissions.js";
 import { DOCS } from "../../src/sections/docs-registry.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import type { UndeclaredPolicy } from "../../src/types.js";
-import { type Architecture, readArchitecture, renderArchitectureMermaid } from "./arch-lint.js";
+import { readArchitecture, renderArchitectureMermaid } from "./arch-lint.js";
 import { COVERAGE_DATA, type CoverageData } from "./coverage-data.js";
 import { ENDPOINT_ANCHORS, type EndpointAnchors } from "./endpoint-docs.js";
 import { runMain } from "./lib/entry.js";
-import { blockLine, blockLines, GeneratedRegion, regionBounds } from "./lib/generated-regions.js";
+import { type GeneratedRegion, markdownBlock, regionBounds } from "./lib/generated-regions.js";
 import { type GeneratedFile, type GeneratedFiles, regenerateFiles } from "./lib/region-driver.js";
 
 /** The repository root, two levels above this script. */
@@ -45,7 +37,7 @@ const ROOT = join(import.meta.dir, "..", "..");
 /** The repository these pages document; the token form's name and description derive from it. */
 const REPO_SLUG = "Vivswan/github-settings-as-code";
 
-/** The Undeclared default cell by policy; sectionsRow() recognizes a row of the table by it. */
+/** The Undeclared default cell by policy. */
 const UNDECLARED_DEFAULT_DISPLAY: Record<UndeclaredPolicy | "untouched", string> = {
   delete: "deleted (settable)",
   keep: "kept (settable)",
@@ -108,14 +100,11 @@ export function renderPatCell(grant: string): string {
   return `${cell}; ${rendered}`;
 }
 
-export const SECTIONS_TABLE_HEADER =
+const SECTIONS_TABLE_HEADER =
   "| Section | Endpoints | PAT permission | Undeclared default | Notes |\n|---|---|---|---|---|";
 
-/**
- * The cells of each section's row, as the renderer writes them and the guard reads them back; the table rule
- * judges them.
- */
-export function sectionsCells(
+/** The cells of each section's row, as the renderer writes them; the table rule judges them. */
+function sectionsCells(
   sections: readonly SectionsTableRow[],
   docs: Readonly<Record<string, Pick<SectionDocs, "sections_table">>>,
 ): ReadonlyArray<readonly string[]> {
@@ -272,7 +261,7 @@ function renderCalls(
   return sharedCalls(carrier.label);
 }
 
-/** One Supported row with the notes group it carries: the printer writes both from it, the guard reads both back into it. */
+/** One Supported row with the notes group it carries: the printer writes both from it. */
 interface SupportedRow {
   readonly area: string;
   readonly key: string;
@@ -281,10 +270,7 @@ interface SupportedRow {
   readonly notes: readonly string[];
 }
 
-/**
- * The one statement of what a Supported row may hold, as the field and its fault: the authoring side throws it
- * and the parse refuses by it, so a row the generator refuses is no row the guard admits.
- */
+/** The one statement of what a Supported row may hold, as the field and its fault: the authoring side throws it. */
 function supportedRowFault(
   row: Omit<SupportedRow, "notes">,
 ): { readonly field: string; readonly fault: string } | undefined {
@@ -323,10 +309,7 @@ function supportedRowFault(
 /** The gaps section: the empty-state note over a bare header, or the rows. */
 type Gaps = { readonly emptyNote: string } | { readonly rows: ReadonlyArray<readonly string[]> };
 
-/**
- * The page as renderCoveragePage() prints it. coveragePage() derives it from the declarations and the authored
- * data, parseCoveragePage() reads a committed page back into it, and the two meet in the byte compare.
- */
+/** The page as renderCoveragePage() prints it; coveragePage() derives it from the declarations and the authored data. */
 interface CoveragePage {
   readonly intro: readonly string[];
   readonly supported: readonly SupportedRow[];
@@ -477,220 +460,12 @@ export function renderCoverage(
   return renderCoveragePage(coveragePage(sections, docs, data, anchors));
 }
 
-/** The key cell as keyCell() writes it, read back; the dotAll flag is for the two Unicode line separators cellFault() admits inside the keys, which `.` would not match without it. */
-const KEY_CELL = new RegExp(
-  String.raw`^\[\x60([a-z_]+)\x60\]\(${RegExp.escape(SECTIONS_PAGE)}\)(?: \(\x60(.*)\x60\))?$`,
-  "s",
-);
-
-/** A Supported row's cells read back and held to the row statement, its notes still to come from the group under the table. */
-function supportedRow(cells: readonly string[]): Result<Omit<SupportedRow, "notes">, string> {
-  const [area = "", key = "", endpoints = ""] = cells;
-  const match = KEY_CELL.exec(key);
-  if (match === null) {
-    return err(`names no section key linking to ${SECTIONS_PAGE} in its second cell`);
-  }
-  const keys = match[2];
-  const row = { area, key: match[1] ?? "", ...(keys === undefined ? {} : { keys }), endpoints };
-  const faulty = supportedRowFault(row);
-  return faulty === undefined ? ok(row) : err(`${faulty.field} ${faulty.fault}`);
-}
-
-/** A cursor over a page body's lines: each read admits what the printer writes there, or refuses naming the line as
- * renderedMismatch() numbers it. */
-class PageReader {
-  private at = 0;
-
-  constructor(private readonly lines: readonly string[]) {}
-
-  /** The line under the cursor, or "" past the end: the printer never writes past the body. */
-  current(): string {
-    return this.lines[this.at] ?? "";
-  }
-
-  refusal(what: string): Result<never, string> {
-    return err(`line ${this.at} ${what}`);
-  }
-
-  literal(text: string, what: string): Result<void, string> {
-    if (this.current() !== text) {
-      return this.refusal(what);
-    }
-    this.at += 1;
-    return ok();
-  }
-
-  blank(): Result<void, string> {
-    return this.literal("", "is not the blank line the generator writes there");
-  }
-
-  heading(text: string): Result<void, string> {
-    return this.literal(text, `is not the "${text}" heading`);
-  }
-
-  prose(what: string): Result<string, string> {
-    const line = this.current();
-    const fault = proseFault(line);
-    if (fault !== undefined) {
-      return this.refusal(`should hold ${what} but ${fault}`);
-    }
-    this.at += 1;
-    return ok(line);
-  }
-
-  /** The `- ` bullets up to the next blank line, at least one. */
-  items(what: string): Result<string[], string> {
-    const found: string[] = [];
-    while (this.current().startsWith("- ")) {
-      const text = this.current().slice(2);
-      const fault = proseFault(text);
-      if (fault !== undefined) {
-        return this.refusal(`should hold ${what} bullet but ${fault}`);
-      }
-      found.push(text);
-      this.at += 1;
-    }
-    return found.length === 0 ? this.refusal(`is not the first ${what} bullet`) : ok(found);
-  }
-
-  /** `header`'s lines, then the rows up to the next blank line under the cell rule, each through `parseRow`. */
-  table<Row>(
-    header: string,
-    what: string,
-    parseRow: (cells: readonly string[]) => Result<Row, string>,
-  ): Result<Row[], string> {
-    for (const line of header.split("\n")) {
-      if (this.current() !== line) {
-        return this.refusal(`is not the ${what} table's header`);
-      }
-      this.at += 1;
-    }
-    const start = this.at;
-    while (this.current() !== "") {
-      this.at += 1;
-    }
-    const line = (row: number): string => `line ${start + row}`;
-    return tableRows(header, this.lines.slice(start, this.at), "cells")
-      .mapErr((faulty) => `${line(faulty.row)} ${faulty.fault}`)
-      .andThen((rows) =>
-        Result.combine(
-          rows.map((cells, row) => parseRow(cells).mapErr((fault) => `${line(row)} ${fault}`)),
-        ),
-      );
-  }
-
-  /** Whether `texts` sit at the cursor, line for line: a paragraph may repeat one structural line, never a run of them. */
-  ahead(...texts: string[]): boolean {
-    return texts.every((text, offset) => this.lines[this.at + offset] === text);
-  }
-
-  /** Whether the cursor sits on the body's last line and that line is empty: the line break that closes the body. */
-  atClose(): boolean {
-    return this.at === this.lines.length - 1 && this.current() === "";
-  }
-}
-
-/** The gaps section read back: the rows, or the empty-state note over a bare header, under which a row is refused. */
-function parseGaps(page: PageReader): Result<Gaps, string> {
-  const [gapsHeaderLine = "", gapsSeparator = ""] = GAPS_HEADER.split("\n");
-  if (page.ahead(gapsHeaderLine, gapsSeparator)) {
-    return page
-      .table(GAPS_HEADER, "gaps", (cells) => ok(cells))
-      .andThen(
-        (rows): Result<Gaps, string> =>
-          rows.length === 0
-            ? page.refusal("is not the first gap row, and no empty-state note precedes the table")
-            : ok({ rows }),
-      );
-  }
-  return safeTry(function* () {
-    const emptyNote = yield* page.prose("the gaps section's empty-state note");
-    yield* page.blank();
-    yield* page.table(GAPS_HEADER, "gaps", () =>
-      err("is a gap row under the empty-state note, which stands only over an empty table"),
-    );
-    return ok<Gaps, string>({ emptyNote });
-  });
-}
-
-/**
- * A committed page read back into the shape renderCoveragePage() prints from, or why it is not one the printer
- * wrote, naming the line as renderedMismatch() numbers it. Prose slots (a paragraph, a bullet, an Area or an
- * Endpoints cell) are opaque and kept, so what the guard refuses here is structure the printer never writes.
- */
-function parseCoveragePage(body: string): Result<CoveragePage, string> {
-  const page = new PageReader(body.split("\n"));
-  return safeTry(function* () {
-    yield* page.blank();
-    const intro: string[] = [];
-    do {
-      intro.push(yield* page.prose("an intro paragraph"));
-      yield* page.blank();
-    } while (!page.ahead(SUPPORTED_HEADING, "", ...SUPPORTED_HEADER.split("\n")));
-    yield* page.heading(SUPPORTED_HEADING);
-    yield* page.blank();
-    const rows = yield* page.table(SUPPORTED_HEADER, "Supported", supportedRow);
-    if (rows.length === 0) {
-      return page.refusal("is not the first Supported row");
-    }
-    yield* page.blank();
-    yield* page.heading(NOTES_HEADING);
-    yield* page.blank();
-    const supported: SupportedRow[] = [];
-    for (const row of rows) {
-      yield* page.literal(
-        notesLabel(row),
-        `is not the notes label of the "${areaLabel(row.area)}" Supported row`,
-      );
-      yield* page.blank();
-      const notes = yield* page.items("a note");
-      yield* page.blank();
-      supported.push({ ...row, notes });
-    }
-    yield* page.heading(GAPS_HEADING);
-    yield* page.blank();
-    const gaps = yield* parseGaps(page);
-    yield* page.blank();
-    yield* page.heading(NO_API_HEADING);
-    yield* page.blank();
-    const noApiIntro = yield* page.prose("the no-public-API intro");
-    yield* page.blank();
-    const noApiItems = yield* page.items("a no-public-API");
-    yield* page.blank();
-    yield* page.heading(OUT_OF_SCOPE_HEADING);
-    yield* page.blank();
-    const outOfScope = yield* page.items("an out-of-scope");
-    if (!page.atClose()) {
-      return page.refusal("is not the line break that closes the body");
-    }
-    return ok({
-      intro,
-      supported,
-      gaps,
-      noPublicApi: { intro: noApiIntro, items: noApiItems },
-      outOfScope,
-    });
-  });
-}
-
-/** The prose after the enumeration, read back as the one tail the guard admits. */
+/** The prose after the enumeration. */
 const RESULT_TAIL =
   ", worst first across the run's targets; the exit code is 1 exactly when it is `failed`, or `drift` in mode: check";
 
 function renderOutputsList(results: readonly string[]): string {
   return `${results.map((value) => `\`${value}\``).join(" / ")}${RESULT_TAIL}`;
-}
-
-const OUTPUTS_LIST = new RegExp(
-  String.raw`^(\x60[a-z]+\x60(?: / \x60[a-z]+\x60)*)${RegExp.escape(RESULT_TAIL)}$`,
-);
-
-/** The outcome words of an inline outputs list, which sits on the BEGIN marker's own line. */
-function parseOutputsList(body: string): Result<readonly string[], string> {
-  const list = OUTPUTS_LIST.exec(body)?.[1];
-  return list === undefined
-    ? err("line 0 is not the outcome words in code spans followed by the tail")
-    : ok(list.split(" / ").map((span) => span.slice(1, -1)));
 }
 
 export type TaggedOperation = Pick<SectionOperation, "role" | "grade" | "permission"> & {
@@ -753,118 +528,42 @@ function patFormUrl(): string {
   );
 }
 
-// The three prose cells are opaque; a row is this table's when its Undeclared default cell is one of the displays,
-// the one cell the table rule does not judge.
-function sectionsRow(cells: readonly string[]): Result<readonly string[], string> {
-  if (!Object.values(UNDECLARED_DEFAULT_DISPLAY).includes(cells[3] ?? "")) {
-    return err("shows an Undeclared default the renderer has no display for");
-  }
-  return ok(cells);
-}
-
 function sectionsTableRegion(name: string, heading: string): GeneratedRegion {
-  return GeneratedRegion.markdown({
+  return {
     name,
     placement: { kind: "under-heading", heading },
-    data: () => sectionsCells(SECTIONS, DOCS),
-    render: renderSectionsRows,
-    parse: tableBody(SECTIONS_TABLE_HEADER, "keyed", sectionsRow),
-  });
+    render: () => markdownBlock(renderSectionsTable(SECTIONS, DOCS)),
+  };
 }
 
+/** The list sits inline, on the BEGIN marker's own line. */
 function outputsListRegion(name: string, heading: string): GeneratedRegion {
-  return GeneratedRegion.of<readonly string[]>({
+  return {
     name,
     placement: { kind: "under-heading", heading },
-    data: () => RUN_RESULTS,
-    render: renderOutputsList,
-    parse: parseOutputsList,
-  });
+    render: () => renderOutputsList(RUN_RESULTS),
+  };
 }
-
-const PAT_FORM_DEFINITION = new RegExp(String.raw`^\[${RegExp.escape(PAT_FORM_LABEL)}\]: (\S+)$`);
 
 /** The page's `[...][pat-form]` reference resolves through this tail definition. */
 function patUrlRegion(name: string): GeneratedRegion {
-  return GeneratedRegion.markdown({
+  return {
     name,
     placement: { kind: "tail" },
-    data: patFormUrl,
-    render: (url: string) => `[${PAT_FORM_LABEL}]: ${url}`,
-    parse: (body) =>
-      blockLine(body).andThen((line) => {
-        const url = PAT_FORM_DEFINITION.exec(line)?.[1];
-        return url === undefined
-          ? err(`line 1 is not the [${PAT_FORM_LABEL}] definition`)
-          : ok(url);
-      }),
-  });
-}
-
-const MERMAID_OPEN = "```mermaid";
-const FENCE = "```";
-const GRAPH_LINE = "graph TD";
-const NODE_LINE = /^ {2}(\S+)\["([^"]*)"\]$/;
-const EDGE_LINE = /^ {2}(\S+) --> (\S+)$/;
-
-/** What the module map draws: the layers with their paths and the import edges; the lint's exclusions are not drawn. */
-type ArchitectureMap = Pick<Architecture, "layers" | "edges">;
-
-/** Why `lines` are not a mermaid fence around a graph, or undefined. */
-function fenceFault(lines: readonly string[]): string | undefined {
-  if (lines[0] !== MERMAID_OPEN) {
-    return "line 1 does not open the mermaid fence";
-  }
-  if (lines[1] !== GRAPH_LINE) {
-    return `line 2 is not the "${GRAPH_LINE}" line`;
-  }
-  if (lines.length < 3 || lines.at(-1) !== FENCE) {
-    return `line ${lines.length} does not close the mermaid fence`;
-  }
-  return undefined;
-}
-
-/** The layers and edges the lines between the fences draw (the first of them is line 3); a line that is neither a
- * node nor an edge is authored. Entries are collected before the records are built, so an id such as `__proto__` is
- * a key and not a prototype write. */
-function mapEntries(lines: readonly string[]): Result<ArchitectureMap, string> {
-  const layers: Array<[string, readonly string[]]> = [];
-  const edges = new Map<string, string[]>();
-  for (const [index, line] of lines.entries()) {
-    const node = NODE_LINE.exec(line);
-    if (node !== null) {
-      layers.push([node[1] ?? "", (node[2] ?? "").split("<br>")]);
-      continue;
-    }
-    const edge = EDGE_LINE.exec(line);
-    if (edge === null) {
-      return err(`line ${index + 3} is neither a layer node nor an import edge`);
-    }
-    const from = edge[1] ?? "";
-    edges.set(from, [...(edges.get(from) ?? []), edge[2] ?? ""]);
-  }
-  return ok({ layers: Object.fromEntries(layers), edges: Object.fromEntries(edges) });
-}
-
-/** The diagram read back into the layers and edges it draws, under the node ids the renderer writes: whatever it
- * makes of a layer name (only "-" is rewritten), so the byte compare judges them. */
-function parseArchitectureMap(body: string): Result<ArchitectureMap, string> {
-  return blockLines(body).andThen((lines) => {
-    const fault = fenceFault(lines);
-    return fault === undefined ? mapEntries(lines.slice(2, -1)) : err(fault);
-  });
+    render: () => markdownBlock(`[${PAT_FORM_LABEL}]: ${patFormUrl()}`),
+  };
 }
 
 // Rendered from architecture.yml, which the lint keeps equal to the tree.
 function architectureMapRegion(name: string, heading: string): GeneratedRegion {
-  return GeneratedRegion.markdown<ArchitectureMap>({
+  return {
     name,
     placement: { kind: "under-heading", heading },
-    data: () => readArchitecture(ROOT),
-    render: (map) =>
-      `${MERMAID_OPEN}\n${renderArchitectureMermaid({ ...map, exclude: [] })}\n${FENCE}`,
-    parse: parseArchitectureMap,
-  });
+    render: () =>
+      markdownBlock(
+        `\`\`\`mermaid\n${renderArchitectureMermaid({ ...readArchitecture(ROOT), exclude: [] })}\n\`\`\``,
+      ),
+  };
 }
 
 // A rendered page must reference the token-form label exactly as often as it defines it, at most once: a renamed
@@ -920,16 +619,14 @@ function coverageShapeFault(coverage: string, path: string): string | undefined 
 
 export const PAGES: GeneratedFiles = {
   "docs/reference/coverage.md": {
-    // The one region closes the file and holds everything below the title (or an empty body between fresh
-    // markers), so a marker moved over authored prose fails instead of erasing it.
+    // The one region closes the file and holds everything below the title.
     regions: [
-      GeneratedRegion.markdown({
+      {
         name: "coverage",
         placement: { kind: "tail" },
-        data: () => coveragePage(SECTIONS, DOCS, COVERAGE_DATA, ENDPOINT_ANCHORS),
-        render: renderCoveragePage,
-        parse: parseCoveragePage,
-      }),
+        render: () =>
+          markdownBlock(renderCoverage(SECTIONS, DOCS, COVERAGE_DATA, ENDPOINT_ANCHORS)),
+      },
     ],
     shape: coverageShapeFault,
   },

@@ -1,17 +1,14 @@
 /**
  * The generated regions of action.yml (the inputs and outputs, from their declarations under src/) and of three
  * docs pages: the undeclared-policy count sentence and Defaults table, the permissions grant sentence and gated
- * reads, and check mode's gated reads (bun run build:action-docs). Each region is read back and re-rendered before
- * it is written, so a marker moved over authored text is refused instead of regenerated over.
+ * reads, and check mode's gated reads (bun run build:action-docs). Each region is overwritten, unread, on every run.
  */
 
 import { join } from "node:path";
-import { err, ok, Result } from "neverthrow";
 import {
   Document,
   type DocumentOptions,
   type ParseOptions,
-  parseDocument,
   Scalar,
   type SchemaOptions,
   type ToStringOptions,
@@ -21,7 +18,7 @@ import { z } from "zod";
 import { OUTPUT_DECLS } from "../../src/action/io.js";
 import type { InputDecl } from "../../src/flows/inputs.js";
 import { INPUT_DECLS } from "../../src/flows/inputs.js";
-import { renderTable, tableBody, tableFault } from "../../src/report/markdown.js";
+import { renderTable, tableFault } from "../../src/report/markdown.js";
 import { UNDECLARED_POLICY_SECTIONS, type UndeclaredPolicySection } from "../../src/schema.js";
 import { overrideAdviceLevel } from "../../src/sections/contract/errors.js";
 import type { SectionMeta } from "../../src/sections/contract/module.js";
@@ -39,9 +36,9 @@ import {
 import { SECTIONS } from "../../src/sections/registry.js";
 import { agree } from "../../src/text.js";
 import type { UndeclaredPolicy } from "../../src/types.js";
-import { COUNT_WORD_MAX, countWord } from "./lib/count-word.js";
+import { countWord } from "./lib/count-word.js";
 import { runMain } from "./lib/entry.js";
-import { block, blockLine, blockLines, GeneratedRegion } from "./lib/generated-regions.js";
+import { block, markdownBlock } from "./lib/generated-regions.js";
 import { type GeneratedFiles, regenerateFiles } from "./lib/region-driver.js";
 
 /** The repository root, two levels above this script. */
@@ -67,16 +64,6 @@ const PLAIN_NAME = /^[a-z][a-z0-9-]*$/;
 const DESCRIPTION = z
   .string()
   .regex(/^\S[^\r\n]*$/, "one line of text, not starting with whitespace");
-
-/** An input as action.yml spells it; every input is optional. */
-const INPUT_ENTRY = z.strictObject({
-  description: DESCRIPTION,
-  required: z.literal(false),
-  default: z.string(),
-});
-
-/** An output as action.yml spells it. */
-const OUTPUT_ENTRY = z.strictObject({ description: DESCRIPTION });
 
 /** The one field every declaration renders; the rest is the entry's own. */
 const DESCRIBED = z.object({ description: DESCRIPTION });
@@ -140,7 +127,7 @@ export function renderActionInputs(
   return yamlEntries("inputs", decls, (decl) => ({
     description: scalar(decl.description, Scalar.BLOCK_FOLDED),
     required: false,
-    // Every default double-quoted: one form for the region shape to name, and the string type visible at a glance.
+    // Every default double-quoted: the string type visible at a glance.
     default: scalar(decl.default, Scalar.QUOTE_DOUBLE),
   }));
 }
@@ -156,7 +143,7 @@ export function renderActionOutputs(
 /** "a", "a and b", "a, b, and c": the list as English prose writes it. */
 const PROSE_LIST = new Intl.ListFormat("en", { style: "long", type: "conjunction" });
 
-/** Why `item` cannot be one item of a prose list: a comma or the word "and" would read back as a joiner. */
+/** Why `item` cannot be one item of a prose list: a comma or the word "and" would read as a joiner. */
 function proseItemFault(item: string): string | undefined {
   return /,|(^|\s)and(\s|$)/.test(item) ? 'holds a comma or the word "and"' : undefined;
 }
@@ -200,33 +187,6 @@ export function renderPolicyCountSentence(sections: readonly KnobbedSection[]): 
   return countSentence(countSentenceKeys(sections));
 }
 
-const COUNT_SENTENCE = new RegExp(
-  String.raw`^[A-Z][a-z-]*${RegExp.escape(COUNT_SENTENCE_LEAD)}(.+)\.$`,
-);
-
-/**
- * The keys a count sentence lists; the count word is the renderer's to re-derive, so the byte compare judges it.
- * A count past the word table is refused here, since the renderer throws on it instead of rendering.
- */
-function parseCountSentence(body: string): Result<readonly string[], string> {
-  return blockLine(body).andThen((line) => {
-    const listed = COUNT_SENTENCE.exec(line)?.[1];
-    if (listed === undefined) {
-      return err("line 1 is not the count sentence");
-    }
-    const keys = [...listed.matchAll(/`([a-z_]+)`/g)].map((span) => span[1] ?? "");
-    if (keys.length === 0) {
-      return err("line 1 names no section key in a code span");
-    }
-    if (keys.length > COUNT_WORD_MAX) {
-      return err(
-        `line 1 lists ${keys.length} section keys, past the ${COUNT_WORD_MAX} the count words name`,
-      );
-    }
-    return ok(keys);
-  });
-}
-
 /** A Defaults-per-section row's prose: the default's parenthesized `caveat`, and what the opposite policy (`override`) buys. */
 export interface PolicyRowProse {
   readonly caveat?: string;
@@ -235,10 +195,9 @@ export interface PolicyRowProse {
 
 /**
  * Why a row's prose cannot be rendered: blank prose would render `delete ()` or a bare policy span, cells
- * cellFault() admits since the policy word fills them. The renderer refuses it at its own boundary and the parser
- * through this same check, by the trimmed-blank rule cellFault() uses, so what the renderer writes is exactly what
- * the guard reads back. A structural type cannot vouch for a property a narrowing hid, so the value is inspected
- * as unknown.
+ * cellFault() admits since the policy word fills them. The renderer refuses it at its own boundary, by the
+ * trimmed-blank rule cellFault() uses. A structural type cannot vouch for a property a narrowing hid, so the value
+ * is inspected as unknown.
  */
 function proseFault(row: PolicyRowProse): string | undefined {
   const blank = (value: unknown): boolean => typeof value !== "string" || value.trim() === "";
@@ -252,16 +211,16 @@ const OPPOSITE: Readonly<Record<UndeclaredPolicy, UndeclaredPolicy>> = {
   keep: "delete",
 };
 
-export const DEFAULTS_TABLE_HEADER = "| Section | Default | The override buys you |\n|---|---|---|";
+const DEFAULTS_TABLE_HEADER = "| Section | Default | The override buys you |\n|---|---|---|";
 
 /** One Defaults row: the section and the prose its cells carry. */
-export interface PolicyRow {
+interface PolicyRow {
   readonly section: KnobbedSection;
   readonly prose: PolicyRowProse;
 }
 
-/** A row's three cells, as the renderer writes them and the guard reads them back. */
-export function policyCells(row: PolicyRow): readonly string[] {
+/** A row's three cells, as the renderer writes them. */
+function policyCells(row: PolicyRow): readonly string[] {
   const caveat = row.prose.caveat === undefined ? "" : ` (${row.prose.caveat})`;
   return [
     `\`${row.section.key}\``,
@@ -270,12 +229,8 @@ export function policyCells(row: PolicyRow): readonly string[] {
   ];
 }
 
-/**
- * The one statement of what a Defaults table may hold: each row's prose by proseFault(), then the table rule over
- * the cells. The renderer consults it whole before writing; the guard consults the same two rules as it parses,
- * so a test can hold both sides to it.
- */
-export function policyTableFault(rows: readonly PolicyRow[]): string | undefined {
+/** What a Defaults table may not hold: each row's prose by proseFault(), then the table rule over the cells. */
+function policyTableFault(rows: readonly PolicyRow[]): string | undefined {
   for (const row of rows) {
     const fault = proseFault(row.prose);
     if (fault !== undefined) {
@@ -300,48 +255,17 @@ function policyRows(
   });
 }
 
-/** The Defaults table in delete-first order, the order the guard holds a committed page to through the byte compare. */
-function renderPolicyRows(rows: readonly PolicyRow[]): string {
-  const ordered = deleteFirst(rows, (row) => row.section.undeclaredDefault);
-  const fault = policyTableFault(ordered);
-  if (fault !== undefined) {
-    throw new Error(fault);
-  }
-  return renderTable(DEFAULTS_TABLE_HEADER, ordered.map(policyCells));
-}
-
+/** The Defaults table, in the delete-first order policyRows() gives. */
 export function renderPolicyDefaultsTable(
   sections: readonly KnobbedSection[],
   prose: Readonly<Record<string, PolicyRowProse>>,
 ): string {
-  return renderPolicyRows(policyRows(sections, prose));
-}
-
-/** A Defaults row read back to the section and prose it renders from; the delete-first order is then the
- * renderer's to check, through the byte compare. The dotAll flag keeps the two Unicode line separators
- * cellFault() admits inside the prose. */
-function policyRow(cells: readonly string[], key: string): Result<PolicyRow, string> {
-  const policy = /^(delete|keep)(?: \((.*)\))?$/s.exec(cells[1] ?? "");
-  // Nothing after the colon is a blank override, which proseFault() names below.
-  const buys = /^`(delete|keep)`:(?: (.*))?$/s.exec(cells[2] ?? "");
-  if (policy === null) {
-    return err("states no delete or keep default");
-  }
-  if (buys === null) {
-    return err("names no policy span before its override prose");
-  }
-  const undeclaredDefault = policy[1] === "delete" ? "delete" : "keep";
-  if (buys[1] !== OPPOSITE[undeclaredDefault]) {
-    return err(
-      `names \`${buys[1]}\` where the override is the opposite policy, \`${OPPOSITE[undeclaredDefault]}\``,
-    );
-  }
-  const row = { caveat: policy[2], override: buys[2] ?? "" };
-  const fault = proseFault(row);
+  const rows = policyRows(sections, prose);
+  const fault = policyTableFault(rows);
   if (fault !== undefined) {
-    return err(`${fault}, which the renderer refuses`);
+    throw new Error(fault);
   }
-  return ok({ section: { key, undeclaredDefault }, prose: row });
+  return renderTable(DEFAULTS_TABLE_HEADER, rows.map(policyCells));
 }
 
 /** The row every secret family shares: the value is write-only, so a wrong delete is a loss, not a drift. */
@@ -457,56 +381,6 @@ export function renderGrantSentence(sections: readonly SectionMeta[]): string {
   return grantSentence(grantLabels(sections));
 }
 
-/** `items` as a prose list's items, or the first one proseList() would refuse. */
-function proseListItems(items: readonly string[]): Result<readonly string[], string> {
-  const faulty = items.find((item) => proseItemFault(item) !== undefined);
-  return faulty === undefined
-    ? ok(items)
-    : err(`lists "${faulty}", which ${proseItemFault(faulty)}`);
-}
-
-/**
- * proseList() read back: "a", "a and b", or "a, b, and c". Exact, since every item passes proseItemFault(); text
- * whose items would not is refused rather than handed to a renderer that throws.
- */
-function proseItems(text: string): Result<readonly string[], string> {
-  const parts = text.split(", ");
-  const last = parts.at(-1);
-  return proseListItems(
-    parts.length > 2 && last?.startsWith("and ")
-      ? [...parts.slice(0, -1), last.slice("and ".length)]
-      : text.split(" and "),
-  );
-}
-
-const GRANT_SENTENCE = new RegExp(
-  String.raw`^${RegExp.escape(GRANT_SENTENCE_LEAD)}(.+?) at write(?:, plus (.+))?\.$`,
-);
-const GRANT_EXTRAS =
-  /^(?:(.+) at read and )?\(for org repos\) the (.+) organization permissions? at read$|^(.+) at read$/;
-
-function parseGrantSentence(body: string): Result<GrantLabels, string> {
-  return blockLine(body).andThen((line) => {
-    const sentence = GRANT_SENTENCE.exec(line);
-    if (sentence === null) {
-      return err("line 1 is not the grant sentence");
-    }
-    const extras = sentence[2] === undefined ? null : GRANT_EXTRAS.exec(sentence[2]);
-    if (sentence[2] !== undefined && extras === null) {
-      return err("line 1 adds grants in neither the read form nor the organization form");
-    }
-    const reads = extras?.[1] ?? extras?.[3];
-    const orgs = extras?.[2];
-    return Result.combine([
-      proseItems(sentence[1] ?? ""),
-      reads === undefined ? ok([]) : proseItems(reads),
-      orgs === undefined ? ok([]) : proseItems(orgs),
-    ])
-      .map(([writes = [], reads = [], orgs = []]): GrantLabels => ({ writes, reads, orgs }))
-      .mapErr((fault) => `line 1 ${fault}`);
-  });
-}
-
 /**
  * One gated-reads bullet's facts: which of a section's reads GitHub gates at write, and the grant that unlocks
  * them.
@@ -557,53 +431,6 @@ export function renderGatedReads(sections: readonly SectionMeta[]): string {
   return gatedBullets(gatedReads(sections));
 }
 
-const EVERY_GATED =
-  /^- GitHub gates even the (.+) reads at write, so `([a-z_]+)` needs (its write grant|the .+ write grant) in check mode too\.$/;
-const SOME_GATED =
-  /^- GitHub gates the (.+) reads at write, so `([a-z_]+)` needs its (.+) write grant in check mode to verify what they return\.$/;
-
-/** One gated-reads bullet read back, or why the line is not one; the caller prefixes the line number. */
-function gatedRead(line: string): Result<GatedRead, string> {
-  const every = EVERY_GATED.exec(line);
-  if (every !== null) {
-    return proseItems(every[1] ?? "").map(
-      (labels): GatedRead => ({
-        key: every[2] ?? "",
-        gated: "every",
-        labels,
-        ownGrant: every[3] === "its write grant",
-      }),
-    );
-  }
-  const some = SOME_GATED.exec(line);
-  if (some === null) {
-    return err("is not a gated-reads bullet");
-  }
-  // A route is listed as a code span, so the span is the item the prose rule judges.
-  const spans = proseListItems([...(some[1] ?? "").matchAll(/`[^`]+`/g)].map((m) => m[0]));
-  return Result.combine([proseItems(some[3] ?? ""), spans]).map(
-    ([labels = [], routeSpans = []]): GatedRead => ({
-      key: some[2] ?? "",
-      gated: "some",
-      routes: routeSpans.map((span) => span.slice(1, -1)),
-      labels,
-    }),
-  );
-}
-
-/** `lines` read back as gated-reads bullets, the first sitting at line `first`. */
-function parseGatedBullets(lines: readonly string[], first: number): Result<GatedRead[], string> {
-  const reads: GatedRead[] = [];
-  for (const [index, line] of lines.entries()) {
-    const read = gatedRead(line);
-    if (read.isErr()) {
-      return err(`line ${first + index} ${read.error}`);
-    }
-    reads.push(read.value);
-  }
-  return ok(reads);
-}
-
 const NO_GATED_READS = "A read-only PAT covers every section in check mode.";
 const GATED_READS_LEAD_IN =
   "The read-only rule has exceptions, each a section to drop from the preview or grant at write:";
@@ -614,21 +441,6 @@ function checkModeGatedReads(reads: readonly GatedRead[]): string {
 
 export function renderCheckModeGatedReads(sections: readonly SectionMeta[]): string {
   return checkModeGatedReads(gatedReads(sections));
-}
-
-function parseCheckModeGatedReads(body: string): Result<GatedRead[], string> {
-  return blockLines(body).andThen((lines) => {
-    if (lines.length === 1 && lines[0] === NO_GATED_READS) {
-      return ok([]);
-    }
-    if (lines[0] !== GATED_READS_LEAD_IN) {
-      return err("line 1 is neither the read-only sentence nor the lead-in to the gated reads");
-    }
-    if (lines[1] !== "") {
-      return err("line 2 is not the blank line under the lead-in");
-    }
-    return parseGatedBullets(lines.slice(2), 3);
-  });
 }
 
 function knobbedSections(): KnobbedSection[] {
@@ -642,122 +454,59 @@ function knobbedSections(): KnobbedSection[] {
   });
 }
 
-/** The region's YAML under the `key` line as data, or why it does not parse or convert. The library counts the
- * prepended key line as line 1, so a parse error's line is counted in the body instead. */
-function yamlData(key: string, body: string): Result<unknown, string> {
-  const doc = parseDocument(`${key}:${body}`, { ...YAML_DOCUMENT, prettyErrors: false });
-  const error = doc.errors[0];
-  if (error !== undefined) {
-    const line = body.slice(0, error.pos[0] - `${key}:`.length).split("\n").length - 1;
-    return err(`line ${line} does not parse as YAML (${error.message})`);
-  }
-  // An alias without its anchor parses but does not convert; to the guard that is a refusal.
-  return Result.fromThrowable(
-    (): unknown => doc.toJS(),
-    (failure) =>
-      `it does not convert from YAML (${failure instanceof Error ? failure.message : String(failure)})`,
-  )();
-}
-
-/** The `key` mapping of the converted YAML, or why the body is not one. */
-function keyMapping(root: unknown, key: string): Result<Record<string, unknown>, string> {
-  const mapping =
-    typeof root === "object" && root !== null
-      ? ((root as Record<string, unknown>)[key] ?? {})
-      : root;
-  if (typeof mapping !== "object" || mapping === null || Array.isArray(mapping)) {
-    return err(`it is not a mapping of ${key} declarations`);
-  }
-  return ok(mapping as Record<string, unknown>);
-}
-
-/**
- * A YAML region's body read back as the `key` mapping's declarations under `entry`, every own name kept; the
- * emitter is its own grammar, so a spelling it does not write fails the byte compare that follows.
- */
-function yamlDeclarations<T>(
-  key: string,
-  entry: z.ZodType<T>,
-): (body: string) => Result<Record<string, T>, string> {
-  return (body) =>
-    yamlData(key, body)
-      .andThen((root) => keyMapping(root, key))
-      .andThen((mapping) => {
-        const declared = declarations(entry, mapping);
-        return typeof declared === "string"
-          ? err(`it is not a set of ${key} declarations (${declared})`)
-          : ok(declared);
-      });
-}
-
-/** Each region reads its body back and re-renders it, so a marker moved elsewhere fails instead of regenerating in the wrong place or erasing authored text. */
 export const FILES: GeneratedFiles = {
   "action.yml": {
     regions: [
-      GeneratedRegion.of<Readonly<Record<string, Pick<InputDecl, "description" | "default">>>>({
+      {
         name: "action-inputs",
         placement: { kind: "under-key", key: "inputs" },
-        data: () => INPUT_DECLS,
-        render: block(renderActionInputs),
-        parse: yamlDeclarations("inputs", INPUT_ENTRY),
-      }),
-      GeneratedRegion.of<Readonly<Record<string, { readonly description: string }>>>({
+        render: () => block(renderActionInputs(INPUT_DECLS)),
+      },
+      {
         name: "action-outputs",
         placement: { kind: "under-key", key: "outputs" },
-        data: () => OUTPUT_DECLS,
-        render: block(renderActionOutputs),
-        parse: yamlDeclarations("outputs", OUTPUT_ENTRY),
-      }),
+        render: () => block(renderActionOutputs(OUTPUT_DECLS)),
+      },
     ],
   },
   "docs/reference/undeclared-policy.md": {
     regions: [
-      GeneratedRegion.markdown<readonly string[]>({
+      {
         name: "policy-count-sentence",
         placement: { kind: "under-heading", heading: "# The undeclared policy" },
-        data: () => countSentenceKeys(knobbedSections()),
-        render: countSentence,
-        parse: parseCountSentence,
-      }),
-      GeneratedRegion.markdown<readonly PolicyRow[]>({
+        render: () => markdownBlock(renderPolicyCountSentence(knobbedSections())),
+      },
+      {
         name: "policy-defaults-table",
         placement: { kind: "under-heading", heading: "## Defaults per section" },
-        data: () => policyRows(knobbedSections(), POLICY_ROW_PROSE),
-        render: renderPolicyRows,
-        parse: tableBody(DEFAULTS_TABLE_HEADER, "keyed", policyRow),
-      }),
+        render: () => markdownBlock(renderPolicyDefaultsTable(knobbedSections(), POLICY_ROW_PROSE)),
+      },
     ],
   },
   "docs/reference/permissions.md": {
     regions: [
-      GeneratedRegion.markdown({
+      {
         name: "permissions-grant-sentence",
         placement: { kind: "under-heading", heading: "## What to grant" },
-        data: () => grantLabels(SECTIONS),
-        render: grantSentence,
-        parse: parseGrantSentence,
-      }),
-      GeneratedRegion.markdown<readonly GatedRead[]>({
+        render: () => markdownBlock(renderGrantSentence(SECTIONS)),
+      },
+      {
         name: "permissions-gated-reads",
         placement: { kind: "under-heading", heading: "## How a denial surfaces" },
-        data: () => gatedReads(SECTIONS),
-        render: gatedBullets,
-        parse: (body) => blockLines(body).andThen((lines) => parseGatedBullets(lines, 1)),
-      }),
+        render: () => markdownBlock(renderGatedReads(SECTIONS)),
+      },
     ],
   },
   "docs/operate/check-mode.md": {
     regions: [
-      GeneratedRegion.markdown<readonly GatedRead[]>({
+      {
         name: "check-mode-gated-reads",
         placement: {
           kind: "under-heading",
           heading: "## Checking settings changes on pull requests",
         },
-        data: () => gatedReads(SECTIONS),
-        render: checkModeGatedReads,
-        parse: parseCheckModeGatedReads,
-      }),
+        render: () => markdownBlock(renderCheckModeGatedReads(SECTIONS)),
+      },
     ],
   },
 };
