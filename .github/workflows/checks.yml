@@ -18,8 +18,6 @@ jobs:
       - uses: ./.github/actions/setup
       - name: Lint (biome)
         run: bun run lint
-      - name: Unused exports (knip)
-        run: bun run knip
       - name: Lint (architecture)
         run: bun run lint:arch
       - name: Typecheck

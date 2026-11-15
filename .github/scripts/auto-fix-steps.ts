@@ -168,11 +168,11 @@ function push(): number | undefined {
   if (canRetrigger === "true") {
     return;
   }
-  // The fix landed via github.token, which starts no workflows, so the PR's checks will not re-run on the new
-  // head: surface that here and, through notify=, on the PR.
+  // The fix landed via github.token, so GitHub holds the new head's checks for approval: surface that here and,
+  // through notify=, on the PR.
   setOutput("notify", "true");
   console.log(
-    "::warning::auto-fix pushed without REPO_PLATFORM_TOKEN - checks will not re-run on the new head; close/reopen the PR or register the token",
+    "::warning::auto-fix pushed without REPO_PLATFORM_TOKEN - GitHub holds the new head's checks for approval; approve the held run in the PR's merge box, or register the token",
   );
 }
 

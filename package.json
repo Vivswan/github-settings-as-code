@@ -46,7 +46,7 @@
     "lint:arch": "bun .github/scripts/arch-lint.ts",
     "lint:package": "bun x publint --strict && bun x attw --pack . --profile esm-only",
     "typecheck": "bun x tsc -p .",
-    "knip": "knip",
+    "knip": "knip --treat-config-hints-as-errors",
     "test": "bun run build:schema && bun test",
     "test:e2e": "bun test/e2e/run.ts",
     "fuzz": "bun run build:schema && bun test/e2e/fuzz.ts",

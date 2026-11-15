@@ -14,18 +14,23 @@ import { runStep } from "./step-fixture.js";
 test.each<
   [name: string, script: string, args: string[], stderr: string, env?: Record<string, string>]
 >([
-  ["no subcommand", "post-green-steps", [], "post-green-steps: no command given; expected probe\n"],
+  [
+    "no subcommand",
+    "auto-format-steps",
+    [],
+    "auto-format-steps: no command given; expected format | push\n",
+  ],
   [
     "a mistyped subcommand",
-    "post-green-steps",
-    ["porbe"],
-    'post-green-steps: unknown command "porbe"; expected probe\n',
+    "auto-format-steps",
+    ["lint"],
+    'auto-format-steps: unknown command "lint"; expected format | push\n',
   ],
   [
     "a subcommand that is a key every object inherits",
-    "post-green-steps",
+    "auto-format-steps",
     ["constructor"],
-    'post-green-steps: unknown command "constructor"; expected probe\n',
+    'auto-format-steps: unknown command "constructor"; expected format | push\n',
   ],
   [
     "a handler's thrown refusal",

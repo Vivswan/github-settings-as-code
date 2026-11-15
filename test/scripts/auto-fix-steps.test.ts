@@ -353,13 +353,13 @@ describe("push", () => {
     },
   );
 
-  test("a push with the default token lands and sets notify=true with a warning, since it starts no workflows", () => {
+  test("a push with the default token lands and sets notify=true with a warning, since its checks wait for approval", () => {
     const { fx, pr, headSha, temp } = prFixture();
     cutPatch(pr, temp, () => write(pr, "README.md", "fresh\n"));
     const result = push(pr, temp, { HEAD_SHA: headSha, CAN_RETRIGGER: "false" });
     expect(result).toMatchObject({ status: 0, outputs: ["notify=true"] });
     expect(result.stdout).toEndWith(
-      "::warning::auto-fix pushed without REPO_PLATFORM_TOKEN - checks will not re-run on the new head; close/reopen the PR or register the token\n",
+      "::warning::auto-fix pushed without REPO_PLATFORM_TOKEN - GitHub holds the new head's checks for approval; approve the held run in the PR's merge box, or register the token\n",
     );
     expect(git(fx.origin, "rev-parse", `${originTip(fx)}^`)).toBe(headSha);
   });

@@ -16,10 +16,10 @@
 #                                                   this workflow file, which predates the split)
 #
 # Dependabot-triggered runs read the Dependabot secrets store, not the Actions one, so REPO_PLATFORM_TOKEN goes in
-# both. A push made with github.token starts no workflows.
-#   no token, install succeeds   -> the fix lands but CI does not re-run; the job posts a PR comment and a warning (close/reopen the PR)
-#   no token, Dependabot bun PR  -> a bun.lock the Bun updater left stale fails the frozen install here; a close/reopen
-#                                   re-runs it against the same stale lockfile; only a push made with a real token brings a fresh one
+# both. GitHub holds the pull_request run a github.token push creates until someone with write access approves it.
+#   no token, install succeeds   -> the fix lands and its checks wait; the job posts a PR comment and a warning (approve the held run in the merge box)
+#   no token, Dependabot bun PR  -> a bun.lock the Bun updater left stale fails the frozen install here, and a re-run
+#                                   meets the same stale lockfile
 
 name: Auto Fix
 
@@ -108,7 +108,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
-      pull-requests: write # the sticky no-retrigger comment below
+      pull-requests: write # the sticky held-checks comment below
     steps:
       # The script that holds the write token comes from the default branch, so nothing checked out from the PR
       # branch is executed here; that branch is checked out beside it, as the tree the patch applies to.
@@ -146,15 +146,15 @@ jobs:
         run: bun .github/scripts/auto-fix-steps.ts push
       # One sticky comment per PR (the header is its identity), updated in place on later pushes; a failed post fails
       # this step, not the push.
-      - name: Tell the PR its checks will not re-run
+      - name: Tell the PR its checks wait for approval
         if: steps.push.outputs.notify == 'true'
         uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
         with:
           header: auto-fix
           message: >-
-            Pushed an auto-fix commit with the default workflow token, which
-            starts no workflows, so checks will not re-run on the new head.
-            Close and reopen this PR to re-run them, or register
-            `REPO_PLATFORM_TOKEN` (as an Actions secret, and as a Dependabot
-            secret for Dependabot PRs) so future fixes re-trigger CI
-            automatically.
+            Pushed an auto-fix commit with the default workflow token, so
+            GitHub holds the checks on the new head for approval. Select
+            **Approve workflows to run** in the merge box to start them, or
+            register `REPO_PLATFORM_TOKEN` (as an Actions secret, and as a
+            Dependabot secret for Dependabot PRs) so future fixes run CI
+            without approval.
