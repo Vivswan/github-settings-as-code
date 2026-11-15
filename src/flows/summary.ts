@@ -8,7 +8,7 @@ import type { SectionOutcome } from "../engine/orchestrate.js";
 import type { RunOutcome } from "../engine/outcome.js";
 import type { SectionSnapshotOutcome } from "../engine/snapshot.js";
 import type { Io } from "../io.js";
-import { markdownCell, renderTable } from "../report/markdown.js";
+import { markdownCell, markdownText, renderTable } from "../report/markdown.js";
 import { countNoun } from "../text.js";
 import type { PublicDetail, PublicTargetView } from "./redact.js";
 
@@ -63,9 +63,9 @@ function targetCells(view: PublicTargetView): [string, string, string] {
 function targetDetails(views: readonly PublicTargetView[]): string[] {
   return views.flatMap((view) => [
     "",
-    `### ${markdownCell(view.display)} (${view.result})`,
+    `### ${markdownText(view.display)} (${view.result})`,
     "",
-    ...(view.note ? [markdownCell(view.note), ""] : []),
+    ...(view.note ? [markdownText(view.note), ""] : []),
     ...(view.outcomes.length > 0 ? [outcomeTable(view.outcomes)] : []),
   ]);
 }
@@ -88,7 +88,7 @@ export function writeSummary(
 ): void {
   const lines = [`## github-settings-as-code (${mode})`, ""];
   if (view.note !== undefined) {
-    lines.push(`${statusCell(result)} - ${markdownCell(view.note)}`, "");
+    lines.push(`${statusCell(result)} - ${markdownText(view.note)}`, "");
   }
   for (const fact of facts) {
     lines.push(fact, "");
@@ -109,7 +109,7 @@ export function writeRenderSummary(
       layers.map((path, index) => [`${index + 1}`, markdownCell(path)]),
     ),
     "",
-    `Rendered document written to ${markdownCell(renderedFile)}.`,
+    `Rendered document written to ${markdownText(renderedFile)}.`,
   ];
   io.summary(lines.join("\n"));
 }
@@ -127,12 +127,12 @@ export function writeMultiSummary(io: SummaryIo, views: PublicTargetView[], mode
 /** The rollup's first line: how many of the targets' snapshots were written under the directory. */
 function writtenLine(written: number, total: number, snapshotDir: string): string {
   if (written === 0) {
-    return `No snapshot was written under ${markdownCell(snapshotDir)}.`;
+    return `No snapshot was written under ${markdownText(snapshotDir)}.`;
   }
   if (written === total) {
-    return `Snapshots written under ${markdownCell(snapshotDir)}.`;
+    return `Snapshots written under ${markdownText(snapshotDir)}.`;
   }
-  return `${written} of ${total} snapshots written under ${markdownCell(snapshotDir)}.`;
+  return `${written} of ${total} snapshots written under ${markdownText(snapshotDir)}.`;
 }
 
 /** The snapshot-dir summary: the fleet rollup with each target's file and the run's moment, then one section table per target. */

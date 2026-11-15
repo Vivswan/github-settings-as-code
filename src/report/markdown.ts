@@ -3,19 +3,33 @@
  * action-layer-free so the composer's independence holds.
  *
  * One renderer, two kinds of cell:
- *   step summary    -> free text the caller escapes with markdownCell(); never refused
+ *   step summary    -> free text the caller escapes with markdownCell(), or markdownText() outside a table; never refused
  *   generated page  -> authored prose refused rather than escaped, since an escape would change the author's text:
  *                      tableFault() before rendering, tableBody() when the committed page is read back
  */
 
+import { gfmStrikethroughToMarkdown } from "mdast-util-gfm-strikethrough";
+import { gfmTableToMarkdown } from "mdast-util-gfm-table";
+import { toMarkdown } from "mdast-util-to-markdown";
 import { err, ok, type Result } from "neverthrow";
 
-/** Backslashes FIRST: a bare backslash before an escaped pipe would read as an escaped backslash plus a live pipe and split the row. */
+/** The GFM constructs GitHub reads beyond CommonMark that free text could open: a table cell boundary and a strikethrough. */
+const GFM = { extensions: [gfmTableToMarkdown(), gfmStrikethroughToMarkdown()] };
+
+/** The serializer ends a non-empty node with one line feed; a line break in the text becomes a space first, so the text stays on its row or its line. */
+function serialized(type: "tableCell" | "paragraph", text: string): string {
+  const value = text.replace(/\r\n?|\n/g, " ");
+  return toMarkdown({ type, children: [{ type: "text", value }] }, GFM).replace(/\n$/, "");
+}
+
+/** `text` as the content of one table cell that renders literally: markup characters, pipes, and backslashes escaped. */
 export function markdownCell(text: string): string {
-  return text
-    .replace(/\\/g, "\\\\")
-    .replace(/\|/g, "\\|")
-    .replace(/\r\n?|\n/g, " ");
+  return serialized("tableCell", text);
+}
+
+/** `text` as running text outside a table that renders literally, a block opener at its start ("- ", "# ", "1. ") included. */
+export function markdownText(text: string): string {
+  return serialized("paragraph", text);
 }
 
 export function tableRow(cells: readonly string[]): string {

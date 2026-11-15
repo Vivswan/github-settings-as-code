@@ -57,8 +57,13 @@ function leftOutMark(count: number): string {
   return `(lines left out: ${count})`;
 }
 
+/** Each section's detail lines as escaped cell text, in outcome order: escaped once per report, since fitting a limit reads every line again. */
+function detailCells(input: ReportInput): string[][] {
+  return input.outcomes.map((outcome) => outcome.detail.map(markdownCell));
+}
+
 /** The document carrying `kept` lines of each list. A list cut short ends in its mark, and any cut is announced under the heading. */
-function render(input: ReportInput, kept: Kept, limit: number): string {
+function render(input: ReportInput, cells: string[][], kept: Kept, limit: number): string {
   const total = input.outcomes.reduce((sum, o) => sum + o.detail.length, input.transcript.length);
   const carried = kept.detail.reduce((sum, count) => sum + count, kept.transcript);
   const lines: string[] = [
@@ -93,7 +98,7 @@ function render(input: ReportInput, kept: Kept, limit: number): string {
       renderTable(
         "| Section | Status | Detail |\n|---|---|---|",
         input.outcomes.map((outcome, row) => {
-          const shown = outcome.detail.slice(0, kept.detail[row]).map(markdownCell);
+          const shown = (cells[row] ?? []).slice(0, kept.detail[row]);
           const cut = outcome.detail.length - shown.length;
           return [
             markdownCell(outcome.key),
@@ -131,11 +136,11 @@ function render(input: ReportInput, kept: Kept, limit: number): string {
  * document past the limit. The rest (heading, run table, section statuses, marks) is never cut, so a limit below it
  * is not met.
  */
-function fit(input: ReportInput, limit: number): Kept {
+function fit(input: ReportInput, cells: string[][], limit: number): Kept {
   const kept: Kept = { detail: input.outcomes.map(() => 0), transcript: 0 };
   // What a first transcript line adds beyond itself: the two fences, their line ends, and the blank line above the mark.
   const fences = 2 * fenceFor(input.transcript.map(transcriptLine).join("\n")).length + 3;
-  let room = limit - render(input, kept, limit).length - fences;
+  let room = limit - render(input, cells, kept, limit).length - fences;
   const take = (cost: number): boolean => {
     if (cost > room) {
       return false;
@@ -146,8 +151,8 @@ function fit(input: ReportInput, limit: number): Kept {
   const open = new Set(input.outcomes.keys());
   for (let depth = 0; open.size > 0; depth++) {
     for (const row of open) {
-      const line = input.outcomes[row]?.detail[depth];
-      if (line !== undefined && take(markdownCell(line).length + BREAK.length)) {
+      const cell = cells[row]?.[depth];
+      if (cell !== undefined && take(cell.length + BREAK.length)) {
         kept.detail[row] = depth + 1;
       } else {
         open.delete(row);
@@ -172,11 +177,12 @@ function everyLine(input: ReportInput): Kept {
 
 /** The whole report, whatever its length. */
 export function composeReport(input: ReportInput): string {
-  return render(input, everyLine(input), Number.POSITIVE_INFINITY);
+  return render(input, detailCells(input), everyLine(input), Number.POSITIVE_INFINITY);
 }
 
 /** The report for a channel whose document holds `limit` characters: over it, lines are left out and the document counts them. */
 export function composeReportWithin(input: ReportInput, limit: number): string {
-  const whole = render(input, everyLine(input), limit);
-  return whole.length <= limit ? whole : render(input, fit(input, limit), limit);
+  const cells = detailCells(input);
+  const whole = render(input, cells, everyLine(input), limit);
+  return whole.length <= limit ? whole : render(input, cells, fit(input, cells, limit), limit);
 }

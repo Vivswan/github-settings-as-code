@@ -85,18 +85,18 @@ describe("the step summary bytes", () => {
   const sectionTable = [
     "| Section | Status | Detail |",
     "|---|---|---|",
-    "| labels | :white_check_mark: applied | 3 upserts<br>a \\| b<br>c\\\\d<br>e f |",
+    "| labels | :white_check_mark: applied | 3 upserts<br>a \\| b<br>c\\d<br>e f |",
     "| rulesets | :fast_forward: skipped | - |",
   ].join("\n");
   const perTarget = [
     "",
-    "### o/r\\|1\\\\2 (applied)",
+    "### o/r|1\\2 (applied)",
     "",
     sectionTable,
     "",
     "### o/r2 (failed)",
     "",
-    "token \\| lacks \\\\ scope",
+    "token | lacks \\ scope",
     "",
   ].join("\n");
 
@@ -110,7 +110,7 @@ describe("the step summary bytes", () => {
       [
         "## github-settings-as-code (check)",
         "",
-        ":warning: drift - redacted \\| view",
+        ":warning: drift - redacted | view",
         "",
         "Fact | one.",
         "",
@@ -126,9 +126,9 @@ describe("the step summary bytes", () => {
         "| Layer | Settings file |",
         "|---|---|",
         "| 1 | layers/a\\|b.yml |",
-        "| 2 | layers\\\\c.yml |",
+        "| 2 | layers\\c.yml |",
         "",
-        "Rendered document written to out/settings\\|.yml.",
+        "Rendered document written to out/settings|.yml.",
       ].join("\n"),
     ],
     [
@@ -139,7 +139,7 @@ describe("the step summary bytes", () => {
         "",
         "| Repository | Source | Result |",
         "|---|---|---|",
-        "| o/r\\|1\\\\2 | remote | :white_check_mark: applied |",
+        "| o/r\\|1\\2 | remote | :white_check_mark: applied |",
         "| o/r2 | central | :x: failed |",
         perTarget,
       ].join("\n"),
@@ -150,13 +150,13 @@ describe("the step summary bytes", () => {
       [
         "## github-settings-as-code (snapshot, 2 repositories)",
         "",
-        "1 of 2 snapshots written under snap\\|dir.",
+        "1 of 2 snapshots written under snap|dir.",
         "",
         "Snapshot taken 2026-09-13T00:00:00.000Z.",
         "",
         "| Repository | Source | Result | File |",
         "|---|---|---|---|",
-        "| o/r\\|1\\\\2 | remote | :white_check_mark: applied | snapshots/o/r\\|1.yml |",
+        "| o/r\\|1\\2 | remote | :white_check_mark: applied | snapshots/o/r\\|1.yml |",
         "| o/r2 | central | :x: failed | - |",
         perTarget,
       ].join("\n"),

@@ -43,7 +43,7 @@ describe("composeReport", () => {
         "",
         "| Section | Status | Detail |",
         "|---|---|---|",
-        "| labels | drift | labels[secret-project]: missing |",
+        "| labels | drift | labels\\[secret-project]: missing |",
         "| repository | clean |  |",
         "",
         "## Transcript",
@@ -173,7 +173,7 @@ describe("composeReportWithin", () => {
     expect(marks).toHaveLength(2);
     expect(marks[1]).toBe(60);
     expect(head).toEqual([limit, (marks[0] as number) + 60, 121]);
-    expect(cut).toContain(`${long[0]}<br>`);
+    expect(cut).toContain("labels\\[entry-0]: undeclared, so apply deletes it<br>");
     expect(cut).toContain(`<br>(lines left out: ${marks[0]}) |`);
     expect(transcriptOf(cut)).toBe("## Transcript\n\n(lines left out: 60)\n");
   });
@@ -196,8 +196,8 @@ describe("composeReportWithin", () => {
     });
     // The fixed part is the body with all 42 lines left out: the heading, the notice, the run table, each section's
     // status, and the marks. Its length moves only with the digits of the limit its notice names.
-    const fixedPart = (limit: number): number =>
-      composeReportWithin(report, 0).length + String(limit).length - 1;
+    const bare = composeReportWithin(report, 0).length;
+    const fixedPart = (limit: number): number => bare + String(limit).length - 1;
     const cuts = Array.from({ length: composeReport(report).length }, (_, limit) => {
       const cut = composeReportWithin(report, limit);
       const { head, marks } = leftOut(cut);
