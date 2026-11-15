@@ -113,7 +113,7 @@ describe("section shape validation", () => {
     // The environments slice refuses a singular `secret` key by name; the null rewrite has nothing truer to say.
     expect(issuesOf({ environments: [{ name: "prod", secret: null }] })).toEqual([
       expect.stringMatching(
-        /^environments\[0\]\.secret: environment secrets belong under the entry's `secrets` list/,
+        /^environments\[0\]\.secret: environment secrets belong under the entry's "secrets" list/,
       ),
     ]);
   });

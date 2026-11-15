@@ -5,7 +5,7 @@
  */
 
 import type { AnnotationLevel } from "../io.js";
-import { markdownCell, renderTable } from "./markdown.js";
+import { markdownCell, markdownLink, markdownText, renderTable } from "./markdown.js";
 
 interface TranscriptLine {
   level?: AnnotationLevel;
@@ -67,7 +67,7 @@ function render(input: ReportInput, cells: string[][], kept: Kept, limit: number
   const total = input.outcomes.reduce((sum, o) => sum + o.detail.length, input.transcript.length);
   const carried = kept.detail.reduce((sum, count) => sum + count, kept.transcript);
   const lines: string[] = [
-    `${REPORT_HEADING} ${input.target}`,
+    `${REPORT_HEADING} ${markdownText(input.target)}`,
     "",
     "Full, unredacted report for this target. The public run redacts it; this document is its private mirror.",
     "",
@@ -82,7 +82,7 @@ function render(input: ReportInput, cells: string[][], kept: Kept, limit: number
     renderTable("| | |\n|---|---|", [
       ["Target", markdownCell(input.target)],
       ["Admin repository", markdownCell(input.adminRepo)],
-      ["Run", markdownCell(input.runUrl)],
+      ["Run", markdownLink(input.runUrl)],
       ["Mode", markdownCell(input.mode)],
       ["Result", markdownCell(input.result)],
       ["Generated", markdownCell(input.timestamp)],

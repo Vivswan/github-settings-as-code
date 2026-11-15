@@ -716,11 +716,20 @@ function renderedSummary(summary: string): string {
 }
 
 /**
- * Whether the step summary carries `needle`: in its raw Markdown, or in the text it renders to. A needle is plain
- * text and is never read as Markdown, which would eat its stars. Both forms count for a leak too.
+ * Whether a step summary carries a needle: in its raw Markdown, or in the text it renders to, read once for every
+ * needle of the summary. A needle is plain text and is never read as Markdown, which would eat its stars. Both
+ * forms count for a leak too.
  */
-function summaryHolds(summary: string, needle: string): boolean {
-  return summary.includes(needle) || renderedSummary(summary).includes(needle);
+function summaryHolder(summary: string): (needle: string) => boolean {
+  let rendered: string | undefined;
+  return (needle) => {
+    if (summary.includes(needle)) {
+      return true;
+    }
+
+    rendered ??= renderedSummary(summary);
+    return rendered.includes(needle);
+  };
 }
 
 /**
@@ -736,8 +745,9 @@ export function checkLeaks(
   const failures: string[] = [];
   const maskedStdout = stripMaskLines(observed.stdout);
   const maskedStderr = stripMaskLines(observed.stderr);
+  const summaryHolds = summaryHolder(observed.summary);
   for (const needle of forbidden) {
-    if (summaryHolds(observed.summary, needle)) {
+    if (summaryHolds(needle)) {
       failures.push(`leak: "${needle}" present in the step summary`);
     }
     if (maskedStdout.includes(needle)) {
@@ -922,8 +932,9 @@ function outcomeFailures(exp: Expect, first: Invocation): string[] {
 
 function surfaceContainsFailures(exp: Expect, first: Invocation): string[] {
   const failures: string[] = [];
+  const summaryHolds = summaryHolder(first.summary);
   for (const needle of exp.summary_contains ?? []) {
-    if (!summaryHolds(first.summary, needle)) {
+    if (!summaryHolds(needle)) {
       failures.push(`summary missing: ${needle}`);
     }
   }
@@ -939,8 +950,9 @@ function surfaceContainsFailures(exp: Expect, first: Invocation): string[] {
 function surfaceLacksFailures(exp: Expect, first: Invocation): string[] {
   const failures: string[] = [];
   const maskedStdout = stripMaskLines(first.stdout);
+  const summaryHolds = summaryHolder(first.summary);
   for (const needle of exp.summary_lacks ?? []) {
-    if (summaryHolds(first.summary, needle)) {
+    if (summaryHolds(needle)) {
       failures.push(`summary must not contain: ${needle}`);
     }
   }

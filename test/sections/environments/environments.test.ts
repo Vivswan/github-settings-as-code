@@ -553,7 +553,7 @@ describe("environments nested secrets validation and shape", () => {
     ]);
     expect(misplaced.success).toBe(false);
     expect(JSON.stringify(misplaced.error?.issues)).toContain(
-      "belong under the entry's `secrets` list",
+      'belong under the entry\'s \\"secrets\\" list',
     );
   });
 

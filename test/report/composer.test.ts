@@ -34,7 +34,7 @@ describe("composeReport", () => {
         "|---|---|",
         "| Target | o/private-repo |",
         "| Admin repository | o/admin |",
-        "| Run | https://github.com/o/admin/actions/runs/42 |",
+        "| Run | <https://github.com/o/admin/actions/runs/42> |",
         "| Mode | check |",
         "| Result | drift |",
         "| Generated | 2026-07-22T10:00:00.000Z |",
@@ -55,6 +55,21 @@ describe("composeReport", () => {
         "",
       ].join("\n"),
     );
+  });
+
+  test("a target and a run URL with underscores at word edges render as written: the heading showed `acme/__init__` bold, and the Run link pointed at an escaped path", () => {
+    const report = composeReport(
+      input({
+        target: "acme/__init__",
+        runUrl: "https://github.com/acme/_admin_/actions/runs/1",
+      }),
+    );
+
+    expect(report.split("\n").filter((line) => /^# |^\| (Target|Run) /.test(line))).toEqual([
+      "# settings-as-code private report: acme/\\_\\_init\\_\\_",
+      "| Target | acme/\\_\\_init\\_\\_ |",
+      "| Run | <https://github.com/acme/_admin_/actions/runs/1> |",
+    ]);
   });
 
   test.each<[name: string, detail: string[], cell: string]>([

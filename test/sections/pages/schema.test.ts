@@ -27,7 +27,7 @@ describe("a Pages field the update cannot set is refused at parse, naming the ke
     [
       "html_url",
       "https://o.github.io/r/",
-      "GitHub mints the site address from the repository and `cname`; declare `cname` for a custom domain",
+      'GitHub mints the site address from the repository and "cname"; declare "cname" for a custom domain',
     ],
     ["status", "built", "it reports the latest build's outcome"],
     [
@@ -48,7 +48,7 @@ describe("a Pages field the update cannot set is refused at parse, naming the ke
     [
       "https_certificate",
       { state: "approved" },
-      "GitHub provisions the certificate for `cname`; declare `cname` and `https_enforced`",
+      'GitHub provisions the certificate for "cname"; declare "cname" and "https_enforced"',
     ],
   ])("%s", (key, value, fix) => {
     expect(issues({ build_type: "workflow", [key]: value })).toEqual([

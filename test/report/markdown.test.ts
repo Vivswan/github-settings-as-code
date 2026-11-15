@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { fromMarkdown } from "mdast-util-from-markdown";
+import { gfmAutolinkLiteralFromMarkdown } from "mdast-util-gfm-autolink-literal";
 import { gfmStrikethroughFromMarkdown } from "mdast-util-gfm-strikethrough";
 import { gfmTableFromMarkdown } from "mdast-util-gfm-table";
+import { toString as nodeText } from "mdast-util-to-string";
+import { gfmAutolinkLiteral } from "micromark-extension-gfm-autolink-literal";
 import { gfmStrikethrough } from "micromark-extension-gfm-strikethrough";
 import { gfmTable } from "micromark-extension-gfm-table";
 import { markdownCell, markdownText, renderTable } from "../../src/report/markdown.js";
@@ -13,9 +16,27 @@ function content(node: { children: ReadonlyArray<{ type: string; value?: string 
 
 function parse(markdown: string) {
   return fromMarkdown(markdown, {
-    extensions: [gfmTable(), gfmStrikethrough()],
-    mdastExtensions: [gfmTableFromMarkdown(), gfmStrikethroughFromMarkdown()],
+    extensions: [gfmTable(), gfmStrikethrough(), gfmAutolinkLiteral()],
+    mdastExtensions: [
+      gfmTableFromMarkdown(),
+      gfmStrikethroughFromMarkdown(),
+      gfmAutolinkLiteralFromMarkdown(),
+    ],
   });
+}
+
+/** What a parsed node renders as: its text, and every kind of child that is neither text nor a link (a link shows its own text). */
+function rendered(node: { children: ReadonlyArray<{ type: string }> }): unknown {
+  const marks = node.children
+    .map((child) => child.type)
+    .filter((type) => type !== "text" && type !== "link");
+  return { text: nodeText(node), marks };
+}
+
+/** Every link target under a node, in order. */
+function hrefs(node: { type: string; url?: string; children?: readonly unknown[] }): string[] {
+  const own = node.type === "link" && node.url !== undefined ? [node.url] : [];
+  return [...own, ...(node.children ?? []).flatMap((child) => hrefs(child as never))];
 }
 
 /** Free text that GitHub would read as markup, a second cell, or a second line. */
@@ -40,9 +61,15 @@ describe("free text in a summary renders literally under the GFM grammar", () =>
         .children[0];
       const rows = table?.type === "table" ? table.children : [];
 
-      expect(rows.map((row) => row.children.map(content))).toEqual([
-        [[["text", "Key"]], [["text", "Detail"]]],
-        [[["text", "k"]], [["text", text]]],
+      expect(rows.map((row) => row.children.map(rendered))).toEqual([
+        [
+          { text: "Key", marks: [] },
+          { text: "Detail", marks: [] },
+        ],
+        [
+          { text: "k", marks: [] },
+          { text, marks: [] },
+        ],
       ]);
     },
   );
@@ -72,8 +99,36 @@ describe("free text in a summary renders literally under the GFM grammar", () =>
     "%s on a line of its own stays one paragraph of plain text: a note is free text, and a leading marker would turn it into a list or a heading",
     (_what, text) => {
       expect(
-        parse(markdownText(text)).children.map((node) => [node.type, content(node as never)]),
-      ).toEqual([["paragraph", [["text", text]]]]);
+        parse(markdownText(text)).children.map((node) => [node.type, rendered(node as never)]),
+      ).toEqual([["paragraph", { text, marks: [] }]]);
+    },
+  );
+
+  test.each([
+    ["a query string", "https://example.com/hook?a=1&b=2", "https://example.com/hook?a=1&b=2"],
+    [
+      "a path with underscores at word edges",
+      "https://github.com/acme/_admin_/actions/runs/1",
+      "https://github.com/acme/_admin_/actions/runs/1",
+    ],
+    ["a bare www address", "www.example.com/a_b_", "http://www.example.com/a_b_"],
+    [
+      "a pipe, which a table cell must escape",
+      "https://example.com/hook?branches=main|release",
+      "https://example.com/hook?branches=main|release",
+    ],
+  ])(
+    "a bare URL with %s links to exactly itself: GitHub's autolink keeps a backslash escape inside a URL, so an escaped one shows the backslash and points elsewhere",
+    (_what, text, href) => {
+      const cell = parse(renderTable("| Detail |\n|---|", [[markdownCell(`see ${text} now`)]]));
+      const line = parse(markdownText(`see ${text} now`));
+
+      expect([hrefs(cell), nodeText(cell.children[0]), hrefs(line), nodeText(line)]).toEqual([
+        [href],
+        `Detailsee ${text} now`,
+        [href],
+        `see ${text} now`,
+      ]);
     },
   );
 });

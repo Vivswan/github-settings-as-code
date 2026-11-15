@@ -627,7 +627,11 @@ export async function runForRepo(
       case "absent":
         continue;
       case "excluded":
-        outcomes.push({ key: section.key, status: "excluded", detail: ["excluded by `sections`"] });
+        outcomes.push({
+          key: section.key,
+          status: "excluded",
+          detail: ['excluded by the "sections" input'],
+        });
         continue;
       case "active":
         break;

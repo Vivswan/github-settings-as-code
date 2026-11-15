@@ -66,7 +66,7 @@ describe("an environment GitHub would 422, or could never converge on, is refuse
       "a singular secret key, which the PUT would carry verbatim",
       { name: "prod", secret: { name: "TOKEN", value: "$TOKEN" } },
       [
-        "environments[0].secret: environment secrets belong under the entry's `secrets` list, not a singular `secret` key; here it would pass through to the environment PUT verbatim and configure nothing",
+        `environments[0].secret: environment secrets belong under the entry's "secrets" list, not a singular "secret" key; here it would pass through to the environment PUT verbatim and configure nothing`,
       ],
     ],
     [
