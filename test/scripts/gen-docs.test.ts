@@ -25,6 +25,7 @@ import { ROOT } from "../root.js";
 
 const renderPage = (path: string, text: string): string => regenerateFile(PAGES, path, text);
 const renderCoverageFile = (text: string): string => renderPage("docs/reference/coverage.md", text);
+const FORMATTER_TIMEOUT_MS = 60_000;
 
 /** The region `name` among `regions`; a page that lost it fails here, not on an undefined read. */
 function regionNamed(
@@ -361,22 +362,26 @@ describe("renderCoverage", () => {
   // Prose may repeat a structural line word for word, and keys may hold the two Unicode line separators the cell
   // rule admits; the guard reads the structure from the lines around a line, never from one line alone, or a page
   // the generator wrote would be refused as authored.
-  test("prose repeating a structural line, or keys holding a line separator, still read back as the generator's", () => {
-    const rendered = render({
-      docs: {
-        ...docs,
-        labels: {
-          coverage: [{ area: "Labels", keys: "x\u2028y", endpoints: ["list"], notes: ["CRUD."] }],
+  test(
+    "prose repeating a structural line, or keys holding a line separator, still read back as the generator's",
+    () => {
+      const rendered = render({
+        docs: {
+          ...docs,
+          labels: {
+            coverage: [{ area: "Labels", keys: "x\u2028y", endpoints: ["list"], notes: ["CRUD."] }],
+          },
         },
-      },
-      data: {
-        intro: ["Intro.", "## Supported"],
-        gaps: { emptyNote: "| Area | Endpoints | Why it matters |" },
-      },
-    });
-    const file = `---\norder: 115\n---\n\n# Coverage\n\n<!-- BEGIN GENERATED: coverage -->\n${rendered}\n<!-- END GENERATED: coverage -->\n`;
-    expect(() => renderCoverageFile(file)).not.toThrow();
-  });
+        data: {
+          intro: ["Intro.", "## Supported"],
+          gaps: { emptyNote: "| Area | Endpoints | Why it matters |" },
+        },
+      });
+      const file = `---\norder: 115\n---\n\n# Coverage\n\n<!-- BEGIN GENERATED: coverage -->\n${rendered}\n<!-- END GENERATED: coverage -->\n`;
+      expect(() => renderCoverageFile(file)).not.toThrow();
+    },
+    FORMATTER_TIMEOUT_MS,
+  );
 
   test("a known gap renders as a table row and drops the empty-state note", () => {
     const rendered = render({
@@ -694,6 +699,7 @@ describe("the committed pages", () => {
       const row = "| A | B |\n| --- | --- |\n| `[pat-form] | [pat-form]` |";
       expect(() => renderPage(path, before(row))).toThrow("found 3 and 1");
     },
+    FORMATTER_TIMEOUT_MS,
   );
 
   test.each<[label: string, path: string, mutate: (page: string) => string, error: string]>([
@@ -759,12 +765,16 @@ describe("the committed pages", () => {
         ),
       "the architecture-map region in docs/reference/architecture.md encloses content the generator would not write",
     ],
-  ])("refuses to regenerate %s in %s", (_label, path, mutate, error) => {
-    // Each page reads wrong while its markers still pair up: the enclosed text is not the generator's, or a token-form reference
-    // has no tail definition. A region moved away from its home is refused by the placement checks generated-regions.test.ts pins.
-    const page = readFileSync(join(ROOT, path), "utf8");
-    expect(() => renderPage(path, mutate(page))).toThrow(error);
-  });
+  ])(
+    "refuses to regenerate %s in %s",
+    (_label, path, mutate, error) => {
+      // Each page reads wrong while its markers still pair up: the enclosed text is not the generator's, or a token-form reference
+      // has no tail definition. A region moved away from its home is refused by the placement checks generated-regions.test.ts pins.
+      const page = readFileSync(join(ROOT, path), "utf8");
+      expect(() => renderPage(path, mutate(page))).toThrow(error);
+    },
+    FORMATTER_TIMEOUT_MS,
+  );
 });
 
 describe("the architecture map guard", () => {
@@ -788,98 +798,102 @@ describe("the committed coverage page", () => {
   // In the renderers' spelling: the committed page is biome's padded output, and every anchor below is the renderers'.
   const coverage = unpadTables(readFileSync(join(ROOT, "docs/reference/coverage.md"), "utf8"));
 
-  test("must keep the region spanning everything below the title", () => {
-    // Prose left outside the region would drift from the generator's while regeneration stayed a no-op.
-    const begin = coverage.match(/<!-- BEGIN GENERATED: coverage[^\n]*\n/)?.[0] ?? "";
-    expect(begin).not.toBe("");
-    const exact =
-      'docs/reference/coverage.md must be the frontmatter, the "# Coverage" title, the coverage region, and one final newline';
-    expect(() => renderCoverageFile(coverage.replace(begin, `Intro prose.\n\n${begin}`))).toThrow(
-      exact,
-    );
-    expect(() => renderCoverageFile(coverage.replace("# Coverage\n", "# Inventory\n"))).toThrow(
-      exact,
-    );
-    // Whitespace past the END marker regenerates as a no-op, so it is refused too; so is the final newline missing.
-    expect(() => renderCoverageFile(coverage.trimEnd())).toThrow(exact);
-    expect(() => renderCoverageFile(`${coverage}\n`)).toThrow(exact);
-    expect(() => renderCoverageFile(`${coverage}\nTrailing prose.\n`)).toThrow(exact);
-    // A pipe-wrapped line that is not a three-cell row of the table it sits in is authored prose.
-    const shape =
-      "the coverage region in docs/reference/coverage.md encloses content the generator would not write";
-    expect(() =>
-      renderCoverageFile(coverage.replace("\n\n### Notes", "\n| Authored prose |\n\n### Notes")),
-    ).toThrow(shape);
-    const topics = "[`repository`](sections.md) (`topics`)";
-    expect(coverage).toContain(topics);
-    expect(() =>
-      renderCoverageFile(coverage.replace(topics, "[`repository`](sections.md) (`top | ics`)")),
-    ).toThrow(shape);
-    expect(() =>
-      renderCoverageFile(coverage.replace(topics, "[`repository`](sections.md) (`top `ics`)")),
-    ).toThrow(shape);
-    // A key cell that links anywhere but the Sections page is not the generator's.
-    expect(() =>
-      renderCoverageFile(coverage.replace(topics, "[`repository`](semantics.md) (`topics`)")),
-    ).toThrow(shape);
-    // A parenthesized qualifier is what supportedRowFault() lets through, so the guard admits it.
-    expect(() =>
-      renderCoverageFile(
-        coverage.replace(topics, "[`repository`](sections.md) (`topics (legacy)`)"),
-      ),
-    ).not.toThrow();
-    // A notes group is a bold label naming its section, a blank, and bullets; anything else between groups is authored.
-    const label = "**Topics** (`repository`)\n\n";
-    expect(coverage).toContain(label);
-    expect(() =>
-      renderCoverageFile(coverage.replace(label, `Authored aside.\n\n${label}`)),
-    ).toThrow(shape);
-    expect(() => renderCoverageFile(coverage.replace(label, "**Topics**\n\n"))).toThrow(shape);
-    expect(() => renderCoverageFile(coverage.replace(label, `${label}- extra bullet\n\n`))).toThrow(
-      shape,
-    );
-    const gapsHeader = "| Area | Endpoints | Why it matters |\n|---|---|---|\n";
-    expect(coverage).toContain(gapsHeader);
-    expect(() =>
-      renderCoverageFile(coverage.replace(gapsHeader, `${gapsHeader}| a | b | c |\n`)),
-    ).toThrow(shape);
-    expect(() =>
-      renderCoverageFile(coverage.replace(/\nThe table is EMPTY right now[^\n]*\n\n/, "\n")),
-    ).toThrow(shape);
-    expect(() =>
-      renderCoverageFile(
-        coverage
-          .replace(/\nThe table is EMPTY right now[^\n]*\n\n/, "\n")
-          .replace(gapsHeader, `${gapsHeader}| a | b | c |\n`),
-      ),
-    ).not.toThrow();
-    // A label the authoring side refuses (a star inside the double stars) is no label the printer writes, even
-    // when the Area cell and the label agree with each other.
-    expect(() =>
-      renderCoverageFile(
-        coverage
-          .replace("[Labels](", "[*Labels*](")
-          .replace("**Labels** (`labels`)", "***Labels*** (`labels`)"),
-      ),
-    ).toThrow(shape);
-    // A carriage return is not something any validator lets through, so the shape refuses it too.
-    expect(coverage).toContain("[Labels](");
-    expect(() => renderCoverageFile(coverage.replace("[Labels](", "[Labels]\r("))).toThrow(shape);
-    expect(() =>
-      renderCoverageFile(
-        coverage.replace(
-          "|---|---|---|\n\n## No public API",
-          "|---|---|---|\n| a | b |\n\n## No public API",
+  test(
+    "must keep the region spanning everything below the title",
+    () => {
+      // Prose left outside the region would drift from the generator's while regeneration stayed a no-op.
+      const begin = coverage.match(/<!-- BEGIN GENERATED: coverage[^\n]*\n/)?.[0] ?? "";
+      expect(begin).not.toBe("");
+      const exact =
+        'docs/reference/coverage.md must be the frontmatter, the "# Coverage" title, the coverage region, and one final newline';
+      expect(() => renderCoverageFile(coverage.replace(begin, `Intro prose.\n\n${begin}`))).toThrow(
+        exact,
+      );
+      expect(() => renderCoverageFile(coverage.replace("# Coverage\n", "# Inventory\n"))).toThrow(
+        exact,
+      );
+      // Whitespace past the END marker regenerates as a no-op, so it is refused too; so is the final newline missing.
+      expect(() => renderCoverageFile(coverage.trimEnd())).toThrow(exact);
+      expect(() => renderCoverageFile(`${coverage}\n`)).toThrow(exact);
+      expect(() => renderCoverageFile(`${coverage}\nTrailing prose.\n`)).toThrow(exact);
+      // A pipe-wrapped line that is not a three-cell row of the table it sits in is authored prose.
+      const shape =
+        "the coverage region in docs/reference/coverage.md encloses content the generator would not write";
+      expect(() =>
+        renderCoverageFile(coverage.replace("\n\n### Notes", "\n| Authored prose |\n\n### Notes")),
+      ).toThrow(shape);
+      const topics = "[`repository`](sections.md) (`topics`)";
+      expect(coverage).toContain(topics);
+      expect(() =>
+        renderCoverageFile(coverage.replace(topics, "[`repository`](sections.md) (`top | ics`)")),
+      ).toThrow(shape);
+      expect(() =>
+        renderCoverageFile(coverage.replace(topics, "[`repository`](sections.md) (`top `ics`)")),
+      ).toThrow(shape);
+      // A key cell that links anywhere but the Sections page is not the generator's.
+      expect(() =>
+        renderCoverageFile(coverage.replace(topics, "[`repository`](semantics.md) (`topics`)")),
+      ).toThrow(shape);
+      // A parenthesized qualifier is what supportedRowFault() lets through, so the guard admits it.
+      expect(() =>
+        renderCoverageFile(
+          coverage.replace(topics, "[`repository`](sections.md) (`topics (legacy)`)"),
         ),
-      ),
-    ).toThrow(shape);
-    expect(() =>
-      renderCoverageFile(
-        coverage.replace(
-          "\n<!-- END GENERATED: coverage -->",
-          "\nAuthored afterword.\n\n<!-- END GENERATED: coverage -->",
+      ).not.toThrow();
+      // A notes group is a bold label naming its section, a blank, and bullets; anything else between groups is authored.
+      const label = "**Topics** (`repository`)\n\n";
+      expect(coverage).toContain(label);
+      expect(() =>
+        renderCoverageFile(coverage.replace(label, `Authored aside.\n\n${label}`)),
+      ).toThrow(shape);
+      expect(() => renderCoverageFile(coverage.replace(label, "**Topics**\n\n"))).toThrow(shape);
+      expect(() =>
+        renderCoverageFile(coverage.replace(label, `${label}- extra bullet\n\n`)),
+      ).toThrow(shape);
+      const gapsHeader = "| Area | Endpoints | Why it matters |\n|---|---|---|\n";
+      expect(coverage).toContain(gapsHeader);
+      expect(() =>
+        renderCoverageFile(coverage.replace(gapsHeader, `${gapsHeader}| a | b | c |\n`)),
+      ).toThrow(shape);
+      expect(() =>
+        renderCoverageFile(coverage.replace(/\nThe table is EMPTY right now[^\n]*\n\n/, "\n")),
+      ).toThrow(shape);
+      expect(() =>
+        renderCoverageFile(
+          coverage
+            .replace(/\nThe table is EMPTY right now[^\n]*\n\n/, "\n")
+            .replace(gapsHeader, `${gapsHeader}| a | b | c |\n`),
         ),
-      ),
-    ).toThrow(shape);
-  });
+      ).not.toThrow();
+      // A label the authoring side refuses (a star inside the double stars) is no label the printer writes, even
+      // when the Area cell and the label agree with each other.
+      expect(() =>
+        renderCoverageFile(
+          coverage
+            .replace("[Labels](", "[*Labels*](")
+            .replace("**Labels** (`labels`)", "***Labels*** (`labels`)"),
+        ),
+      ).toThrow(shape);
+      // A carriage return is not something any validator lets through, so the shape refuses it too.
+      expect(coverage).toContain("[Labels](");
+      expect(() => renderCoverageFile(coverage.replace("[Labels](", "[Labels]\r("))).toThrow(shape);
+      expect(() =>
+        renderCoverageFile(
+          coverage.replace(
+            "|---|---|---|\n\n## No public API",
+            "|---|---|---|\n| a | b |\n\n## No public API",
+          ),
+        ),
+      ).toThrow(shape);
+      expect(() =>
+        renderCoverageFile(
+          coverage.replace(
+            "\n<!-- END GENERATED: coverage -->",
+            "\nAuthored afterword.\n\n<!-- END GENERATED: coverage -->",
+          ),
+        ),
+      ).toThrow(shape);
+    },
+    FORMATTER_TIMEOUT_MS,
+  );
 });

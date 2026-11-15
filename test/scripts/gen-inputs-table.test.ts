@@ -26,6 +26,9 @@ const [intro, body, tail] = [
 /** The page regenerated from `text`, as the build does it. */
 const regenerate = (text: string): string => regenerateFile(INPUTS_PAGES, INPUTS_PAGE_PATH, text);
 
+/** Bun's 5 s default is too tight for a test that spawns the formatter on a loaded machine. */
+const FORMATTER_TIMEOUT_MS = 60_000;
+
 /** The seal's refusal of the inputs-table region, naming the line below the BEGIN marker. */
 const refusal = (lineBelowBegin: number): RegExp =>
   new RegExp(
@@ -33,10 +36,14 @@ const refusal = (lineBelowBegin: number): RegExp =>
   );
 
 describe("the inputs table region", () => {
-  test("the committed page regenerates to itself and a fresh marker pair renders the table", () => {
-    expect(regenerate(page)).toBe(page);
-    expect(regenerate(`${intro}\n${tail}`)).toBe(page);
-  });
+  test(
+    "the committed page regenerates to itself and a fresh marker pair renders the table",
+    () => {
+      expect(regenerate(page)).toBe(page);
+      expect(regenerate(`${intro}\n${tail}`)).toBe(page);
+    },
+    FORMATTER_TIMEOUT_MS,
+  );
 
   /** A parse that checked only the cell count let an authored four-cell row through; each shape is placed where a moved marker would swallow it. */
   test.each([
