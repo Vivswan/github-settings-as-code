@@ -33,9 +33,14 @@ GitHub Settings as Code: GitHub Action applying declarative repository settings:
 <!-- Add project-specific instructions below the END marker; they are this repository's own and survive every sync. -->
 <!-- END REPO-PLATFORM MANAGED -->
 
-Code is the source of truth: this section holds only the rules and the decisions a reader could not recover from the code. The mechanics (toolchain, generated output, tests, releases) are in CONTRIBUTING.md.
+Code is the source of truth: this section holds only the guidelines and the decisions a reader could not recover from the code. The mechanics (toolchain, generated output, tests, releases) are in CONTRIBUTING.md.
 
-### Hard rules
+### Guidelines
+
+These are guidelines, not laws: each holds until a situation shows it should not.
+When one seems wrong for a case, or two pull apart, stop and ask the owner: name the guideline, the exception, and the reason.
+An exception the owner agrees to is recorded on the guideline's own line, with its reason.
+Never take an exception silently, and never apply a guideline against the evidence without asking.
 
 - Generated artifacts are regenerated, never hand-edited; `.github/scripts/generated.ts` is the one list of them, and whole-file generated TypeScript lives under `src/generated/`.
 - `lib/index.js`, `lib/settings.schema.json`, and `lib/pkg/` are built, never committed on main.
