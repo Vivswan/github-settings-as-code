@@ -94,8 +94,8 @@ jobs:
   # bump merged would otherwise read the old pin and open the bump again.
   # That tip is main's own manifest, with --ignore-scripts keeping lifecycle
   # scripts out of the install. The push and gh use REPO_PLATFORM_TOKEN;
-  # without it github.token pushes but starts no workflows, and the step
-  # says so.
+  # without it GitHub holds the bump PR's checks for approval, and the
+  # step says so.
   refresh-openapi:
     runs-on: ubuntu-latest
     timeout-minutes: 15
