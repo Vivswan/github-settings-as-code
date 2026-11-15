@@ -5,8 +5,9 @@ import { Ajv, type ValidateFunction } from "ajv";
 import addFormats from "ajv-formats";
 import { parse } from "yaml";
 import { validateSectionShapes } from "../src/engine/validate.js";
-import { SECTION_KEYS } from "../src/schema.js";
+import { SECTION_KEYS, type SectionKey } from "../src/schema.js";
 import { Rng } from "./e2e/generators/prng.js";
+import { forEachSeed } from "./e2e/generators/seed-property.js";
 import { genSettings } from "./e2e/generators/settings.js";
 import { collectYmlFiles, scenarioRoots } from "./e2e/scenario.js";
 import { ROOT } from "./root.js";
@@ -30,6 +31,9 @@ const FRAGMENT_KINDS = [
   "repos.<slug>.settings",
   "repos.<slug>.expect.snapshot",
 ] as const;
+
+/** The seeds every section's generated documents keep covering on each run. */
+const GENERATED_SEEDS = [1, 2, 3, 4, 5];
 
 type FragmentKind = (typeof FRAGMENT_KINDS)[number];
 
@@ -149,18 +153,12 @@ function scenarioDocs(): CorpusDoc[] {
   return docs;
 }
 
-/** Seeded generator output, shape-valid by construction, so schema and runtime must BOTH accept every one. */
-function generatedDocs(): CorpusDoc[] {
-  const docs: CorpusDoc[] = [];
-  for (const key of SECTION_KEYS) {
-    for (let seed = 1; seed <= 5; seed++) {
-      docs.push({
-        label: `generated ${key} seed ${seed}`,
-        doc: { [key]: genSettings(new Rng(seed), key) },
-      });
-    }
-  }
-  return docs;
+/** One seeded generator document, shape-valid by construction, so schema and runtime must BOTH accept it. */
+function generatedDoc(key: SectionKey, seed: number): CorpusDoc {
+  return {
+    label: `generated ${key} seed ${seed}`,
+    doc: { [key]: genSettings(new Rng(seed), key) },
+  };
 }
 
 /** The deliberate schema-vs-runtime disagreements, every one schema-looser (a runtime invariant the schema does not carry, rejected upfront); schema-stricter would reject documents the action applies, so none is tolerated, and anything unlisted fails. */
@@ -244,10 +242,10 @@ describe("published schema agrees with the runtime over the corpus", () => {
   (add as typeof addFormats)(ajv);
   const validate: ValidateFunction = ajv.compile(readSettingsSchema());
 
-  test("every scenario fragment and generated document gets one verdict", () => {
+  test("every scenario fragment gets one verdict", () => {
     const disagreements: string[] = [];
     const staleAllowlist = new Set(Object.keys(KNOWN_DIVERGENCES));
-    for (const { label, doc } of [...scenarioDocs(), ...generatedDocs()]) {
+    for (const { label, doc } of scenarioDocs()) {
       const verdict = verdictOn(label, doc, validate);
       if (verdict.kind === "known") {
         staleAllowlist.delete(label);
@@ -262,5 +260,14 @@ describe("published schema agrees with the runtime over the corpus", () => {
       [...staleAllowlist],
       "KNOWN_DIVERGENCES entries no corpus document witnesses - delete them",
     ).toEqual([]);
+  });
+
+  test("every generated document is accepted by both validators", () => {
+    for (const key of SECTION_KEYS) {
+      forEachSeed(GENERATED_SEEDS, (seed) => {
+        const { label, doc } = generatedDoc(key, seed);
+        expect(verdictOn(label, doc, validate)).toEqual({ kind: "agree" });
+      });
+    }
   });
 });
