@@ -56,7 +56,10 @@ The fuzzer is deterministic. It prints a master seed and a per-iteration seed:
 ```sh
 FUZZ_SEED=<masterSeed> bun run fuzz                    # replay a whole run
 bun run fuzz --seed <iterationSeed> --iterations 1    # replay one failing iteration
+PROPERTY_SEED=<seed> bun test <file> -t "<test>"      # replay one failing in-process property
 ```
+
+The in-process property tests run their fixed seeds plus fresh ones on every run. A failure prints its seed and that replay line.
 
 ## Releases
 
