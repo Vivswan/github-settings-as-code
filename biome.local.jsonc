@@ -108,24 +108,8 @@
       }
     },
     {
-      "includes": ["src/flows/redact.ts"],
-      "linter": {
-        "rules": {
-          "style": {
-            "noRestrictedImports": {
-              "level": "error",
-              "options": {
-                "paths": {
-                  "@actions/core": "Only src/action/ implements the Io port over @actions/core; every other layer takes an Io."
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    {
       "includes": [
+        "src/flows/redact.ts",
         "src/private.ts",
         "src/discovery/discover.ts",
         "src/report/delivery.ts",
