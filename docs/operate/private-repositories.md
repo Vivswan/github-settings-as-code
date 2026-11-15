@@ -44,7 +44,14 @@ A repository that a `repos: "*"` discovery filter drops is not a target, so it g
 
 The rule does not judge the pattern or what it skipped. A pattern can name a repository it skips, and a negated one (`!secret-repo`) names the repository it keeps, so a notice listing only public repositories could still spell a private name. The public repositories a pattern skipped are still listed.
 
-The other filters (`visibility`, `archived`, `forks`, `topics`) are named in full: they hold a setting or a topic, never a repository name.
+The other filters are named in full, in either policy:
+
+| Filter                            | What the notice prints                                                |
+| --------------------------------- | --------------------------------------------------------------------- |
+| `visibility`, `archived`, `forks` | one of a fixed set of values                                          |
+| `topics`                          | the topics you supplied, lowercased: `topics (has none of: platform)` |
+
+A `topics` value is your input and reaches the log unredacted, so keep a private identifier, such as a private repository's name, out of the topic filter.
 
 A refused input follows the same rule. The refusal is printed before any repository is listed, so the run cannot know whether the text names a private repository. Under `private-repos: redact` it hides the text and still says the flaw and the fix, in words that quote no character of the input:
 
