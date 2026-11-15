@@ -22,7 +22,7 @@ import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
 import { endpointPath } from "../../src/sections/contract/endpoints.js";
 import { sectionModule } from "../../src/sections/registry.js";
 import { quote } from "../../src/text.js";
-import { iterationSummary } from "./fuzz-summary.js";
+import { iterationSummary, runIterations } from "./fuzz-iterations.js";
 import {
   type DiscoveryScenarioMeta,
   genDiscoveryScenario,
@@ -2162,30 +2162,26 @@ async function main(): Promise<number> {
 
   const tally = newTally();
   const failingSeeds: number[] = [];
-  let failures = 0;
-  let ran = 0;
-  for (let i = 0; i < flags.iterations; i++) {
+  const counts = await runIterations(flags.iterations, FAILURE_CAP, async (i) => {
     const seed = replayOne ? master : iterationSeed(master, i);
     const { mode, result } = await runIteration(seed, flags);
     recordIteration(tally, result, mode);
-    ran++;
     if (result.ok) {
       console.log(`  iter ${i} [${mode}] seed ${seed} ok`);
-      continue;
+      return true;
     }
-    failures++;
     failingSeeds.push(seed);
     reportIterationFailure(i, mode, seed, result, flags);
-    if (failures >= FAILURE_CAP) {
-      console.log(`\nfailure cap (${FAILURE_CAP}) reached; stopping`);
-      break;
-    }
+    return false;
+  });
+  if (counts.failed >= FAILURE_CAP) {
+    console.log(`\nfailure cap (${FAILURE_CAP}) reached; stopping`);
   }
 
   const batteryFailures = replayOne ? 0 : await runBatteries(tally, master);
   const coverageFailures = printCoverage(tally, replayOne);
 
-  console.log(`\n${iterationSummary({ requested: flags.iterations, ran, failed: failures })}`);
+  console.log(`\n${iterationSummary(counts)}`);
   if (batteryFailures > 0) {
     console.log(
       `directed battery failures (witness + input + fault + fixpoint + merge): ${batteryFailures}`,
@@ -2197,7 +2193,7 @@ async function main(): Promise<number> {
       "replay one with the per-failure `replay:` line above (it carries --sections when set)",
     );
   }
-  return failures + batteryFailures + coverageFailures > 0 ? 1 : 0;
+  return counts.failed + batteryFailures + coverageFailures > 0 ? 1 : 0;
 }
 
 try {
