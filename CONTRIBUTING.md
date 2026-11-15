@@ -31,6 +31,7 @@ The platform's `autofix` module commits two kinds of fix to a same-repository pu
 - **A red push run** means the hook failed or the fix was refused, and nothing was committed. A pull request with a type error stops in the graduation, by design. A generator that wrote a file outside `autofix.push.paths` is refused, and the notice names the path.
 - **The label never fixes a file under `.github/`:** the notice names it, and `bun run lint:fix` on your machine is the fix.
 - **The fix commit's checks wait for approval.** GitHub holds the run a workflow token's push starts; approve it from the merge box, or push a commit.
+- **A Dependabot pull request** is fixed by the `fix-lint` label, added by a person. Commit-back never refreshes a stale `bun.lock`: the frozen install fails and the run is red.
 - **A fork's pull request is not fixed:** run `bun run build` and `bun run lint:fix` and commit the result.
 - **The lists are read from `main`,** so a pull request that adds a generated file gets no fix for it until it merges: commit that file's first copy by hand. `test/scripts/autofix-registration.test.ts` fails when a generator, one of its inputs, or one of its outputs is missing from the lists or the hook.
 
