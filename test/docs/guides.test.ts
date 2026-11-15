@@ -496,7 +496,7 @@ describe("docs/ guide pages", () => {
       .concat(templates);
   }
 
-  type ExtraFile = string | { type: string; path: string; jsonpath?: string };
+  type ExtraFile = string | { type: string; path: string; jsonpath?: string; glob?: boolean };
 
   function releaseExtraFiles(): ExtraFile[] {
     const config = JSON.parse(readFileSync(join(ROOT, "release-please-config.json"), "utf8")) as {
@@ -505,14 +505,20 @@ describe("docs/ guide pages", () => {
     return config.packages["."]?.["extra-files"] ?? [];
   }
 
-  test("marker-bearing files equal the release-please extra-files set", () => {
-    // release-please rewrites pins only in files listed under extra-files, so a page moved without a config update keeps a stale pin silently.
-    // An extra-files entry outside markerScanFiles() (action.yml, a workflow) fails here too and means the scan set needs widening.
-    const extraFiles = releaseExtraFiles().filter((entry) => typeof entry === "string");
-    const marked = markerScanFiles()
+  test("every marker-bearing file is matched by a release-please extra-files entry", () => {
+    // release-please rewrites pins only in files an extra-files entry names, by path or by glob, so a marked file no entry matches keeps a stale pin silently.
+    const matchers = releaseExtraFiles().map((entry) => {
+      if (typeof entry === "string") {
+        return (label: string) => label === entry;
+      }
+      const glob = new Bun.Glob(entry.path);
+      return (label: string) => (entry.glob === true ? glob.match(label) : label === entry.path);
+    });
+    const unmatched = markerScanFiles()
       .filter((file) => readFileSync(file.path, "utf8").includes("x-release-please-"))
-      .map((file) => file.label);
-    expect(marked.sort()).toEqual([...extraFiles].sort());
+      .map((file) => file.label)
+      .filter((label) => !matchers.some((matches) => matches(label)));
+    expect(unmatched).toEqual([]);
   });
 
   /** The example with every `_remove: true` turned into the plain entry it names: the lower layer every removal in it matches. */
