@@ -633,6 +633,12 @@ describe("checkLeaks (redaction leak invariant)", () => {
       ['leak: "acme/secret" present in the step summary'],
     ],
     [
+      "a private value the summary escaped: a needle holding a bracket or a star sits in a cell with backslashes, and a raw match alone would pass a real leak",
+      { ...quiet, summary: "| labels | drift | labels\\[secret/\\*]: missing live |" },
+      ["labels[secret/*]"],
+      ['leak: "labels[secret/*]" present in the step summary'],
+    ],
+    [
       "a canary in stdout outside the mask directive",
       { ...quiet, stdout: "::add-mask::acme/secret\n::debug::CANARY-1 slipped out" },
       ["CANARY-1"],

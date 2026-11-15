@@ -23,6 +23,7 @@ import { dirname, join, relative } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { parseRepoSlug } from "../../../src/discovery/targets.js";
 import { type OutputName, redactRanges } from "../../../src/io.js";
+import { markdownCell, markdownText } from "../../../src/report/markdown.js";
 import { tableRows } from "../../docs/markdown.js";
 import { ROOT } from "../../root.js";
 import {
@@ -688,6 +689,16 @@ export function stripDebugLines(text: string): string {
 }
 
 /**
+ * Whether the step summary carries `needle`, as written or as the product renders free text: in a table cell or on a
+ * line of its own it escapes markup characters, so a needle holding "[" or "*" sits there with a backslash before each.
+ */
+function summaryHolds(summary: string, needle: string): boolean {
+  return [needle, markdownCell(needle), markdownText(needle)].some((form) =>
+    summary.includes(form),
+  );
+}
+
+/**
  * The redaction LEAK INVARIANT, implemented once so a scenario and a fuzz iteration prove the exact
  * same property: no forbidden string on any publicly-readable surface. stderr counts because the
  * Actions run log captures it too; the `::add-mask::` lines are stripped first, since they carry the
@@ -701,7 +712,7 @@ export function checkLeaks(
   const maskedStdout = stripMaskLines(observed.stdout);
   const maskedStderr = stripMaskLines(observed.stderr);
   for (const needle of forbidden) {
-    if (observed.summary.includes(needle)) {
+    if (summaryHolds(observed.summary, needle)) {
       failures.push(`leak: "${needle}" present in the step summary`);
     }
     if (maskedStdout.includes(needle)) {
@@ -887,7 +898,7 @@ function outcomeFailures(exp: Expect, first: Invocation): string[] {
 function surfaceContainsFailures(exp: Expect, first: Invocation): string[] {
   const failures: string[] = [];
   for (const needle of exp.summary_contains ?? []) {
-    if (!first.summary.includes(needle)) {
+    if (!summaryHolds(first.summary, needle)) {
       failures.push(`summary missing: ${needle}`);
     }
   }
@@ -904,7 +915,7 @@ function surfaceLacksFailures(exp: Expect, first: Invocation): string[] {
   const failures: string[] = [];
   const maskedStdout = stripMaskLines(first.stdout);
   for (const needle of exp.summary_lacks ?? []) {
-    if (first.summary.includes(needle)) {
+    if (summaryHolds(first.summary, needle)) {
       failures.push(`summary must not contain: ${needle}`);
     }
   }
