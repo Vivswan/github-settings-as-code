@@ -540,7 +540,7 @@ The side-by-side comparison with the Probot Settings app lives in the migration 
 - A delimiter, once set, cannot be cleared back to GitHub's default through the PATCH (it updates provided fields only); delete and redeclare the pattern without the field instead.
 - The regex fields (pattern, the delimiters, the must_match/must_not_match lists) are sent as written: their dialect is GitHub's to judge, and the REST API has no validate or dry-run call, so the file is not refused at parse for an expression GitHub would reject.
 - An expression GitHub rejects is reported when apply reaches the section: the bulk create's 422 fails the section naming each refused pattern by name with GitHub's own message, and the update PATCH's 422 names the pattern it was updating.
-- When GitHub's answer cannot be tied to a pattern of the request, the line carries that answer as GitHub sent it, and no pattern is blamed for it.
+- When GitHub's answer names no pattern of the request, the line carries GitHub's message and says to check the regular expressions of the patterns in the request.
 - Check mode cannot report an unsupported construct: it compares the declared strings with the live ones and sends no write.
 - GitHub's validation is not rebuilt to refuse earlier: a second implementation of its dialect could only drift from it and refuse a pattern GitHub accepts. The late refusal is loud instead, naming the pattern and the reason.
 - Writes ride optimistic concurrency whenever GitHub supplies a version: the list GET carries each pattern's custom_pattern_version, the PATCH/DELETE send it back, and a 412 means the pattern changed mid-run (re-run); a version-less pattern (the field is optional and nullable upstream) writes without the check, as the API allows.
