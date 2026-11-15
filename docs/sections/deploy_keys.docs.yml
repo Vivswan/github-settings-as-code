@@ -26,7 +26,7 @@ coverage:
         on every apply.
       - >-
         A declared blob that is not canonical base64 (padding bits set, which no ssh-keygen output
-        has) could never equal the stored key, so it is refused when the settings file is read.
+        has) cannot be compared reliably with the stored key, so it is refused when the settings file is read.
       - >-
         A live key under an algorithm the settings file cannot declare is outside the section: GitHub
         accepted it, so it is never matched, deleted, or aborted on, and a snapshot leaves it out with

@@ -839,6 +839,20 @@ export function loadWebhooksDescriptor(): WebhooksDescriptor {
   return JSON.parse(readFileSync(WEBHOOKS_DESCRIPTOR_PATH, "utf8")) as WebhooksDescriptor;
 }
 
+/** The three fields the derivation reads from one entry; an absent one is undefined. */
+function hookFields(entry: WebhooksDescriptor["webhooks"][string]) {
+  const github = entry.post?.["x-github"];
+  // A scope list of another type reads as absent: `"repo".includes("repository")` is false, which would drop the event unseen.
+  const scopes: unknown = github?.["supported-webhook-types"];
+  return {
+    "post.x-github.supported-webhook-types": Array.isArray(scopes)
+      ? (scopes as readonly string[])
+      : undefined,
+    "post.x-github.subcategory": github?.subcategory,
+    "post.externalDocs.url": entry.post?.externalDocs?.url,
+  };
+}
+
 /**
  * The wire names of the events whose supported-webhook-types names "repository", sorted, without the "*" wildcard
  * (the schema adds it), and the one reference page their externalDocs point at, minus the anchors. An entry lacking
@@ -853,21 +867,13 @@ export function repositoryWebhookVocabulary(doc: WebhooksDescriptor): {
   const references = new Set<string>();
   const missing: string[] = [];
   for (const [hook, entry] of Object.entries(doc.webhooks)) {
-    const github = entry.post?.["x-github"];
-    const fields = {
-      "post.x-github.supported-webhook-types": github?.["supported-webhook-types"],
-      "post.x-github.subcategory": github?.subcategory,
-      "post.externalDocs.url": entry.post?.externalDocs?.url,
-    };
-    for (const [path, value] of Object.entries(fields)) {
-      if (value === undefined) {
-        missing.push(`webhooks.${hook}.${path}`);
-      }
-    }
+    const fields = hookFields(entry);
     const scopes = fields["post.x-github.supported-webhook-types"];
     const slug = fields["post.x-github.subcategory"];
     const url = fields["post.externalDocs.url"];
     if (scopes === undefined || slug === undefined || url === undefined) {
+      const absent = Object.entries(fields).filter(([, value]) => value === undefined);
+      missing.push(...absent.map(([path]) => `webhooks.${hook}.${path}`));
       continue;
     }
     if (!scopes.includes("repository")) {

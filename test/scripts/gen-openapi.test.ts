@@ -472,6 +472,19 @@ describe("the repository webhook events", () => {
       },
       "webhooks.push.post.x-github.supported-webhook-types, webhooks.fork.post.externalDocs.url missing from the webhooks descriptor",
     ],
+    [
+      "a scope list that is not a list, which would otherwise drop the event unseen",
+      {
+        push: hook("push", ["repository"], {
+          "x-github": {
+            subcategory: "push",
+            "supported-webhook-types": "repo" as unknown as readonly string[],
+          },
+        }),
+        fork: hook("fork", ["repository"]),
+      },
+      "webhooks.push.post.x-github.supported-webhook-types missing from the webhooks descriptor",
+    ],
   ])("the render refuses %s", (_what, webhooks, refusal) => {
     expect(() => repositoryWebhookVocabulary({ webhooks })).toThrow(refusal);
   });

@@ -2,8 +2,8 @@
  * The syntax check behind every regex field of a secret scanning custom pattern. GitHub compiles
  * them with Hyperscan, a PCRE subset this action cannot run, so the check is a flagless JavaScript
  * RegExp over a translation of the PCRE-only forms. It also refuses some syntax PCRE compiles: a
- * branch reset `(?|`, the `(?U)` flag, a `(*COMMIT)` verb, an option group ending in `-`. What
- * Hyperscan alone refuses compiles here and fails at apply as the bulk create's 422. Left to that
+ * branch reset `(?|`, the `(?U)` flag, a `(*COMMIT)` verb, an option group ending in `-`. A pattern
+ * that compiles here can still be refused by Hyperscan, at apply, as the bulk create's 422. Left to that
  * 422 as well: a pattern in extended mode (`(?x)`), whose whitespace and `#` comments this
  * tokenizer does not read, so it passes unchecked rather than refused on a lexing it cannot follow.
  */

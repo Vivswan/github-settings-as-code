@@ -53,7 +53,7 @@ const BLOB_NOT_BASE64 =
   "the key's second field is not base64 (the alphabet A-Z a-z 0-9 + / with = padding to a multiple of four)";
 const BLOB_NOT_CANONICAL =
   "the key's second field is not canonical base64 (the character before the = padding carries bits past the key's last byte), " +
-  "so it can never equal the key GitHub stores; copy the key again from the .pub file";
+  "so it cannot be compared reliably with the key GitHub stores; copy the key again from the .pub file";
 
 /** `material` is the comparable form, algorithm + blob: GitHub may strip or rewrite the comment on storage. */
 export interface PublicKeyMaterial {
@@ -107,8 +107,8 @@ function declaredAlgorithmRejection(algorithm: string): string | undefined {
 
 /**
  * Why the settings file cannot declare `blob`, which zod's check already took as base64. Material is compared as
- * text with what GitHub stores, the canonical encoding, so a blob with padding bits set would never match and the
- * key would be deleted and recreated on every run.
+ * text with what GitHub stores, so a blob with padding bits set, a second spelling of the same bytes, has no
+ * reliable comparison.
  */
 function declaredBlobRejection(blob: string): string | undefined {
   return decodeBase64(blob).isErr() ? BLOB_NOT_CANONICAL : undefined;
