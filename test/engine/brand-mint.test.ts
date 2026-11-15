@@ -15,6 +15,7 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
+import { type Node as ESTreeNode, walk } from "estree-walker";
 import { parseSync } from "oxc-parser";
 import { ROOT } from "../root.js";
 
@@ -83,23 +84,19 @@ function isNode(value: unknown): value is Node {
   return typeof value === "object" && value !== null && typeof (value as Node).type === "string";
 }
 
-function children(node: Node): Node[] {
-  const out: Node[] = [];
-  for (const [key, value] of Object.entries(node)) {
-    if (key === "type") {
-      continue;
-    }
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        if (isNode(item)) {
-          out.push(item);
-        }
+/**
+ * estree-walker over this file's nodes, the synthetic class shapes included (it finds children by the fields carrying
+ * a `type`). `enter` answering false skips the node's children and its `leave`.
+ */
+function walkNodes(root: Node, enter: (node: Node) => boolean, leave: () => void): void {
+  walk(root as unknown as ESTreeNode, {
+    enter(node) {
+      if (!enter(node as unknown as Node)) {
+        this.skip();
       }
-    } else if (isNode(value)) {
-      out.push(value);
-    }
-  }
-  return out;
+    },
+    leave,
+  });
 }
 
 function parse(source: Source): Node {
@@ -287,26 +284,51 @@ class Tree {
   /** A name declared twice in one file (merged interfaces, a nested scope) keeps both declarations. */
   readonly declarations = new Map<string, Map<string, Declared[]>>();
 
+  /** Each file's import aliases, local name to imported name. */
+  private readonly aliases = new Map<string, Map<string, string>>();
+
   constructor(sources: readonly Source[]) {
     for (const source of sources) {
       const program = parse(source);
       this.programs.push({ source, program });
-      this.collect(program, source.file, NO_BOUND);
+      this.collect(program, source.file);
     }
   }
 
-  private collect(node: Node, file: string, outer: Bound): void {
-    const bound = bindTypeParameters(node, outer);
-    const body = declaredShape(node);
-    if (body !== undefined) {
-      const perFile = this.declarations.get(file) ?? new Map<string, Declared[]>();
-      const name = (node.id as Node).name as string;
-      perFile.set(name, [...(perFile.get(name) ?? []), { file, body, bound }]);
-      this.declarations.set(file, perFile);
+  private collect(program: Node, file: string): void {
+    const bounds: Bound[] = [NO_BOUND];
+    const enter = (node: Node): boolean => {
+      const bound = bindTypeParameters(node, bounds.at(-1) ?? NO_BOUND);
+      bounds.push(bound);
+      if (node.type === "ImportSpecifier") {
+        this.collectAlias(node, file);
+      }
+      const body = declaredShape(node);
+      if (body !== undefined) {
+        const perFile = this.declarations.get(file) ?? new Map<string, Declared[]>();
+        const name = (node.id as Node).name as string;
+        perFile.set(name, [...(perFile.get(name) ?? []), { file, body, bound }]);
+        this.declarations.set(file, perFile);
+      }
+      return true;
+    };
+    walkNodes(program, enter, () => bounds.pop());
+  }
+
+  /** `import { Imported as Local }`: the local name stands for the imported one wherever the file references it. */
+  private collectAlias(specifier: Node, file: string): void {
+    const imported = memberName(specifier.imported as Node);
+    const local = (specifier.local as Node).name as string;
+    if (imported !== undefined && imported !== local) {
+      const perFile = this.aliases.get(file) ?? new Map<string, string>();
+      perFile.set(local, imported);
+      this.aliases.set(file, perFile);
     }
-    for (const child of children(node)) {
-      this.collect(child, file, bound);
-    }
+  }
+
+  /** The name `name` stands for in `file`: what an import alias imports, else itself. */
+  private imported(file: string, name: string): string {
+    return this.aliases.get(file)?.get(name) ?? name;
   }
 
   /**
@@ -315,7 +337,9 @@ class Tree {
    */
   declaration(file: string, name: string): Declared | undefined {
     const local = this.declarations.get(file)?.get(name);
-    const candidates = local ?? [...this.declarations.values()].flatMap((m) => m.get(name) ?? []);
+    const elsewhere = this.imported(file, name);
+    const candidates =
+      local ?? [...this.declarations.values()].flatMap((m) => m.get(elsewhere) ?? []);
     return candidates.length === 1 ? candidates[0] : undefined;
   }
 
@@ -326,7 +350,7 @@ class Tree {
   carries(file: string, name: string, carriers: Carriers): boolean {
     return this.declarations.get(file)?.has(name) === true
       ? carriers.keys.has(key(file, name))
-      : carriers.names.has(name);
+      : carriers.names.has(this.imported(file, name));
   }
 
   /**
@@ -427,8 +451,30 @@ class Tree {
    * `RepoRunOptions["mode"]` does not carry what `RepoRunOptions["settings"]` does; an unresolvable one is judged by
    * its parts.
    */
-  mentions(file: string, node: Node, carriers: Carriers, outer: Bound = NO_BOUND): boolean {
-    const bound = bindTypeParameters(node, outer);
+  mentions(file: string, root: Node, carriers: Carriers, outer: Bound = NO_BOUND): boolean {
+    const bounds: Bound[] = [outer];
+    let found = false;
+    const enter = (node: Node): boolean => {
+      const bound = bindTypeParameters(node, bounds.at(-1) ?? NO_BOUND);
+      const verdict = found ? true : this.ownVerdict(file, node, carriers, bound);
+      if (verdict !== undefined) {
+        found ||= verdict;
+        return false;
+      }
+      bounds.push(bound);
+      return true;
+    };
+    walkNodes(root, enter, () => bounds.pop());
+    return found;
+  }
+
+  /** What a node says by itself: a function position, an identifier, a resolvable indexed access; undefined for a node judged by its children. */
+  private ownVerdict(
+    file: string,
+    node: Node,
+    carriers: Carriers,
+    bound: Bound,
+  ): boolean | undefined {
     if (FUNCTION_POSITIONS.has(node.type)) {
       return this.functionPositionMentions(file, node, carriers, bound);
     }
@@ -443,7 +489,7 @@ class Tree {
         );
       }
     }
-    return children(node).some((child) => this.mentions(file, child, carriers, bound));
+    return undefined;
   }
 }
 
@@ -476,24 +522,28 @@ function brandCarriers(tree: Tree, brand: Brand): Carriers {
 function brandCasts(tree: Tree, carriers: Carriers): Cast[] {
   const casts: Cast[] = [];
   for (const { source, program } of tree.programs) {
-    const walk = (node: Node, within: string, outer: Bound): void => {
-      const scope =
-        node.type === "FunctionDeclaration" && isNode(node.id) ? (node.id.name as string) : within;
-      const bound = bindTypeParameters(node, outer);
-      if (node.type === "TSAsExpression" || node.type === "TSTypeAssertion") {
-        if (tree.mentions(source.file, node.typeAnnotation as Node, carriers, bound)) {
-          casts.push({
-            file: source.file,
-            within: scope,
-            text: source.text.slice(node.start, node.end).replace(/\s+/g, " "),
-          });
-        }
+    const scopes: Array<{ within: string; bound: Bound }> = [
+      { within: "<module>", bound: NO_BOUND },
+    ];
+    const enter = (node: Node): boolean => {
+      const outer = scopes.at(-1) ?? { within: "<module>", bound: NO_BOUND };
+      const within =
+        node.type === "FunctionDeclaration" && isNode(node.id)
+          ? (node.id.name as string)
+          : outer.within;
+      const bound = bindTypeParameters(node, outer.bound);
+      scopes.push({ within, bound });
+      const isCast = node.type === "TSAsExpression" || node.type === "TSTypeAssertion";
+      if (isCast && tree.mentions(source.file, node.typeAnnotation as Node, carriers, bound)) {
+        casts.push({
+          file: source.file,
+          within,
+          text: source.text.slice(node.start, node.end).replace(/\s+/g, " "),
+        });
       }
-      for (const child of children(node)) {
-        walk(child, scope, bound);
-      }
+      return true;
     };
-    walk(program, "<module>", NO_BOUND);
+    walkNodes(program, enter, () => scopes.pop());
   }
   return casts;
 }
@@ -748,6 +798,31 @@ describe("the validated brand's mint", () => {
       "carrier.ts: raw as Shape",
       'plain.ts: raw as Outer["value"]',
       "importer.ts: raw as Shape",
+    ]);
+  });
+
+  // An import may rename the brand, so a cast spelled with the local name is the same second mint.
+  test("an import alias is judged as the name it imports", () => {
+    const files = [
+      {
+        file: "shape.ts",
+        text: "export type Shape = { settings: ValidatedSettings; name: string };",
+      },
+      {
+        file: "alias.ts",
+        text: [
+          'import type { ValidatedSettings as VS } from "./x.js";',
+          'import { type Shape as S, other as VSS } from "./shape.js";',
+          "export const a = raw as VS;",
+          'export const b = raw as S["settings"];',
+          'export const c = raw as S["name"];',
+          "export const d = raw as VSS;",
+        ].join("\n"),
+      },
+    ];
+    expect(scanBrand(files).casts.map((c) => `${c.file}: ${c.text}`)).toEqual([
+      "alias.ts: raw as VS",
+      'alias.ts: raw as S["settings"]',
     ]);
   });
 });

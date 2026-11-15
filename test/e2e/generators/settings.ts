@@ -298,24 +298,13 @@ let validator: ValidateFunction | undefined;
 
 function settingsValidator(): ValidateFunction {
   if (!validator) {
-    const ajv = new Ajv({ strict: false, allErrors: true });
+    // verbose: each error carries the offending value as `data`.
+    const ajv = new Ajv({ strict: false, allErrors: true, verbose: true });
     const add = (addFormats as unknown as { default?: typeof addFormats }).default ?? addFormats;
     (add as typeof addFormats)(ajv);
     validator = ajv.compile(readSettingsSchema());
   }
   return validator;
-}
-
-function valueAtPointer(doc: unknown, instancePath: string): unknown {
-  let value = doc;
-  for (const segment of instancePath.split("/").slice(1)) {
-    if (typeof value !== "object" || value === null) {
-      return undefined;
-    }
-    const key = segment.replace(/~1/g, "/").replace(/~0/g, "~");
-    value = (value as Record<string, unknown>)[key];
-  }
-  return value;
 }
 
 /** One leg of the three-way drift check; generators.test.ts runs it beside validateSettingsDoc and each section's zod shape. */
@@ -327,7 +316,7 @@ export function validateAgainstPublishedSchema(doc: unknown): void {
       .map((e) => {
         const params =
           Object.keys(e.params ?? {}).length > 0 ? `, ${JSON.stringify(e.params)}` : "";
-        return `  ${e.instancePath || "(root)"} ${e.message} (got ${JSON.stringify(valueAtPointer(doc, e.instancePath))}${params})`;
+        return `  ${e.instancePath || "(root)"} ${e.message} (got ${JSON.stringify(e.data)}${params})`;
       })
       .join("\n");
     throw new Error(`generated settings failed schema validation:\n${errors}`);
