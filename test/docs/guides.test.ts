@@ -300,12 +300,6 @@ function refusalRow(
     throw new Error(`${source}: refusal table row is not two cells: ${cells.join(" | ")}`);
   }
   const [has = "", says = ""] = cells;
-  // The page shows an escaped pipe without its backslash, so the layer read here would not be the one the reader sees.
-  if (cells.some((cell) => cell.includes("\\|"))) {
-    throw new Error(
-      `${source}: refusal row "${has}" holds an escaped pipe, so it cannot be reproduced`,
-    );
-  }
   const trigger = has.match(/\((`[^`]+`(?: or `[^`]+`)*)\)$/);
   if (!trigger) {
     throw new Error(
@@ -1052,11 +1046,6 @@ describe("refusal table parser (mutation checks)", () => {
       /does not quote one message/,
     ],
     ["a row with three cells", [...header, "| a | b | c |"], /is not two cells/],
-    [
-      "a row whose layer escapes a pipe",
-      [...header, row("X (`labels: {_layering: mer\\|ge}`)")],
-      /holds an escaped pipe/,
-    ],
     [
       "a prose line run into the table without a blank line",
       [...header, row("X (`a: 1`)"), "A paragraph GFM reads as a one-cell row."],

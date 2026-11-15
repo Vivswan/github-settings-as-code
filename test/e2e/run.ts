@@ -20,7 +20,7 @@ import { indentedStdout, runScenario, type ScenarioReport } from "./runner/runne
 import { loadScenarios, type Scenario, scenarioRoots } from "./scenario.js";
 
 const FLAGS = {
-  sections: { type: "string", multiple: true },
+  sections: { type: "string" },
   scenario: { type: "string" },
   "print-stdout": { type: "boolean" },
 } as const;
@@ -73,15 +73,13 @@ function parseFlags(argv: readonly string[]): ParsedFlags {
   if (values["print-stdout"] === true) {
     flags.printStdout = true;
   }
-  // Every --sections is read in order: `all` clears an earlier list, and an empty list is refused wherever it stands.
-  for (const value of values.sections ?? []) {
-    const keys = sectionKeys(value);
+  // parseArgs keeps the last --sections given, so a later `all` clears an earlier list.
+  if (values.sections !== undefined) {
+    const keys = sectionKeys(values.sections);
     if (keys.length === 0) {
       return refuse("--sections got an empty list; name at least one section, or all");
     }
-    if (value === "all") {
-      delete flags.sections;
-    } else {
+    if (values.sections !== "all") {
       flags.sections = keys;
     }
   }
