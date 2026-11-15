@@ -55,17 +55,6 @@ A `topics` value is your input and reaches the log unredacted, so keep a private
 
 An input that takes one of a fixed set of words (`visibility`, `archived`, `forks`, `affiliation`, `private-repos`, `undeclared`, and the like) quotes a value it refuses, in either policy. A private identifier does not belong there either.
 
-A refused input that can hold a repository name (`exclude`, `repos`, `repository`) follows the exclude rule. The refusal is printed before any repository is listed, so the run cannot know whether the text names a private repository. Under `private-repos: redact` it hides the text and still says the flaw and the fix, in words that quote no character of the input:
-
-| Refused input                     | The refusal names it as                   |
-| --------------------------------- | ----------------------------------------- |
-| a malformed `exclude` pattern     | `pattern #2`, its place in the list       |
-| a malformed `repos` entry         | `entry #2`, at every place it holds       |
-| a valid `repos` entry given again | `entry #3`, at each place after its first |
-| a malformed `repository` value    | the `repository` input, without its text  |
-
-Under `private-repos: show` each refusal quotes the text. A missing `repository` falls back to the workflow's own repository, which is never hidden.
-
 ## One seal, every mode
 
 Every target ends the same way, whichever mode ran it: its lines and its end state go through one channel, which closes open for a shown target and sealed for a hidden one. Only the seal's projections open it, and they render the public view alone. No mode has a redaction path of its own.
