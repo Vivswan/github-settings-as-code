@@ -30,7 +30,7 @@
           "level": "error",
           "options": {
             "paths": {
-              "@actions/core": "Only src/action/ implements the Io port over @actions/core; every other layer takes an Io."
+              "@actions/core": "Only src/action/ implements the Io port over @actions/core, and the nightly step script writes its annotations with it; every other layer takes an Io."
             },
             "patterns": [
               {
@@ -87,8 +87,9 @@
       "includes": ["src/**", "!src/sections/shared/schema-helpers.ts"],
       "plugins": ["./lint/rule-gate.grit"]
     },
+    // The nightly step script too: its jobs install before it runs, so the toolkit's escaping is there to import.
     {
-      "includes": ["src/action/**"],
+      "includes": ["src/action/**", ".github/scripts/nightly-steps.ts"],
       "linter": {
         "rules": {
           "style": {
@@ -122,7 +123,7 @@
               "level": "error",
               "options": {
                 "paths": {
-                  "@actions/core": "Only src/action/ implements the Io port over @actions/core; every other layer takes an Io."
+                  "@actions/core": "Only src/action/ implements the Io port over @actions/core, and the nightly step script writes its annotations with it; every other layer takes an Io."
                 }
               }
             }

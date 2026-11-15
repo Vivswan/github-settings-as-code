@@ -17,6 +17,7 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { devNull, tmpdir } from "node:os";
 import { join } from "node:path";
+import * as core from "@actions/core";
 import { countNoun } from "../../src/text.js";
 import { GENERATED_OUTPUTS } from "./generated.js";
 import { planGraduation } from "./graduate-upstream-gaps.js";
@@ -58,8 +59,8 @@ function installLatest(packages: readonly string[]): number | undefined {
     const installed = installedVersion(pkg);
     const latest = capture(["bun", "info", pkg, "version"]);
     if (installed !== latest) {
-      console.log(
-        `::error::${pkg}@${installed} is installed but ${latest} is the latest; the probe is testing the pin`,
+      core.error(
+        `${pkg}@${installed} is installed but ${latest} is the latest; the probe is testing the pin`,
       );
       return 1;
     }
@@ -106,8 +107,8 @@ function probeTypes(): number | undefined {
   const { gapFiles, foreign } = planGraduation(parseDiagnostics(log).diagnostics);
   process.stdout.write(log);
   if (gapFiles.length > 0) {
-    console.log(
-      `::error::${TYPES_LATEST} fire upstream-gap tripwires; run bun .github/scripts/graduate-upstream-gaps.ts for these files:`,
+    core.error(
+      `${TYPES_LATEST} fire upstream-gap tripwires; run bun .github/scripts/graduate-upstream-gaps.ts for these files:`,
     );
     for (const file of gapFiles) {
       console.log(file);
@@ -115,14 +116,14 @@ function probeTypes(): number | undefined {
   }
   if (foreign.length > 0) {
     const count = countNoun(foreign.length, "diagnostic", "diagnostics");
-    console.log(
-      `::error::typecheck against ${TYPES_LATEST} failed outside the upstream-gap tripwires (${count}); ` +
+    core.error(
+      `typecheck against ${TYPES_LATEST} failed outside the upstream-gap tripwires (${count}); ` +
         "a types major may have broken the build (see log above)",
     );
   }
   if (gapFiles.length === 0 && foreign.length === 0) {
-    console.log(
-      `::error::typecheck against ${TYPES_LATEST} failed without a diagnostic this probe can read (see log above)`,
+    core.error(
+      `typecheck against ${TYPES_LATEST} failed without a diagnostic this probe can read (see log above)`,
     );
   }
   return 1;
@@ -166,14 +167,18 @@ function bumpBody(from: string, to: string, changed: string): string {
   ].join("\n");
 }
 
-/** The line to print instead of bumping: the pin is already the latest, the registry rolled back behind it, or the bump PR is open. */
-function noBumpReason(pinned: string, latest: string, branch: string): string | undefined {
+/** Whether the night has nothing to bump, with the reason on the log. */
+function nothingToBump(pinned: string, latest: string, branch: string): boolean {
   if (pinned === latest) {
-    return `${OPENAPI}@${pinned} is the latest; nothing to bump`;
+    core.info(`${OPENAPI}@${pinned} is the latest; nothing to bump`);
+    return true;
   }
   // A registry tag rolled back behind the pin would otherwise read as a release and open a downgrade PR.
   if (Bun.semver.order(latest, pinned) < 0) {
-    return `::notice::${OPENAPI}@${pinned} is ahead of the registry's latest ${latest}; nothing to bump`;
+    core.notice(
+      `${OPENAPI}@${pinned} is ahead of the registry's latest ${latest}; nothing to bump`,
+    );
+    return true;
   }
   // The PR is the postcondition, not the branch: a night whose push landed but whose gh call failed leaves the
   // branch alone, and the next night must not read that as done. --head matches a fork's branch of the same name
@@ -192,9 +197,10 @@ function noBumpReason(pinned: string, latest: string, branch: string): string | 
     "[.[] | select(.isCrossRepository | not)] | length",
   ]);
   if (open !== "0") {
-    return `::notice::the bump PR for ${OPENAPI}@${latest} is already open from ${branch}`;
+    core.notice(`the bump PR for ${OPENAPI}@${latest} is already open from ${branch}`);
+    return true;
   }
-  return undefined;
+  return false;
 }
 
 /** The bump as one bot commit: the pin moved, the descriptor-derived files and the schema regenerated, all staged; `changed` is git's stat of it. */
@@ -227,10 +233,10 @@ function openBumpPr(
     const present = status(["git", "ls-remote", "--exit-code", "--heads", "origin", branch], {
       stdoutFile: devNull,
     });
-    console.log(
+    core.error(
       present === 0
-        ? `::error::${branch} exists on origin with no open PR; open the PR from it or delete the branch, and the next night retries`
-        : `::error::the push to ${branch} failed (see above); nothing was opened`,
+        ? `${branch} exists on origin with no open PR; open the PR from it or delete the branch, and the next night retries`
+        : `the push to ${branch} failed (see above); nothing was opened`,
     );
     return 1;
   }
@@ -241,17 +247,15 @@ function refreshOpenapi(): number | undefined {
   const pinned = pinnedVersion(OPENAPI);
   const latest = capture(["bun", "info", OPENAPI, "version"]);
   const branch = `nightly/openapi-${latest}`;
-  const reason = noBumpReason(pinned, latest, branch);
-  if (reason !== undefined) {
-    console.log(reason);
+  if (nothingToBump(pinned, latest, branch)) {
     return;
   }
   const { subject, changed } = commitBump(latest);
   // The whole gate, on the committed bump (build:check compares the generated files against the index): bump nights
   // are rare and the minutes free, so the PR arrives green and a red night names the command in the log above.
   if (status(["bun", "run", "check"]) !== 0) {
-    console.log(
-      `::error::bun run check fails against ${OPENAPI}@${latest}; the log above names the failing script, and nothing was pushed`,
+    core.error(
+      `bun run check fails against ${OPENAPI}@${latest}; the log above names the failing script, and nothing was pushed`,
     );
     return 1;
   }
@@ -264,9 +268,9 @@ function refreshOpenapi(): number | undefined {
   if (canRetrigger === "true") {
     return;
   }
-  console.log(
-    `::warning::${branch} was pushed with github.token, which starts no workflows; ` +
-      "close and reopen the bump PR to run its checks, or register REPO_PLATFORM_TOKEN",
+  core.warning(
+    `${branch} was pushed with github.token, so GitHub holds the bump PR's checks for approval; ` +
+      "approve the held run in the PR's merge box, or register REPO_PLATFORM_TOKEN",
   );
 }
 

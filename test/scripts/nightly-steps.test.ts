@@ -205,6 +205,24 @@ describe("probe-schema", () => {
       });
     }));
 
+  // Without the escape the registry's second line starts a line of the log, where the runner reads it as a command.
+  test("a registry answer carrying a newline stays inside the one error annotation, escaped", () =>
+    withTempDir("nightly-steps-", (dir) => {
+      const result = probe(
+        dir,
+        {
+          installed: { "@octokit/openapi": "20.1.0", "@octokit/graphql-schema": "15.26.0" },
+          latest: { "@octokit/openapi": "20.2.0\n::add-mask::forged" },
+        },
+        "probe-schema",
+      );
+      expect(result).toMatchObject({
+        status: 1,
+        stdout:
+          "::error::@octokit/openapi@20.1.0 is installed but 20.2.0%0A::add-mask::forged is the latest; the probe is testing the pin\n",
+      });
+    }));
+
   test("a failing install ends the probe with its status", () =>
     withTempDir("nightly-steps-", (dir) => {
       const result = probe(dir, { addStatus: 7 }, "probe-schema");
@@ -480,8 +498,8 @@ describe("refresh-openapi", () => {
       expect(result.status).toBe(0);
       expect(result.stdout).toEndWith(
         [
-          "::warning::nightly/openapi-25.0.0 was pushed with github.token, which starts no workflows; ",
-          "close and reopen the bump PR to run its checks, or register REPO_PLATFORM_TOKEN\n",
+          "::warning::nightly/openapi-25.0.0 was pushed with github.token, so GitHub holds the bump PR's checks for approval; ",
+          "approve the held run in the PR's merge box, or register REPO_PLATFORM_TOKEN\n",
         ].join(""),
       );
       const tip = branchTip(fx);
@@ -505,6 +523,6 @@ describe("refresh-openapi", () => {
         "gh pr create --draft --head nightly/openapi-25.0.0 --title build(deps): bump @octokit/openapi to 25.0.0 --body ## What this adds",
       );
       expect(log).toContain("before: @octokit/openapi 24.0.0 pinned, 25.0.0 released");
-      expect(log).toMatch(new RegExp(`${RULES_PATH} +\\| 2 \\+-`));
+      expect(log).toMatch(new RegExp(`${RegExp.escape(RULES_PATH)} +\\| 2 \\+-`));
     }));
 });
