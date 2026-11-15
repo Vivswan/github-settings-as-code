@@ -262,8 +262,7 @@ function hasSnapshot<K extends SectionKey>(
   return module.snapshot !== undefined;
 }
 
-// The one door out of src/sections, so the owner gate, the door refusals (a foreign context, an unbuildable path), and the freeze are applied here once, not in 26 handlers:
-// modules arrive by several routes (literals, listSection, the factories), so no definition helper sees them all.
+// The one door out of src/sections: the owner gate, the door refusals, and the freeze are applied here once, not in 26 handlers, since modules arrive by several routes (literals, listSection, the factories) and no definition helper sees them all.
 const guarded: { [K in SectionKey]: SectionModule<K> } = Object.fromEntries(
   SECTION_KEYS.map((key) => [
     key,
