@@ -7,7 +7,79 @@ modules:
   - pr-title
   - fuzzer
   - nightly
+  - autofix
 project:
   name: GitHub Settings as Code
   slug: github-settings-as-code
   description: "GitHub Action applying declarative repository settings: rulesets, labels, branch protection, and more. A loud, stateless Probot Settings replacement."
+# What a commit-back fix may carry (the platform's docs/modules/autofix.md); the hook is .github/actions/autofix.
+# The push job reads these lists from the default branch, so a pull request cannot widen its own fix.
+autofix:
+  # The fix-lint label runs `bun run lint:fix`, and biome reads the whole tree.
+  label:
+    paths: ["**"]
+  # A push runs the generators. test/scripts/autofix-registration.test.ts pins `on` to the generators' inputs and
+  # `paths` to the generated-output table (.github/scripts/generated.ts).
+  push:
+    on:
+      - "src/**"
+      - "README.md"
+      - "action.yml"
+      - "docs/reference/undeclared-policy.md"
+      - "docs/reference/permissions.md"
+      - "docs/reference/sections.md"
+      - "docs/reference/inputs.md"
+      - "docs/reference/architecture.md"
+      - "architecture.yml"
+      - "docs/operate/check-mode.md"
+      - "docs/start/getting-started.md"
+      - "docs/sections/*.docs.yml"
+      - "docs/schema.docs.yml"
+      - ".github/scripts/gen-action-docs.ts"
+      - ".github/scripts/gen-inputs-table.ts"
+      - "docs/reference/coverage.md"
+      - "package.json"
+      - "bun.lock"
+      - "tsconfig.json"
+      - ".bun-version"
+      - ".github/scripts/graduate-upstream-gaps.ts"
+      - ".github/scripts/gen-gaps-index.ts"
+      - ".github/scripts/gen-openapi.ts"
+      - ".github/scripts/gen-docs.ts"
+      - ".github/scripts/arch-lint.ts"
+      - ".github/scripts/lib/**"
+      - ".github/scripts/coverage-data.ts"
+      - ".github/scripts/coverage-data.yml"
+      - ".github/scripts/endpoint-docs.ts"
+      - ".github/scripts/endpoint-docs.yml"
+      - "test/e2e/openapi/validate.ts"
+      - "test/e2e/openapi/paths.ts"
+      # The formatter's config: every generator but the gaps index pipes its output through biome. Listed by hand:
+      # the registration test follows what a generator imports and loads, not what a subprocess opens.
+      - "biome.json"
+      - "biome.local.jsonc"
+      # The hook and the setup action it runs.
+      - ".github/actions/autofix/**"
+      - ".github/actions/setup/**"
+    # Each generated file by name: a directory entry would admit a file no generator registers. The gaps directory is
+    # the one exception, for the files a graduation rewrites.
+    paths:
+      - "README.md"
+      - "action.yml"
+      - "docs/reference/coverage.md"
+      - "docs/reference/undeclared-policy.md"
+      - "docs/reference/permissions.md"
+      - "docs/operate/check-mode.md"
+      - "docs/reference/sections.md"
+      - "docs/reference/inputs.md"
+      - "docs/reference/architecture.md"
+      - "docs/start/getting-started.md"
+      - "src/generated/spec-enums.ts"
+      - "src/generated/spec-roles.ts"
+      - "src/generated/spec-rules.ts"
+      - "src/generated/spec-webhooks.ts"
+      - "src/generated/upstream-gaps.ts"
+      - "src/upstream-gaps/"
+    # A graduated gap file is a deletion.
+    delete:
+      - "src/upstream-gaps/"

@@ -1,6 +1,6 @@
 /**
- * The commit-back a pull request's branch receives from auto-fix.yml and auto-format.yml: the one place the bot
- * identity and the lease push are spelled, so the two workflows cannot drift apart on either.
+ * The push a branch this repository's own scripts write receives (the nightly bump): the bot identity and the lease
+ * push. A pull request's fix commits are the platform's autofix module's, not this file's.
  */
 
 import { command, must, STREAMED } from "./command.js";

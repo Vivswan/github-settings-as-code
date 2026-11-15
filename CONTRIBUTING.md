@@ -18,6 +18,22 @@ The fleet-wide conventions - Conventional Commit titles, squash merges, the `all
 - The action bundle compiles every runtime dependency in. The library keeps them external: they are the `dependencies` of `package.json`, installed by the consumer's package manager.
 - [docs/reference/coverage.md](docs/reference/coverage.md) is the inventory of the supported API surface, one link per call. A change that adds or extends a section keeps its `<key>.docs.yml` rows and `.github/scripts/endpoint-docs.yml` in step.
 
+## Fixes committed to a pull request
+
+The platform's `autofix` module commits two kinds of fix to a same-repository pull request's branch. This repository's part is the hook, `.github/actions/autofix/action.yml`, and the `autofix` lists in `.repo-platform.yml`; the workflow and the push are the platform's ([its guide](https://github.com/Vivswan/repo-platform/blob/stable/docs/modules/autofix.md)).
+
+| Trigger                                                                     | The hook runs                                                    | The commit may carry                                                                  |
+| --------------------------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| a push to a pull request that changes a generator input (`autofix.push.on`) | `graduate-upstream-gaps.ts`, then every generator in table order | the generated outputs by name, and `src/upstream-gaps/` (the one place a fix deletes) |
+| the `fix-lint` label                                                        | `bun run lint:fix`                                               | what biome changed in a file outside `.github/`; never a deletion                     |
+
+- **Each trigger keeps one comment on the pull request,** its notice: what was pushed, dropped, or refused.
+- **A red push run** means the hook failed or the fix was refused, and nothing was committed. A pull request with a type error stops in the graduation, by design. A generator that wrote a file outside `autofix.push.paths` is refused, and the notice names the path.
+- **The label never fixes a file under `.github/`:** the notice names it, and `bun run lint:fix` on your machine is the fix.
+- **The fix commit's checks wait for approval.** GitHub holds the run a workflow token's push starts; approve it from the merge box, or push a commit.
+- **A fork's pull request is not fixed:** run `bun run build` and `bun run lint:fix` and commit the result.
+- **The lists are read from `main`,** so a pull request that adds a generated file gets no fix for it until it merges: commit that file's first copy by hand. `test/scripts/autofix-registration.test.ts` fails when a generator, one of its inputs, or one of its outputs is missing from the lists or the hook.
+
 ## Backward compatibility
 
 - A compat path that stays (an alias, a retired input still accepted, an arm for an older artifact) carries a comment `COMPAT(vN): <what stays working and what to delete>`, N the major that deletes it.

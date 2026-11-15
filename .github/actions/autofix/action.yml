@@ -1,0 +1,63 @@
+# This file is repo-owned, seeded once by the fleet sync and never overwritten by a later sync.
+
+name: Autofix
+description: |
+  Makes this repository's automated fixes in the checkout, for the fleet's auto-fix.yml to commit and push.
+
+  It runs on the pull request's head commit, in a job whose token can only read. It leaves the fixes in the work tree
+  and never commits or pushes. A non-zero exit stops the fix: nothing is committed.
+
+    push   a pull request touching a generator input: graduates the upstream gaps @octokit/types caught up with,
+           then regenerates the committed generated output (.github/scripts/generated.ts)
+    label  the fix-lint label: bun run lint:fix
+
+  What the commit may carry is the `autofix` block of .repo-platform.yml on the default branch. The contract and
+  examples are the fleet's docs/modules/autofix.md.
+
+inputs:
+  event:
+    description: What started the run, `label` (the fix-lint label) or `push` (a push the registration's autofix.push names)
+    required: true
+
+outputs:
+  findings:
+    description: What the fixer could not fix, shown in the pull request's notice; empty for none
+    value: ${{ steps.lint.outputs.findings }}
+  subject:
+    description: The commit's subject, a Conventional Commit line
+    value: ${{ steps.subject.outputs.subject || steps.lint.outputs.subject }}
+
+runs:
+  using: composite
+  steps:
+    # The frozen install without lifecycle scripts: the lockfile never changes and no dependency's script runs.
+    - uses: ./.github/actions/setup
+    # A pull request with unrelated type errors stops here by design: the graduation refuses to half-fix a red build.
+    - name: Graduate upstream gaps octokit now ships
+      if: inputs.event == 'push'
+      shell: bash
+      run: bun .github/scripts/graduate-upstream-gaps.ts
+    # In the generated-output table's order, each generator after its sources; a failing one stops the fix.
+    - name: Regenerate the generated files
+      if: inputs.event == 'push'
+      shell: bash
+      run: |
+        bun run build:openapi
+        bun run build:gaps-index
+        bun run build:docs
+        bun run build:action-docs
+        bun run build:inputs-table
+    # After the generators, whose modules it imports: a regeneration that failed never reaches it.
+    - name: Choose the commit subject from what changed
+      id: subject
+      if: inputs.event == 'push'
+      shell: bash
+      run: bun .github/scripts/autofix-subject.ts
+    # What biome fixed is committed even when findings remain, so their non-zero exit is reported, not fatal.
+    - name: Apply the lint fixes
+      id: lint
+      if: inputs.event == 'label'
+      shell: bash
+      run: |
+        echo "subject=style: apply automated formatting" >> "$GITHUB_OUTPUT"
+        bun run lint:fix || echo "findings=bun run lint:fix left findings it cannot fix; the lint check lists them" >> "$GITHUB_OUTPUT"
