@@ -141,7 +141,7 @@ v3   secret_scanning_custom_patterns: creating secret scanning patterns "interna
 
 Not a parse-time refusal: the five regex fields are sent as written. Their dialect is GitHub's to judge, and the REST API has no validate call, so an expression GitHub rejects is reported when apply reaches the section; check mode cannot report it.
 
-v3.0.0 and v3.0.1 alone refused some expressions at parse, with a local syntax check. That check was withdrawn: a second implementation of GitHub's dialect could only drift from it. A snapshot writes every live pattern as GitHub holds it.
+v3 releases from 3.0.0 on refused some expressions at parse, with a local syntax check, until that check was withdrawn: a second implementation of GitHub's dialect could only drift from it. A snapshot writes every live pattern as GitHub holds it.
 
 ## 49. Rulesets: enforcement, actors, tokens, and parameters
 
