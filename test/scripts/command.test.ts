@@ -77,10 +77,25 @@ describe("output", () => {
 });
 
 // A second spawn helper beside the wrapper brings back a second failure shape for the same failure.
-test("no script under .github/scripts spawns a process outside lib/command.ts", () => {
-  const spawning = /\bchild_process\b|\bBun\s*\.\s*(spawn|spawnSync|\$)/;
-  const offenders = [...new Bun.Glob("**/*.ts").scanSync(SCRIPTS)]
-    .filter((path) => path !== "lib/command.ts")
-    .filter((path) => spawning.test(readFileSync(join(SCRIPTS, path), "utf8")));
-  expect(offenders).toEqual([]);
+describe("no script under .github/scripts spawns a process outside lib/command.ts", () => {
+  const spawning =
+    /\bchild_process\b|\bBun\s*\.\s*(spawn|spawnSync|\$)|import\s*\{[^}]*(\$|\bspawn(Sync)?\b)[^}]*\}\s*from\s*["']bun["']|=\s*Bun\b(?!\s*\.)/;
+
+  test.each([
+    'import { execFileSync } from "node:child_process";',
+    "Bun.spawnSync(argv);",
+    "await Bun.$`git status`;",
+    'import { $ } from "bun";',
+    'import { spawnSync } from "bun";',
+    "const { spawnSync } = Bun;",
+  ])("%s is a spawn the scan refuses", (line) => {
+    expect(spawning.test(line)).toBe(true);
+  });
+
+  test("the scripts hold to it", () => {
+    const offenders = [...new Bun.Glob("**/*.ts").scanSync(SCRIPTS)]
+      .filter((path) => path !== "lib/command.ts")
+      .filter((path) => spawning.test(readFileSync(join(SCRIPTS, path), "utf8")));
+    expect(offenders).toEqual([]);
+  });
 });

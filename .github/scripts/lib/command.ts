@@ -2,9 +2,9 @@
  * The one way a script under .github/scripts runs another program, and the one file there that spawns a process
  * (test/scripts/command.test.ts holds the rest to it): an argv with no shell between, each of the three streams sent
  * where the caller names, and the outcome returned as a value. `command` is for a command whose status is the
- * answer: no failure of the command becomes a throw or an exit. `must` is the same run for a command the script
- * cannot go on without, and throws the refusal lib/entry.ts prints. Bun and Node builtins only: the release job
- * runs its scripts with nothing installed.
+ * answer: no failure of the command becomes a throw or an exit (a `stdout` file that cannot be opened still
+ * throws). `must` is the same run for a command the script cannot go on without, and throws the refusal
+ * lib/entry.ts prints. Bun and Node builtins only: the release job runs its scripts with nothing installed.
  */
 
 import { closeSync, openSync, writeSync } from "node:fs";
