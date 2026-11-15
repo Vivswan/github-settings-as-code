@@ -121,7 +121,7 @@ describe("init: argv -> config", () => {
       "a snapshot destination flag",
       ["--repository", "o/r", "--snapshot-file", "x.yml"],
       { GITHUB_TOKEN: TOKEN },
-      /^error: unknown option '--snapshot-file'/,
+      /^error: an option is not one the command takes; run it with --help for its options\n$/,
     ],
   ])(
     "%s is refused before any config exists, with a remedy a terminal can follow",

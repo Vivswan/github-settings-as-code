@@ -316,7 +316,9 @@ describe("argv -> config equals env -> config", () => {
     if (unknownFlag === undefined) {
       expect(actual.stderr).toBe(`error: ${describeProblem(expected.error)}\n`);
     } else {
-      expect(actual.stderr).toStartWith(`error: unknown option '--${unknownFlag}'`);
+      expect(actual.stderr).toBe(
+        "error: an option is not one the command takes; run it with --help for its options\n",
+      );
     }
   });
 });

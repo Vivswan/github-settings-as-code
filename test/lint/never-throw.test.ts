@@ -322,8 +322,12 @@ const OUTSIDE_THE_RULE = 'export function outside(): never {\n  throw new Error(
 /** A second src/ module beside the fixture of throws: the rule reaches every file under src/, not one. */
 const SECOND_MODULE = "src/cli/inputs.ts";
 
-/** A suppression of the plugin in any of Biome's forms: one line, a whole file (`-all`), a range (`-start`), with or without the plugin's name. */
-const SUPPRESSION = /biome-ignore(?:-all|-start)?\s+lint\/plugin\b/;
+/**
+ * A suppression that silences the plugin, in any form Biome honours: one line, a whole file (`-all`), a range
+ * (`-start`); the plugin by name, every plugin, or all of `lint`; alone or anywhere in a list of categories.
+ */
+const SUPPRESSION =
+  /biome-ignore(?:-all|-start)?(?:\s+[^\s:]+)*?\s+lint(?:\/plugin(?:\/[^\s:]*)?)?(?=[\s:])/;
 
 describe("the never-throw plugin", () => {
   test("flags exactly the throws and rejections outside the rule, and nothing outside src/", () =>
@@ -348,6 +352,21 @@ describe("the never-throw plugin", () => {
         "src/generated/upstream-gaps.ts:2": `plugin: ${MESSAGE}`,
       });
     }));
+
+  // The census below is only as good as its matcher: a form Biome honours and the matcher misses would pass unseen.
+  test.each<[string, boolean]>([
+    ["// biome-ignore lint/plugin: reason", true],
+    ["// biome-ignore lint/plugin/never-throw: reason", true],
+    ["/** biome-ignore-all lint/plugin: reason */", true],
+    ["// biome-ignore-start lint/plugin/never-throw: reason", true],
+    ["// biome-ignore lint: reason", true],
+    ["// biome-ignore-all lint: reason", true],
+    ["// biome-ignore lint/suspicious/noExplicitAny lint/plugin: reason", true],
+    ["// biome-ignore lint/suspicious/noExplicitAny: the lint plugin is not at issue", false],
+    ["// biome-ignore format: reason", false],
+  ])("the matcher reads %s as silencing the plugin: %p", (comment, silences) => {
+    expect(SUPPRESSION.test(comment)).toBe(silences);
+  });
 
   // A suppression hides a throw from the rule, and one left behind after its throw is gone hides the next one written under it.
   test("no file under src/ suppresses the rule, so no suppression can go stale", () => {

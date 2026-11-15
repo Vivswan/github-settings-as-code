@@ -79,6 +79,9 @@ export const INIT_INPUTS: readonly InputName[] = INPUT_NAMES.filter((name) =>
 export const INIT_SETTINGS_FILE_DESCRIPTION =
   "Where the settings document is written: the file apply and check read. One path; an existing file is kept unless --force is passed.";
 
+/** The error code of a refusal this program words itself, from names it declares: the one parse error whose message the program prints as written. */
+export const OWN_REFUSAL = "gsac.refusal";
+
 /** Every input some subcommand or the program exposes; the mode is the subcommand itself. */
 export function exposedInputs(): InputName[] {
   const flags = new Set<InputName>(["token", ...MODES.flatMap(inputsForMode)]);
@@ -174,7 +177,9 @@ export function once(flag: string, command: Command): (value: string, previous?:
   return (value, previous) =>
     previous === undefined
       ? value
-      : command.error(`error: --${flag} takes one value and was given more than once`);
+      : command.error(`--${flag} takes one value and was given more than once`, {
+          code: OWN_REFUSAL,
+        });
 }
 
 /**

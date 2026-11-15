@@ -11,7 +11,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CliHost } from "../../src/cli/commands.js";
-import { main } from "../../src/cli/program.js";
+import { main, parseErrorLine } from "../../src/cli/program.js";
 import { type ConfigEnv, type GitHubClient, sectionGrant, sectionModule } from "../../src/index.js";
 import { MockApi } from "../mock-api.js";
 import { ROOT } from "../root.js";
@@ -115,6 +115,54 @@ describe("check and apply", () => {
     },
   );
 
+  // commander words its parse errors around what was typed, and a typed argument may name a private repository.
+  describe("a parse error is worded from its kind and the program's own names, never from argv", () => {
+    const COMMANDS = "check, apply, render, snapshot, init, validate and permissions";
+    test.each<[string, string[], string]>([
+      [
+        "an argument a command does not take",
+        ["check", "o/zq-secret-zq"],
+        "the command was given more arguments than it takes; run it with --help for its usage",
+      ],
+      [
+        "an argument after the option terminator",
+        ["check", "--repository", "o/a", "--", "--repository", "o/zq-secret-zq"],
+        "the command was given more arguments than it takes; run it with --help for its usage",
+      ],
+      [
+        "a second argument to a file command",
+        ["validate", "a.yml", "o/zq-secret-zq"],
+        "the command was given more arguments than it takes; run it with --help for its usage",
+      ],
+      [
+        "an unknown option carrying a value",
+        ["check", "--repositry=o/zq-secret-zq"],
+        "an option is not one the command takes; run it with --help for its options",
+      ],
+      [
+        "an unknown command",
+        ["o/zq-secret-zq"],
+        `the first argument is not a command; the commands are ${COMMANDS}`,
+      ],
+    ])("%s", async (_case, argv, line) => {
+      const plain = await cli(argv, new MockApi({}));
+      expect(plain).toEqual({ code: 1, stdout: "", stderr: `error: ${line}\n` });
+      // Ahead of the command, so the row with a terminator still reads it as the flag.
+      const json = await cli(["--json", ...argv], new MockApi({}));
+      expect(json).toEqual({
+        code: 1,
+        stdout: `${JSON.stringify({ result: "failed", problem: line })}\n`,
+        stderr: `error: ${line}\n`,
+      });
+    });
+
+    test("an error code the table does not hold gets the generic line, so a code commander adds later cannot leak", () => {
+      expect(parseErrorLine("commander.addedLater", "o/zq-secret-zq", ["check"])).toBe(
+        "the command line could not be read; run with --help for the usage",
+      );
+    });
+  });
+
   // init has no --private-repos flag, so a refusal that tells its reader to set one sends them to an unknown option.
   test("init hides a refused --repository and names no flag it does not accept", async () => {
     const result = await cli(
@@ -128,7 +176,6 @@ describe("check and apply", () => {
   });
 
   test.each<[string, string[], ConfigEnv]>([
-    ["the parser's unknown-option message", ["check", `--tokn=${TOKEN}`], { GITHUB_TOKEN: TOKEN }],
     [
       "a file-only command's argument, --json",
       ["validate", TOKEN, "--json"],
@@ -337,7 +384,7 @@ describe("the --json failure envelope", () => {
     expect(result.stderr).toStartWith("error: ");
     expect(result.stdout).toBe(
       envelope
-        ? `${JSON.stringify({ result: "failed", problem: "missing required argument 'file'" })}\n`
+        ? `${JSON.stringify({ result: "failed", problem: "the command is missing an argument it requires; run it with --help for its usage" })}\n`
         : "",
     );
   });

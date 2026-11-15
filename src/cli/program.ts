@@ -37,6 +37,7 @@ import {
   INIT_SUBCOMMAND,
   inputOption,
   modeSubcommand,
+  OWN_REFUSAL,
   once,
   tokenValues,
 } from "./inputs.js";
@@ -132,6 +133,28 @@ export function processHost(): CliHost {
 /** A terminal has no Actions artifact service, so the artifact report channel is refused at the parse. */
 const CLI_CAPABILITIES = { artifactUpload: false } as const;
 
+/** This program's line for each commander error code, built from the kind of error alone. */
+const PARSE_ERROR_LINES: Readonly<Record<string, string>> = {
+  "commander.excessArguments":
+    "the command was given more arguments than it takes; run it with --help for its usage",
+  "commander.unknownOption":
+    "an option is not one the command takes; run it with --help for its options",
+  "commander.missingArgument":
+    "the command is missing an argument it requires; run it with --help for its usage",
+  "commander.optionMissingArgument":
+    "an option that takes a value was given none; run the command with --help for its options",
+  "commander.missingMandatoryOptionValue":
+    "an option the command requires was not given; run it with --help for its options",
+  "commander.conflictingOption":
+    "two options that cannot be given together were; run the command with --help for its options",
+  "commander.invalidArgument":
+    "an option or argument was given a value it does not take; run the command with --help for its usage",
+  // A missing subcommand is the usage shown as an error, which commander has already written.
+  "commander.help": "no subcommand was given; the usage above lists them",
+};
+
+const PROSE_LIST = new Intl.ListFormat("en-GB", { type: "conjunction", style: "long" });
+
 /** The root command with the four global flags, every line it prints going through the masked streams. */
 function rootProgram(streams: MaskedStreams): Command {
   const program = new Command();
@@ -158,6 +181,8 @@ function rootProgram(streams: MaskedStreams): Command {
     .configureOutput({
       writeOut: (text) => streams.stdout.write(text),
       writeErr: (text) => streams.stderr.write(text),
+      // commander words an error around the argv text it refused; parserExit prints this program's own line instead.
+      outputError: () => {},
     });
 }
 
@@ -325,15 +350,40 @@ export function buildProgram(options: ProgramOptions): {
   return { program, exitCode: () => exitCode };
 }
 
-/** The parser's own exit: commander already wrote its line (or the usage) to stderr, and --help exits 0, no failure. */
-function parserExit(error: CommanderError, failedJson: (message: string) => void): number {
-  // A missing subcommand is the usage shown as an error, whose message is commander's "(outputHelp)" sentinel.
+/**
+ * The line for a parse error. commander's own message quotes the argv text it refused, which may name a private
+ * repository, so it is never printed: the line comes from the error's code and the names the program declares. Only
+ * a refusal this program worded itself (OWN_REFUSAL) passes through, and a code the table lacks gets the generic line.
+ */
+export function parseErrorLine(code: string, message: string, commands: readonly string[]): string {
+  if (code === OWN_REFUSAL) {
+    return message;
+  }
+  if (code === "commander.unknownCommand") {
+    return `the first argument is not a command; the commands are ${PROSE_LIST.format(commands)}`;
+  }
+  return (
+    PARSE_ERROR_LINES[code] ?? "the command line could not be read; run with --help for the usage"
+  );
+}
+
+/** The parser's own exit: its error becomes this program's line on stderr and in the --json envelope, and --help exits 0, no failure. */
+function parserExit(
+  error: CommanderError,
+  program: Command,
+  streams: MaskedStreams,
+  failedJson: (message: string) => void,
+): number {
   if (error.exitCode !== 0) {
-    failedJson(
-      error.code === "commander.help"
-        ? "no subcommand was given; the usage above lists them"
-        : error.message.replace(/^error: /, ""),
+    const line = parseErrorLine(
+      error.code,
+      error.message,
+      program.commands.map((command) => command.name()),
     );
+    if (error.code !== "commander.help") {
+      streams.stderr.write(`error: ${line}\n`);
+    }
+    failedJson(line);
   }
 
   return error.exitCode;
@@ -376,7 +426,7 @@ export async function main(
     await program.parseAsync(argv);
   } catch (error) {
     if (error instanceof CommanderError) {
-      return parserExit(error, failedJson);
+      return parserExit(error, program, streams, failedJson);
     }
 
     const globals = program.opts<Globals>();

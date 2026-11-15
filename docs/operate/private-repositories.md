@@ -53,15 +53,16 @@ The other filters are named in full, in either policy:
 
 A `topics` value is your input and reaches the log unredacted, so keep a private identifier, such as a private repository's name, out of the topic filter.
 
-A value the run refuses for `visibility`, `archived`, `forks`, or `affiliation` is quoted in the refusal too, in either policy. Those inputs take one of a fixed set of words, so a private identifier does not belong there either.
+An input that takes one of a fixed set of words (`visibility`, `archived`, `forks`, `affiliation`, `private-repos`, `undeclared`, and the like) quotes a value it refuses, in either policy. A private identifier does not belong there either.
 
 A refused input that can hold a repository name (`exclude`, `repos`, `repository`) follows the exclude rule. The refusal is printed before any repository is listed, so the run cannot know whether the text names a private repository. Under `private-repos: redact` it hides the text and still says the flaw and the fix, in words that quote no character of the input:
 
-| Refused input                         | The refusal names it as                  |
-| ------------------------------------- | ---------------------------------------- |
-| a malformed `exclude` pattern         | `pattern #2`, its place in the list      |
-| a malformed or repeated `repos` entry | `entry #2`, every place it holds         |
-| a malformed `repository` value        | the `repository` input, without its text |
+| Refused input                     | The refusal names it as                   |
+| --------------------------------- | ----------------------------------------- |
+| a malformed `exclude` pattern     | `pattern #2`, its place in the list       |
+| a malformed `repos` entry         | `entry #2`, at every place it holds       |
+| a valid `repos` entry given again | `entry #3`, at each place after its first |
+| a malformed `repository` value    | the `repository` input, without its text  |
 
 Under `private-repos: show` each refusal quotes the text. A missing `repository` falls back to the workflow's own repository, which is never hidden.
 
