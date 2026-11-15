@@ -9,6 +9,7 @@ import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import type { SectionModule, SectionSnapshot } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
+import type { Body, Pinned } from "../contract/pin.js";
 import { hasDrift, type PlannedOp, type SectionPlan } from "../contract/plan.js";
 import { projectOntoSchema } from "../shared/snapshot-helpers.js";
 import { PAGES_SITE_SHAPE, PagesConfig } from "./schema.js";
@@ -65,6 +66,8 @@ function createBody(payload: PagesWirePayload): PagesCreateBody | undefined {
 
 // A mapping only: PagesConfig accepts null as the declared "Pages off", so a null 200 would otherwise read back as a declaration that DISABLES the site.
 const LiveSite = z.looseObject({});
+
+type _LiveSitePin = Pinned<typeof LiveSite, Body<typeof ENDPOINTS.get>>;
 
 // A note, not a parse error, since nothing in the file tells an Enterprise Cloud organization from github.com; only live true beside declared false earns it, as a live non-public site proves the host supports visibility.
 const PUBLIC_VISIBILITY_NOTE =

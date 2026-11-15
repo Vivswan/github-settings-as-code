@@ -12,6 +12,7 @@ import { type DeclaredIssue, declaredEntries, type EntryOf } from "../contract/d
 import { undeclaredPolicy } from "../contract/drift.js";
 import type { SectionFailure } from "../contract/errors.js";
 import type { SectionMeta } from "../contract/module.js";
+import type { EnvelopedItem, Pinned } from "../contract/pin.js";
 import type { Read } from "../contract/plan.js";
 import { duplicateNameIssues } from "../shared/secrets-and-variables/named-scope.js";
 import {
@@ -239,6 +240,11 @@ export function splitEntry(env: EnvironmentConfig): {
   return { settings, nested, routed };
 }
 
+type _LiveVariablePin = Pinned<
+  typeof LiveVariable,
+  EnvelopedItem<typeof ENDPOINTS.listVariables, "variables">
+>;
+
 /** One environment's live Actions variables. */
 export function listEnvironmentVariables(
   ctx: EnvironmentsRestContext,
@@ -296,6 +302,11 @@ async function planEnvironmentVariables(
     })
   ).map((planned) => ({ ops: planned.ops, notes: planned.notes }));
 }
+
+type _LiveSecretNamePin = Pinned<
+  typeof LiveSecretName,
+  EnvelopedItem<typeof ENDPOINTS.listSecrets, "secrets">
+>;
 
 /** One environment's live Actions secret names (GitHub never lists values). */
 export function listEnvironmentSecrets(

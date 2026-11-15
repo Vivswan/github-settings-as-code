@@ -26,6 +26,7 @@ import {
 } from "../contract/module.js";
 import { sectionGrant } from "../contract/operations.js";
 import type { SectionPermission } from "../contract/permissions.js";
+import type { Body, Item, Pinned } from "../contract/pin.js";
 import type { PlanContext, PlannedOp, Read, SectionPlan } from "../contract/plan.js";
 import { DEFAULT_ROLE, readBackPermission, roleForPermission } from "../shared/roles.js";
 import { knobbed, routed } from "../shared/schema-helpers.js";
@@ -65,6 +66,8 @@ type TeamsOp = PlannedOp<typeof ENDPOINTS>;
 // Nullish because a server ignoring the repository media type answers a bare 204, which still means "the team has access".
 const LiveTeamRepo = z.looseObject({ role_name: z.string().optional() }).nullish();
 
+type _LiveTeamRepoPin = Pinned<typeof LiveTeamRepo, Body<typeof ENDPOINTS.probe>>;
+
 // The id tells two same-fold slugs apart; access_source appears only in a repository listing, and absent reads as direct.
 const LiveTeam = z.looseObject({
   id: z.number().optional(),
@@ -73,6 +76,8 @@ const LiveTeam = z.looseObject({
 });
 
 type LiveTeam = z.infer<typeof LiveTeam>;
+
+type _LiveTeamPin = Pinned<typeof LiveTeam, Item<typeof ENDPOINTS.list>>;
 
 /** What the access probe answers for one team. */
 type TeamAccess = { access: false } | { access: true; role: string | undefined };

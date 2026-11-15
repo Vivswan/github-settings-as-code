@@ -16,6 +16,7 @@ import type { SectionFailure } from "../../contract/errors.js";
 import { type KeyedListLayering, keyedBy } from "../../contract/keyed-list.js";
 import type { GraphqlDict, SectionSnapshot } from "../../contract/module.js";
 import type { PatResource } from "../../contract/permissions.js";
+import type { EnvelopedItem, Pinned } from "../../contract/pin.js";
 import type {
   KeyedPlan,
   PlanMisfits,
@@ -92,6 +93,11 @@ type VariablesTable = {
 };
 
 type WideEndpoints = RepoVariablesEndpoints<VariablesSegment>;
+
+type _LiveVariablePin = Pinned<
+  typeof LiveVariable,
+  EnvelopedItem<WideEndpoints["list"], "variables">
+>;
 
 /** One family's plan(), indexed by K so the generic factory can assign its one WidePlan to it. */
 type RepoVariablesPlan<K extends RepoVariablesKey> = {

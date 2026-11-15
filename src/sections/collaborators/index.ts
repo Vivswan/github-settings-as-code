@@ -24,6 +24,7 @@ import {
   type SectionModule,
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
+import type { Item, Pinned } from "../contract/pin.js";
 import type { PlanContext, PlannedOp, Read, SectionPlan } from "../contract/plan.js";
 import { DEFAULT_ROLE, readBackPermission, roleForPermission } from "../shared/roles.js";
 import { knobbed, routed } from "../shared/schema-helpers.js";
@@ -36,6 +37,8 @@ const LiveCollaborator = z.looseObject({
 });
 type LiveCollaborator = z.infer<typeof LiveCollaborator>;
 
+type _LiveCollaboratorPin = Pinned<typeof LiveCollaborator, Item<typeof ENDPOINTS.list>>;
+
 const LiveInvitation = z.looseObject({
   id: z.number(),
   // null on an email invitation
@@ -45,6 +48,8 @@ const LiveInvitation = z.looseObject({
   expired: z.boolean().optional(),
 });
 type LiveInvitation = z.infer<typeof LiveInvitation>;
+
+type _LiveInvitationPin = Pinned<typeof LiveInvitation, Item<typeof ENDPOINTS.listInvitations>>;
 
 type NamedInvitation = LiveInvitation & { invitee: { login: string } };
 

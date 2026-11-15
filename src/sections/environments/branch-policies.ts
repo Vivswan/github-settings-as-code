@@ -12,9 +12,11 @@ import { missingDrift, undeclaredDrift, undeclaredNote } from "../contract/drift
 import type { SectionFailure } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import type { SectionMeta } from "../contract/module.js";
+import type { EnvelopedItem, Pinned } from "../contract/pin.js";
 import { hasDrift, type Read } from "../contract/plan.js";
 import { reportedKeyNote } from "../shared/reported-key-note.js";
 import {
+  type ENDPOINTS,
   type EnvironmentRestOp,
   type EnvironmentsRestContext,
   unreconcilable,
@@ -35,6 +37,11 @@ const LiveBranchPolicy = z.looseObject({
 });
 
 type LiveBranchPolicy = z.infer<typeof LiveBranchPolicy>;
+
+type _LiveBranchPolicyPin = Pinned<
+  typeof LiveBranchPolicy,
+  EnvelopedItem<typeof ENDPOINTS.listPolicies, "branch_policies">
+>;
 
 /** "branch" is GitHub's server-side default when the type is absent. */
 function livePolicyType(policy: LiveBranchPolicy): string {
