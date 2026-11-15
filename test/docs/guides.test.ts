@@ -15,6 +15,7 @@ import { DecodingMode, decodeHTML } from "entities";
 import GithubSlugger from "github-slugger";
 import { toString as headingText } from "mdast-util-to-string";
 import { ok } from "neverthrow";
+import { source as sourceText } from "unist-util-source";
 import { visitParents } from "unist-util-visit-parents";
 import { parse as parseYaml } from "yaml";
 import { type Layer, mergeLayers, standaloneView } from "../../src/engine/layers.js";
@@ -270,55 +271,41 @@ interface RefusalRow {
   readonly quoted: string;
 }
 
-/** The cells of one GFM row; GFM makes the outer pipes optional, so a row written without them is still pinned. */
-function tableCells(line: string): string[] {
-  let body = line.trim();
-  if (body.startsWith("|")) {
-    body = body.slice(1);
-  }
-  if (body.endsWith("|")) {
-    body = body.slice(0, -1);
-  }
-  return body.split("|").map((cell) => cell.trim());
-}
-
-/** A GFM delimiter row (`|---|:--:|`), the one line that opens a table after its header. */
-function isDelimiterRow(line: string | undefined): boolean {
-  return line !== undefined && /^\s*\|?(\s*:?-+:?\s*\|)*\s*:?-+:?\s*\|?\s*$/.test(line);
-}
-
 /** The gate a refusal table's second header cell names. */
 const REFUSAL_GATES: Record<string, RefusalRow["gate"]> = {
   "Caught by": "validation",
   "The fold says": "fold",
 };
 
-/** The gate the table a piped header line opens documents, given the line after the header. */
-function tableGate(line: string, next: string | undefined, source: string): RefusalRow["gate"] {
-  // A piped line opens a table only when the delimiter row follows it;
-  // one that renders as prose is an authoring slip, not a row to skip.
-  if (!isDelimiterRow(next)) {
-    throw new Error(`${source}: refusal table row outside a known table: ${line.trim()}`);
-  }
-  const header = tableCells(line);
+/** The gate a table documents, from its header row's cells. */
+function tableGate(header: readonly string[], source: string): RefusalRow["gate"] {
   if (header.length !== 2) {
-    throw new Error(`${source}: refusal table header is not two cells: ${line.trim()}`);
+    throw new Error(`${source}: refusal table header is not two cells: ${header.join(" | ")}`);
   }
   const [has = "", says = ""] = header;
   const gate = has === "The layer has" ? (REFUSAL_GATES[says] ?? null) : null;
   if (gate === null) {
-    throw new Error(`${source}: unknown refusal table header "${line.trim()}"`);
+    throw new Error(`${source}: unknown refusal table header "${header.join(" | ")}"`);
   }
   return gate;
 }
 
 /** One row of a table under `gate`; a row that cannot be reproduced fails by name. */
-function refusalRow(line: string, gate: RefusalRow["gate"], source: string): RefusalRow {
-  const cells = tableCells(line);
+function refusalRow(
+  cells: readonly string[],
+  gate: RefusalRow["gate"],
+  source: string,
+): RefusalRow {
   if (cells.length !== 2) {
-    throw new Error(`${source}: refusal table row is not two cells: ${line.trim()}`);
+    throw new Error(`${source}: refusal table row is not two cells: ${cells.join(" | ")}`);
   }
   const [has = "", says = ""] = cells;
+  // The page shows an escaped pipe without its backslash, so the layer read here would not be the one the reader sees.
+  if (cells.some((cell) => cell.includes("\\|"))) {
+    throw new Error(
+      `${source}: refusal row "${has}" holds an escaped pipe, so it cannot be reproduced`,
+    );
+  }
   const trigger = has.match(/\((`[^`]+`(?: or `[^`]+`)*)\)$/);
   if (!trigger) {
     throw new Error(
@@ -339,30 +326,26 @@ function refusalRow(line: string, gate: RefusalRow["gate"], source: string): Ref
 
 /**
  * The layering guide's refusal tables are the single source; a row missing its input or its message fails here by name.
- * Rows are recognized more permissively than GFM renders them, so every divergence adds a pin and never loses one.
+ * The tables are the ones GFM renders, so a row is pinned exactly when a reader sees it as a row.
  *
- *   first cell              -> ends with the triggering layer as a code span in parentheses, or several joined by "or"
- *   second cell             -> quotes the engine's message in one code span
- *   header + delimiter row  -> opens a table (the delimiter's cell count is not checked); a blank line closes it
+ *   first cell   -> ends with the triggering layer as a code span in parentheses, or several joined by "or"
+ *   second cell  -> quotes the engine's message in one code span
+ *   outside one  -> a piped line GFM renders as prose is an authoring slip and fails, never a row to skip
  */
-function refusalRows(section: readonly string[], source: string): RefusalRow[] {
+function refusalRows(section: string, source: string): RefusalRow[] {
   const rows: RefusalRow[] = [];
-  let gate: RefusalRow["gate"] | null = null;
-  for (let index = 0; index < section.length; index++) {
-    const line = section[index] ?? "";
-    if (line.trim() === "") {
-      gate = null;
+  for (const node of markdownTree(section).children) {
+    const text = sourceText(section, node) ?? "";
+    if (node.type !== "table") {
+      const piped = text.split("\n").find((line) => line.includes("|"));
+      if (piped !== undefined) {
+        throw new Error(`${source}: refusal table row outside a known table: ${piped.trim()}`);
+      }
       continue;
     }
-    if (gate !== null) {
-      rows.push(refusalRow(line, gate, source));
-      continue;
-    }
-    if (!line.includes("|")) {
-      continue; // prose between the tables
-    }
-    gate = tableGate(line, section[index + 1], source);
-    index++; // the delimiter row, the only line a table skips
+    const [header = [], ...body] = tableRows(text);
+    const gate = tableGate(header, source);
+    rows.push(...body.map((cells) => refusalRow(cells, gate, source)));
   }
   return rows;
 }
@@ -704,7 +687,7 @@ describe("docs/ guide pages", () => {
       );
     }
     const layerName = prefix[1] ?? "";
-    const rows = refusalRows(section.split("\n"), PAGE);
+    const rows = refusalRows(section, PAGE);
     // The rows drive test.each, which runs nothing over an empty table, so a table that lost its rows fails here instead.
     for (const gate of ["validation", "fold"] as const) {
       if (!rows.some((row) => row.gate === gate)) {
@@ -1048,7 +1031,7 @@ describe("refusal table parser (mutation checks)", () => {
       [[["a: 1", "b: 2"], "the message"]],
     ],
   ])("%s", (_case, section, parsed) => {
-    const rows = refusalRows(section, "page");
+    const rows = refusalRows(section.join("\n"), "page");
     expect(rows.map((found) => [found.inputs, found.quoted])).toEqual(parsed);
   });
 
@@ -1069,6 +1052,11 @@ describe("refusal table parser (mutation checks)", () => {
       /does not quote one message/,
     ],
     ["a row with three cells", [...header, "| a | b | c |"], /is not two cells/],
+    [
+      "a row whose layer escapes a pipe",
+      [...header, row("X (`labels: {_layering: mer\\|ge}`)")],
+      /holds an escaped pipe/,
+    ],
     [
       "a prose line run into the table without a blank line",
       [...header, row("X (`a: 1`)"), "A paragraph GFM reads as a one-cell row."],
@@ -1091,7 +1079,7 @@ describe("refusal table parser (mutation checks)", () => {
       /outside a known table/,
     ],
   ])("%s is rejected by name", (_case, section, error) => {
-    expect(() => refusalRows(section, "page")).toThrow(error);
+    expect(() => refusalRows(section.join("\n"), "page")).toThrow(error);
   });
 });
 

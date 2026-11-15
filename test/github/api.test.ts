@@ -22,7 +22,7 @@ import {
 } from "../../src/github/scheduler.js";
 import { redactingOctokitLog, TraceRedaction } from "../../src/github/trace-redaction.js";
 import { expectSealed } from "../io/leak-sweep.js";
-import { api, json, restoreFetch, stubFetch, timeless, traceIo } from "./stub.js";
+import { api, json, replaceFetch, restoreFetch, stubFetch, timeless, traceIo } from "./stub.js";
 
 afterEach(restoreFetch);
 
@@ -724,10 +724,10 @@ describe("secret-field request redaction and fail-closed error responses", () =>
 
   function stubFetchCapturingBodies(response: () => Response): { bodies: string[] } {
     const state = { bodies: [] as string[] };
-    globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
+    replaceFetch(async (_input, init) => {
       state.bodies.push(String(init?.body ?? ""));
       return response();
-    }) as unknown as typeof fetch;
+    });
     return state;
   }
 
@@ -934,9 +934,9 @@ describe("secret-field request redaction and fail-closed error responses", () =>
       "GET /repos/hookco/hookrepo failed: socket hang up. Check network connectivity from the runner to https://api.test, then re-run",
     ],
   ])("a transport failure on %s", async (_name, method, path, payload, reason, failed) => {
-    globalThis.fetch = (async () => {
+    replaceFetch(async () => {
       throw new Error(reason);
-    }) as unknown as typeof fetch;
+    });
     const answer = await api().tryRequest(method, path, payload);
     expect(answer).toEqual({ failed });
   });
@@ -974,9 +974,9 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     expect("error" in unmarked && unmarked.error.message).toBe(`rejected token ${hostileSecret}`);
     expect(plain.lines.join("\n")).toContain('"token":"he said');
 
-    globalThis.fetch = (async () => {
+    replaceFetch(async () => {
       throw new Error(`request failed, body was: {"token":"${hostileSecret}"}`);
-    }) as unknown as typeof fetch;
+    });
     expect(
       await api().tryRequest("POST", path, { token: hostileSecret }, { carriesSecret: true }),
     ).toEqual({

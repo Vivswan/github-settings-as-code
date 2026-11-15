@@ -43,52 +43,46 @@ function run(
   );
 }
 
-// The hand-rolled parser these replaced ignored every argument it did not recognize, so a typo'd flag, an inline
-// `--sections=labels`, or a stray word ran the whole corpus for minutes and exited green. Each case is an input
-// the shell cannot refuse for the script.
-test.each<[label: string, args: string[], error: string]>([
-  ["--sections with no value", ["--sections"], `--sections needs a value; ${USAGE}`],
-  ["--scenario with no value", ["--scenario"], `--scenario needs a value; ${USAGE}`],
+// A parser that ignores what it does not recognize lets a typo'd flag, an inline `--sections=labels`, or a stray word
+// run the whole corpus for minutes and exit green. Each case is an input the shell cannot refuse for the script; the
+// wording of all but the empty list is parseArgs's own, so a row pins the word the refusal names, not the sentence.
+test.each<[label: string, args: string[], named: string]>([
+  ["--sections with no value", ["--sections"], "'--sections <value>'"],
+  ["--scenario with no value", ["--scenario"], "'--scenario <value>'"],
   [
     "--sections with an empty list",
     ["--sections", " , "],
-    `--sections got an empty list; name at least one section, or all; ${USAGE}`,
+    "--sections got an empty list; name at least one section, or all",
   ],
-  ["a misspelled flag", ["--section", "labels"], `unknown flag --section; ${USAGE}`],
-  // parseArgs hands a string flag the next word whatever it is, so a "--" or a flag standing where the value
-  // belongs would otherwise become the value: here the later "all" would clear the filter and run the corpus.
+  // The later "all" would otherwise clear the filter and run the corpus over a list that named nothing.
   [
-    "--sections swallowing a --",
-    ["--sections", "--", "--sections", "all"],
-    `--sections needs a value; ${USAGE}`,
+    "an earlier --sections with an empty list",
+    ["--sections", "", "--sections", "all"],
+    "--sections got an empty list; name at least one section, or all",
   ],
-  [
-    "--sections swallowing the next flag",
-    ["--sections", "--print-stdout"],
-    `--sections needs a value; ${USAGE}`,
-  ],
-  ["a stray argument", ["labels"], `unexpected argument "labels"; ${USAGE}`],
+  ["a misspelled flag", ["--section", "labels"], "'--section'"],
+  // A "--" or a flag standing where the value belongs must not become the value: here the later "all" would clear
+  // the filter and run the corpus.
+  ["--sections swallowing a --", ["--sections", "--", "--sections", "all"], "'--sections'"],
+  ["--sections swallowing the next flag", ["--sections", "--print-stdout"], "'--sections'"],
+  ["a stray argument", ["labels"], "'labels'"],
   // bun drops a "--" that directly follows the script path, so the row puts a flag ahead of it.
-  [
-    "a -- and the flags after it",
-    ["--print-stdout", "--", "--sections", "labels"],
-    `unexpected argument "--"; ${USAGE}`,
-  ],
-  [
-    "--print-stdout with a value",
-    ["--print-stdout=yes"],
-    `--print-stdout takes no value; ${USAGE}`,
-  ],
+  ["the flags after a --", ["--print-stdout", "--", "--sections", "labels"], "'--sections'"],
+  ["--print-stdout with a value", ["--print-stdout=yes"], "'--print-stdout'"],
 ])(
   "%s is refused at the entry, naming the flag and the fix",
-  async (_label, args, error) => {
-    expect(await run(args)).toEqual({ exitCode: 2, stdout: "", stderr: `e2e: ${error}\n` });
+  async (_label, args, named) => {
+    const { stderr, ...rest } = await run(args);
+    expect(rest).toEqual({ exitCode: 2, stdout: "" });
+    expect(stderr).toStartWith("e2e: ");
+    expect(stderr).toContain(named);
+    expect(stderr).toEndWith(`; ${USAGE}\n`);
   },
   20_000,
 );
 
 // A filter nothing matches exits 1 before any scenario runs, and its message echoes the filters as parsed, so the
-// two parsings the old code got wrong (an inline value, a later `all`) are pinned without running the corpus.
+// two parsings a hand walk gets wrong (an inline value, a later `all`) are pinned without running the corpus.
 test.each<[label: string, args: string[], filters: string]>([
   [
     "--sections=<key> is read as the flag's value",

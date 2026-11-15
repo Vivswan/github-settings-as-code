@@ -12,7 +12,7 @@ import {
 } from "../../src/github/api-error.js";
 import { IMMEDIATE_SCHEDULER, TIMERS_SCHEDULER } from "../../src/github/scheduler.js";
 import { expectSealed } from "../io/leak-sweep.js";
-import { api, restoreFetch, stubFetch, traceIo } from "./stub.js";
+import { api, replaceFetch, restoreFetch, stubFetch, traceIo } from "./stub.js";
 
 afterEach(restoreFetch);
 
@@ -46,12 +46,10 @@ describe("tryGraphql success and envelope", () => {
 
   test("the request carries query, operationName, and variables", async () => {
     let sent: Record<string, unknown> | undefined;
-    stubFetch([() => graphql({ data: {} })]);
-    const realFetch = globalThis.fetch;
-    globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    replaceFetch(async (_input, init) => {
       sent = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      return realFetch(input, init);
-    }) as unknown as typeof fetch;
+      return graphql({ data: {} });
+    });
     await api().tryGraphql(READ_OP, { owner: "o", repo: "r" }, "o/r");
     expect(sent).toEqual({
       query: READ_OP.query,
@@ -368,10 +366,10 @@ describe("tryGraphql tracing and redaction", () => {
   test("a mask registered while the request is in flight withholds the transport-failure reason", async () => {
     const t = traceIo();
     const rawReason = "socket hang up talking to o/secretrepo";
-    globalThis.fetch = (async () => {
+    replaceFetch(async () => {
       t.io.mask("o/secretrepo");
       throw new Error(rawReason);
-    }) as unknown as typeof fetch;
+    });
     expect(
       await api(t.io).tryGraphql(READ_OP, { owner: "o", repo: "secretrepo" }, "o/secretrepo"),
     ).toEqual({
@@ -444,9 +442,9 @@ describe("tryGraphql tracing and redaction", () => {
     async (_label, scheduler) => {
       // The throttling plugin inspects every failed /graphql request and reads `error.response.headers`, which a transport error lacks; the
       // original error must survive that handler under both schedulers.
-      globalThis.fetch = (async () => {
+      replaceFetch(async () => {
         throw new Error("socket hang up");
-      }) as unknown as typeof fetch;
+      });
       const client = new GitHubApi({
         token: "t",
         io: traceIo().io,
