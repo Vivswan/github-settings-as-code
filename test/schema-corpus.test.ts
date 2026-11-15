@@ -32,6 +32,9 @@ const FRAGMENT_KINDS = [
   "repos.<slug>.expect.snapshot",
 ] as const;
 
+/** The seeds every section's generated documents keep covering on each run. */
+const GENERATED_SEEDS = [1, 2, 3, 4, 5];
+
 type FragmentKind = (typeof FRAGMENT_KINDS)[number];
 
 /** A curated fragment remembers its file and kind, so the loader guards derive from what was collected, not from side bookkeeping. */
@@ -149,9 +152,6 @@ function scenarioDocs(): CorpusDoc[] {
   );
   return docs;
 }
-
-/** The seeds every section's generated documents keep covering on each run. */
-const GENERATED_SEEDS = [1, 2, 3, 4, 5];
 
 /** One seeded generator document, shape-valid by construction, so schema and runtime must BOTH accept it. */
 function generatedDoc(key: SectionKey, seed: number): CorpusDoc {
