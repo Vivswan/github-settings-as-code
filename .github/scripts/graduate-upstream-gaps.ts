@@ -13,8 +13,10 @@
 
 import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { type Node, type ObjectExpression, parseSync } from "oxc-parser";
 import { countNoun } from "../../src/text.js";
 import { INDEX_PATH, isGapFileName, regenerateIndex } from "./gen-gaps-index.js";
+import { formatted } from "./lib/biome-format.js";
 import { runMain } from "./lib/entry.js";
 import { type Diagnostic, parseDiagnostics } from "./lib/tsc-diagnostics.js";
 
@@ -50,32 +52,127 @@ export function planGraduation(diagnostics: readonly Diagnostic[]): GraduationPl
   return { gapFiles: [...gapFiles].sort(), foreign };
 }
 
+interface GapExport {
+  /** The helper `export const GAP = <helper>({...})` calls. */
+  helper: string;
+
+  /** The properties of the object literal the helper is called with, by key. */
+  properties: ReadonlyMap<string, Node>;
+
+  /** Whether every property is a plain `key: value`; a spread or a computed key could override what `properties` holds. */
+  plain: boolean;
+
+  /** The block comment directly above the export, its delimiters stripped. */
+  doc: string | undefined;
+
+  /** The source text of each comment inside `node`: a rewrite that keeps only the node's values would drop it. */
+  commentsIn(node: Node): string[];
+}
+
+/** The helper and the object literal of `export const GAP = helper({...})`, or undefined for any other statement. */
+function gapCall(statement: Node): { helper: string; argument: ObjectExpression } | undefined {
+  if (
+    statement.type !== "ExportNamedDeclaration" ||
+    statement.declaration?.type !== "VariableDeclaration"
+  ) {
+    return undefined;
+  }
+  const declarator = statement.declaration.declarations[0];
+  const call = declarator?.init;
+  if (
+    declarator?.id.type !== "Identifier" ||
+    declarator.id.name !== "GAP" ||
+    call?.type !== "CallExpression" ||
+    call.callee.type !== "Identifier"
+  ) {
+    return undefined;
+  }
+  const argument = call.arguments[0];
+  return argument?.type === "ObjectExpression" ? { helper: call.callee.name, argument } : undefined;
+}
+
+/** The file's `export const GAP = helper({...})`, read from the syntax tree; a comment or a string that quotes a
+ * helper or a property never decides. Undefined when the file does not parse or has no such export. */
+function readGapExport(source: string): GapExport | undefined {
+  const { program, errors, comments } = parseSync("gap.ts", source);
+  if (errors.length > 0) {
+    return undefined;
+  }
+  for (const statement of program.body) {
+    const call = gapCall(statement);
+    if (call === undefined) {
+      continue;
+    }
+    const properties = new Map<string, Node>();
+    let plain = true;
+    for (const property of call.argument.properties) {
+      if (
+        property.type === "Property" &&
+        property.key.type === "Identifier" &&
+        !property.computed
+      ) {
+        properties.set(property.key.name, property.value);
+      } else {
+        plain = false;
+      }
+    }
+    const above = comments.findLast((comment) => comment.end <= statement.start);
+    const isDoc = above?.type === "Block" && source.slice(above.end, statement.start).trim() === "";
+    return {
+      helper: call.helper,
+      properties,
+      plain,
+      doc: isDoc ? above.value : undefined,
+      commentsIn: (node) =>
+        comments
+          .filter((comment) => comment.start >= node.start && comment.end <= node.end)
+          .map((comment) => source.slice(comment.start, comment.end)),
+    };
+  }
+  return undefined;
+}
+
+/** What the graduation does with a flagged gap file: delete it, rewrite it to spec-only, or refuse with a reason. */
+export type Graduation = "delete" | "rewrite" | { refusal: string };
+
+/** `documentedInSpec: true` deletes. `false` means octokit caught up but the pinned descriptor did not: the file is
+ * rewritten, so its UNDOCUMENTED_ROUTES exemption survives until an @octokit/openapi bump documents the paths.
+ * Anything this script cannot read as one of the two is refused: a guess would delete a file on a value nobody read. */
+export function graduationOf(gapSource: string): Graduation {
+  const gap = readGapExport(gapSource);
+  if (gap?.helper === "defineSpecOnlyGap") {
+    // A spec-only gap carries no octokit tripwire, so a diagnostic inside one is not a graduation; deleting it
+    // would silently drop its UNDOCUMENTED_ROUTES exemption.
+    return {
+      refusal:
+        "is a spec-only gap but the compiler flagged it; that is not a graduation - fix the file by hand",
+    };
+  }
+  const flag =
+    gap?.helper === "defineGap" && gap.plain ? gap.properties.get("documentedInSpec") : undefined;
+  if (flag?.type !== "Literal" || typeof flag.value !== "boolean") {
+    return {
+      refusal:
+        "does not declare documentedInSpec as a plain true or false in defineGap({...}); graduate the file by hand",
+    };
+  }
+  return flag.value ? "delete" : "rewrite";
+}
+
 /** A spec-only gap source: octokit ships its routes already, so it carries no tripwire. */
 export function isSpecOnly(gapSource: string): boolean {
-  return gapSource.includes("defineSpecOnlyGap(");
+  return readGapExport(gapSource)?.helper === "defineSpecOnlyGap";
 }
 
-/** A documentedInSpec: false gap whose tripwire fired means octokit caught up but the pinned descriptor did not: it
- * is rewritten rather than deleted, so its UNDOCUMENTED_ROUTES exemption survives until an @octokit/openapi bump documents the paths. */
+/** A gap source the graduation rewrites instead of deleting. */
 export function isSpecPinned(gapSource: string): boolean {
-  return /documentedInSpec:\s*false/.test(gapSource);
-}
-
-/** `  routes: [...],` in the shape biome would format: inline while it fits. */
-function renderRoutes(routes: readonly string[]): string {
-  const inline = `  routes: [${routes.map((route) => `"${route}"`).join(", ")}],`;
-  if (inline.length <= 100) {
-    return inline;
-  }
-  return ["  routes: [", ...routes.map((route) => `    "${route}",`), "  ],"].join("\n");
+  return graduationOf(gapSource) === "rewrite";
 }
 
 /** Only the feature clause survives (the text up to the first ";", where the octokit-lags prose starts): preserving
  * the whole original would keep a now-false "octokit does not carry these routes yet" sentence in a bot-committed file. */
 function specOnlyDoc(doc: string): string {
   const text = doc
-    .replace(/^\/\*\*/, "")
-    .replace(/\*\/$/, "")
     .split("\n")
     .map((line) => line.replace(/^\s*\*?\s?/, ""))
     .join(" ")
@@ -85,47 +182,48 @@ function specOnlyDoc(doc: string): string {
 }
 
 export function toSpecOnlyGapSource(source: string, gapFile: string): string {
-  // (?:[^*]|\*(?!\/))* spans exactly one block comment (no */ inside), so a module-head comment earlier in the file
-  // can never be mistaken for the GAP doc: only the comment directly above the export matches.
-  const match =
-    /(?<doc>\/\*\*(?:[^*]|\*(?!\/))*\*\/)\s*\nexport const GAP = defineGap\(\{(?<body>[\s\S]*?)\}\);/.exec(
-      source,
-    );
-  const body = match?.groups?.body;
-  const doc = match?.groups?.doc;
-  if (body === undefined || doc === undefined) {
+  const gap = readGapExport(source);
+  if (gap?.helper !== "defineGap" || gap.doc === undefined) {
     throw new Error(
       `${gapFile} does not match the documented defineGap shape (doc comment + export const GAP = defineGap({...})); rewrite it to defineSpecOnlyGap by hand`,
     );
   }
-  const routesMatch = /routes:\s*\[(?<routes>[\s\S]*?)\]/.exec(body);
-  const routesBody = routesMatch?.groups?.routes ?? "";
-  const routes = [...routesBody.matchAll(/"([^"]+)"/g)].map((hit) => hit[1] as string);
-  if (routes.length === 0) {
+  const array = gap.properties.get("routes");
+  const elements = array?.type === "ArrayExpression" ? array.elements : [];
+  if (elements.length === 0) {
     throw new Error(
       `${gapFile} declares no parsable routes; rewrite it to defineSpecOnlyGap by hand`,
     );
   }
-  // Anything in the array besides plain string literals (an identifier, a comment, a template literal) would be
+  // Anything besides plain string literals (an identifier, a spread, a template literal, a comment) would be
   // dropped by the rewrite: refuse instead of silently losing it.
-  const leftover = routesBody.replace(/"[^"]+"/g, "").replace(/[,\s]/g, "");
-  if (leftover !== "") {
+  const routes: string[] = [];
+  const leftover = array === undefined ? [] : gap.commentsIn(array);
+  for (const element of elements) {
+    if (element?.type === "Literal" && typeof element.value === "string") {
+      routes.push(element.value);
+    } else {
+      leftover.push(element === null ? "an empty slot" : source.slice(element.start, element.end));
+    }
+  }
+  if (leftover.length > 0) {
     throw new Error(
-      `${gapFile}'s routes array holds more than plain string literals (leftover: ${leftover}); rewrite it to defineSpecOnlyGap by hand`,
+      `${gapFile}'s routes array holds more than plain string literals (leftover: ${leftover.join(" ")}); rewrite it to defineSpecOnlyGap by hand`,
     );
   }
-  return [
+  const rewritten = [
     // check-file-headers.ts gates the rewritten file too; this header is true of every spec-only gap, whatever its routes.
     "/** A spec-only gap: its routes are exempt from the e2e validator's unknown-route check until the pinned OpenAPI descriptor documents them; the file is then deleted by hand (./gap.ts). */",
     "",
     `import { defineSpecOnlyGap } from "./gap.js";`,
     "",
-    specOnlyDoc(doc),
+    specOnlyDoc(gap.doc),
     "export const GAP = defineSpecOnlyGap({",
-    renderRoutes(routes),
+    `  routes: [${routes.map((route) => JSON.stringify(route)).join(", ")}],`,
     "});",
     "",
   ].join("\n");
+  return formatted(gapFile, rewritten);
 }
 
 /** Compile the repo; diagnostics land on stdout, tool failures on stderr. */
@@ -185,19 +283,13 @@ function main(): number {
   const rewrites: { gapFile: string; next: string }[] = [];
   for (const gapFile of plan.gapFiles) {
     const source = readFileSync(join(ROOT, gapFile), "utf8");
-    if (isSpecOnly(source)) {
-      // A spec-only gap carries no octokit tripwire, so a diagnostic inside one is not a graduation; deleting it
-      // would silently drop its UNDOCUMENTED_ROUTES exemption.
-      abort(
-        `${gapFile} is a spec-only gap but the compiler flagged it; that is not a graduation - fix the file by hand`,
-        first.stdout,
-        first.stderr,
-      );
-    }
-    if (isSpecPinned(source)) {
+    const graduation = graduationOf(source);
+    if (graduation === "delete") {
+      deletions.push(gapFile);
+    } else if (graduation === "rewrite") {
       rewrites.push({ gapFile, next: toSpecOnlyGapSource(source, gapFile) });
     } else {
-      deletions.push(gapFile);
+      abort(`${gapFile} ${graduation.refusal}`, first.stdout, first.stderr);
     }
   }
   for (const { gapFile, next } of rewrites) {
