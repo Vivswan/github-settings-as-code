@@ -5,6 +5,7 @@
  * create or update               -> mints a fresh version
  * stale version on a write       -> 412
  * PATCH version: null            -> accepted (the key is required but nullable upstream)
+ * create with a look-behind      -> 422, a validation_errors map keyed by the pattern's index
  * DELETE entry without a version -> accepted (optional upstream)
  */
 
@@ -21,6 +22,12 @@ import {
   secretScanningPatternFromCreate,
 } from "../../e2e/mock/support.js";
 
+/**
+ * The one dialect refusal the mock stands in for: a look-behind, which GitHub's engine (Hyperscan) has none of.
+ * The status and the body shape are the API description's; the message text is the mock's own.
+ */
+const LOOK_BEHIND = /\(\?<[=!]/;
+
 export const secretScanningCustomPatternsMockHandlers: SectionRestHandlers<"secret_scanning_custom_patterns"> =
   {
     "secret_scanning_custom_patterns.list": ({ state, query }) =>
@@ -36,6 +43,8 @@ export const secretScanningCustomPatternsMockHandlers: SectionRestHandlers<"secr
           body: { message: "Validation failed: no patterns provided", validation_errors: {} },
         };
       }
+      // GitHub's per-index validation_errors map. With any entry in it the mock creates nothing: GitHub documents no partial create.
+      const refused: Record<string, Json> = {};
       const created: Json[] = [];
       for (const [index, entry] of patterns.entries()) {
         const payload = asObject(entry);
@@ -44,20 +53,27 @@ export const secretScanningCustomPatternsMockHandlers: SectionRestHandlers<"secr
           state.secret_scanning_patterns.some((p) => p.name === name) ||
           created.some((p) => p.name === name);
         if (duplicate) {
-          // A duplicate name answers GitHub's per-index validation_errors map; nothing is created.
-          return {
-            status: 422,
-            body: {
-              message: "Validation failed for one or more patterns",
-              validation_errors: {
-                [String(index)]: {
-                  errors: [{ code: "name", message: `A pattern named "${name}" already exists` }],
-                },
-              },
-            },
+          refused[String(index)] = {
+            errors: [{ code: "name", message: `A pattern named "${name}" already exists` }],
           };
+          continue;
+        }
+        if (LOOK_BEHIND.test(String(payload.pattern ?? ""))) {
+          refused[String(index)] = {
+            errors: [{ code: "invalid", message: "Lookbehind assertions are not supported" }],
+          };
+          continue;
         }
         created.push(secretScanningPatternFromCreate(state, payload));
+      }
+      if (Object.keys(refused).length > 0) {
+        return {
+          status: 422,
+          body: {
+            message: "Validation failed for one or more patterns",
+            validation_errors: refused,
+          },
+        };
       }
       state.secret_scanning_patterns.push(...created);
       return { status: 201, body: { created_patterns: created } };

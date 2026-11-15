@@ -50,6 +50,7 @@ Never take an exception silently, and never apply a guideline against the eviden
   Healing is for state this action owns: GitHub's repository settings, which apply converges toward what the settings file declares;
   the settings file and the inputs are the user's and are never healed from GitHub or repaired by the parser.
   Open passthrough shapes keep unknown keys and note them at check time when GitHub does not echo them back.
+  Exception, by the owner's decision: a secret-scanning custom pattern's regular-expression dialect is GitHub's to judge, because a second implementation of it can only drift and refuse what GitHub accepts; the tool passes GitHub's refusal through at apply.
 - The import layering of `src/` is declared in `architecture.yml`; a new cross-layer import is a deliberate edit to that file.
 - A type a section module exposes is exported from its home module, or the bundled declarations cannot reach it and the package-smoke job fails.
 - New sections and endpoints ship with e2e scenarios.

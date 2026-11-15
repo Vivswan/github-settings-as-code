@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import { executePlan } from "../../../src/engine/execute.js";
 import { validateSettingsDoc } from "../../../src/engine/orchestrate.js";
 import { SectionSelection } from "../../../src/engine/section-selection.js";
 import { snapshotRepository } from "../../../src/engine/snapshot.js";
 import { silentIo } from "../../../src/io.js";
 import { describeProblem } from "../../../src/problem.js";
 import type { SectionInput } from "../../../src/sections/contract/declared.js";
+import type { SectionFailure } from "../../../src/sections/contract/errors.js";
 import {
   type PlainData,
   planContext,
@@ -16,7 +18,7 @@ import { captureIo } from "../../io/capture.js";
 import { MockApi } from "../../mock-api.js";
 import { fragmentFake } from "../fragment-fake.js";
 import { provePlanIdempotent } from "../plan-idempotence.js";
-import { REPO, unwrap } from "../section-run.js";
+import { NO_SECRETS, REPO, unwrap } from "../section-run.js";
 import { validatedInput } from "../validated-input.js";
 import { secretScanningCustomPatternsMockHandlers } from "./mock.js";
 
@@ -95,6 +97,7 @@ describe("secret_scanning_custom_patterns", () => {
           drift: [
             "secret_scanning_custom_patterns[vendor-key]: missing - declared in the settings file but not on the repo; apply will create it",
           ],
+          tolerate: { statuses: [422], outcome: expect.any(Function) },
           change: ['created secret scanning custom pattern "vendor-key"'],
         },
         {
@@ -215,6 +218,7 @@ describe("secret_scanning_custom_patterns", () => {
         drift: [
           "secret_scanning_custom_patterns[new-name]: missing - declared in the settings file but not on the repo; apply will create it",
         ],
+        tolerate: { statuses: [422], outcome: expect.any(Function) },
         change: ['created secret scanning custom pattern "new-name"'],
       },
       {
@@ -307,6 +311,68 @@ describe("secret_scanning_custom_patterns", () => {
     }
   });
 
+  test.each<[answer: string, body: unknown, told: string]>([
+    [
+      "its per-index validation_errors map",
+      {
+        message: "Validation failed for one or more patterns",
+        validation_errors: {
+          "1": {
+            errors: [
+              { code: "invalid", message: "pattern is not a supported regular expression" },
+              { code: "must_match", message: "must_match is not a supported regular expression" },
+            ],
+          },
+        },
+      },
+      "GitHub refused secret_scanning_custom_patterns[vendor-key] (invalid): pattern is not a supported regular expression; " +
+        "secret_scanning_custom_patterns[vendor-key] (must_match): must_match is not a supported regular expression. " +
+        "Fix each named pattern in the settings file to satisfy GitHub's message",
+    ],
+    [
+      "a map that leaves out the optional errors list and message",
+      {
+        message: "Validation failed for one or more patterns",
+        validation_errors: { "0": {}, "1": { errors: [{ code: "invalid" }] } },
+      },
+      "GitHub refused secret_scanning_custom_patterns[internal-token]; secret_scanning_custom_patterns[vendor-key] (invalid). " +
+        "Fix each named pattern in the settings file to satisfy GitHub's message",
+    ],
+    [
+      "a body that names no pattern",
+      { message: "Validation failed for one or more patterns" },
+      "GitHub did not say which pattern it refused; check the regular expressions of the patterns named above",
+    ],
+  ])(
+    "a 422 on the bulk create answering %s is reported with what GitHub said",
+    async (_answer, body, told) => {
+      // Drifts silently otherwise: the dialect is GitHub's alone to judge, so this line is the only place a user learns which pattern was refused.
+      const api = new MockApi({
+        ...listRoute([]),
+        "POST /repos/o/r/secret-scanning/custom-patterns": {
+          error: {
+            status: 422,
+            message: "Validation failed for one or more patterns",
+            body: JSON.stringify(body),
+          },
+        },
+      });
+      const declared = [INTERNAL, { name: "vendor-key", pattern: "(?<=key_)[0-9]{6}" }];
+      const execution = await executePlan(
+        await plan(api, declared),
+        secretScanningPatternsSection,
+        api,
+        REPO,
+        NO_SECRETS,
+      );
+      expect(execution.status).toBe("failed");
+      expect((execution as { failure: SectionFailure }).failure.message).toBe(
+        'secret_scanning_custom_patterns: creating secret scanning patterns "internal-token", "vendor-key" failed - ' +
+          `POST /repos/o/r/secret-scanning/custom-patterns: 422 Validation failed for one or more patterns. ${told}`,
+      );
+    },
+  );
+
   test("executing the plan against the mock fragment converges: the re-plan is empty", async () => {
     const api = fragmentFake(
       secretScanningPatternsSection,
@@ -364,13 +430,12 @@ describe("secret_scanning_custom_patterns snapshot", () => {
       captureIo().io,
     );
 
-  // GitHub compiles these with Hyperscan and holds them; a JavaScript RegExp alone refuses each, and
-  // a live value has no file-side fix, so the snapshot must translate rather than fail.
+  // A live value has no file-side fix and its dialect is GitHub's to judge, so the snapshot writes it as GitHub holds it.
   test.each([
-    ["a plain pattern (control)", "key_[A-Z0-9]{32}"],
+    ["a plain pattern", "key_[A-Z0-9]{32}"],
     ["a Python-style named group", "(?P<token>key_[A-Z0-9]{32})"],
-    ["an inline comment", "(?#vendor)key_[A-Z0-9]{32}"],
     ["a braced hex escape in a class range", "[\\x{41}-\\x{5A}]{32}"],
+    ["an expression no JavaScript RegExp compiles", "(key_[A-Z0-9]{32}"],
   ])("a live pattern with %s reads back verbatim", async (_form, pattern) => {
     const result = await snapshot([livePattern({ id: 7, name: "vendor-key", pattern })]);
     expect(result.result).toBe("snapshot");
@@ -383,62 +448,12 @@ describe("secret_scanning_custom_patterns snapshot", () => {
     });
   });
 
-  test("a live pattern no dialect parses is left out with a note naming it, never a failed snapshot", async () => {
-    // GitHub would not hold an unbalanced group, but the mock can, and the guard must hold for
-    // whatever the translation table does not cover: the entry is left out, the rest is written.
-    const result = await snapshot([
-      livePattern({ id: 7, name: "vendor-key", pattern: "key_[A-Z0-9]{32}" }),
-      livePattern({ id: 8, name: "odd-one", pattern: "(key_[A-Z0-9]{32}", must_match: ["[0-9"] }),
-    ]);
-    expect(result.result).toBe("snapshot");
-    expect(result.outcomes).toEqual([
-      {
-        key: "secret_scanning_custom_patterns",
-        status: "snapshot",
-        detail: [
-          // The engine's own reason sits in each parenthesis; its wording is the runtime's, not pinned.
-          expect.stringMatching(
-            new RegExp(
-              "^secret_scanning_custom_patterns\\[odd-one\\]: left out of the snapshot - " +
-                "its pattern \\(Invalid regular expression: .+\\), must_match\\[0\\] \\(Invalid regular expression: .+\\) " +
-                "cannot be verified as regular expressions by this tool; the pattern stays live and undeclared under the keep default$",
-            ),
-          ),
-        ],
-      },
-    ]);
-    expect<unknown>(result.settings?.secret_scanning_custom_patterns).toEqual({
-      _undeclared: "keep",
-      entries: [{ name: "vendor-key", pattern: "key_[A-Z0-9]{32}" }],
-    });
-  });
-
   test.each<[form: string, live: Record<string, unknown>]>([
     ["a list where a string belongs", { pattern: ["("] }],
-    [
-      "a number where a string belongs, beside an unverifiable list",
-      { pattern: 7, must_match: ["("] },
-    ],
-  ])("a live entry with %s is still the engine's BUG, not a left-out note", async (_form, live) => {
-    // The left-out path is for values the check cannot verify, never for a body outside the shape.
+    ["a number where a string belongs", { pattern: 7 }],
+  ])("a live entry with %s is the engine's BUG, never written to the file", async (_form, live) => {
     const result = await snapshot([livePattern({ id: 8, name: "odd-one", ...live })]);
     expect(result.result).toBe("failed");
     expect(result.outcomes[0]?.detail).toEqual([expect.stringMatching(/^BUG: /)]);
-  });
-
-  test("a live set whose every pattern is left out snapshots as an empty declaration under keep, with only the notes", async () => {
-    // Something exists on the repository, so the outcome must not also say nothing does: the left-out
-    // pattern stays live under the keep policy the empty declaration spells.
-    const result = await snapshot([livePattern({ id: 8, name: "odd-one", pattern: "(key" })]);
-    expect(result.result).toBe("snapshot");
-    expect<unknown>(result.settings?.secret_scanning_custom_patterns).toEqual({
-      _undeclared: "keep",
-      entries: [],
-    });
-    expect(result.outcomes[0]?.detail).toEqual([
-      expect.stringMatching(
-        /^secret_scanning_custom_patterns\[odd-one\]: left out of the snapshot - its pattern \(/,
-      ),
-    ]);
   });
 });

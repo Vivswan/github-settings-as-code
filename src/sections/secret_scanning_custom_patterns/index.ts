@@ -9,7 +9,7 @@
  */
 
 import { isDeepStrictEqual } from "node:util";
-import { ok, type Result } from "neverthrow";
+import { ok, Result } from "neverthrow";
 import { z } from "zod";
 import { agree } from "../../text.js";
 import type { UndeclaredPolicy } from "../../types.js";
@@ -20,7 +20,7 @@ import {
   undeclaredPolicy,
   valueDrift,
 } from "../contract/drift.js";
-import type { EndpointDecl } from "../contract/endpoints.js";
+import { type EndpointDecl, expand } from "../contract/endpoints.js";
 import type { SectionFailure } from "../contract/errors.js";
 import { identifiedBy } from "../contract/keyed-list.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
@@ -34,12 +34,8 @@ import type { SectionPermission } from "../contract/permissions.js";
 import type { Item, Pinned } from "../contract/pin.js";
 import { hasDrift, type PlannedOp, type SectionPlan } from "../contract/plan.js";
 import { knobbed, routed } from "../shared/schema-helpers.js";
-import {
-  knobbedSnapshot,
-  leftOutOfSnapshot,
-  projectOntoSchema,
-} from "../shared/snapshot-helpers.js";
-import { SecretScanningPatternConfig, unverifiableRegexFields } from "./schema.js";
+import { knobbedSnapshot, projectOntoSchema } from "../shared/snapshot-helpers.js";
+import { SecretScanningPatternConfig } from "./schema.js";
 
 const key = "secret_scanning_custom_patterns";
 
@@ -72,9 +68,9 @@ const ENDPOINTS = {
   },
   create: {
     route: "POST /repos/{owner}/{repo}/secret-scanning/custom-patterns",
-    statuses: { 201: "patterns created" },
-    hints: {
-      422: "GitHub rejected a declared pattern - usually an invalid regular expression in one of its fields; the response names the rejected pattern",
+    statuses: {
+      201: "patterns created",
+      422: "GitHub refused a declared pattern, as a validation_errors map keyed by the pattern's index in the request",
     },
     denialHint: NOT_ENABLED_HINT,
   },
@@ -109,6 +105,18 @@ const LivePatternEntry = z.looseObject({
 });
 
 type _LivePatternEntryPin = Pinned<typeof LivePatternEntry, Item<typeof ENDPOINTS.list>>;
+
+/** The bulk create's 422 body: GitHub's per-pattern refusals, keyed by each pattern's zero-based index in the request; the description marks every field optional. */
+const CreateRefusal = z.looseObject({
+  validation_errors: z.record(
+    z.string(),
+    z.looseObject({
+      errors: z
+        .array(z.looseObject({ code: z.string().optional(), message: z.string().optional() }))
+        .optional(),
+    }),
+  ),
+});
 
 function liveFrom(entry: z.infer<typeof LivePatternEntry>): LivePattern {
   const fields: Partial<Record<UpdatableKey, unknown>> = {};
@@ -200,8 +208,45 @@ function updateOp(
   };
 }
 
+/**
+ * GitHub's refusals of a bulk create, one clause per error under the pattern's settings-file label (the bare label
+ * for a pattern refused without one); empty when the body is not that shape or names no pattern of the request. GitHub alone judges a pattern's regular expressions, so
+ * this is where a user learns which pattern it refused and why.
+ */
+function createRefusals(
+  body: string,
+  toCreate: readonly SecretScanningPatternConfig[],
+): readonly string[] {
+  const parsed: unknown = Result.fromThrowable(JSON.parse)(body).unwrapOr(undefined);
+  const refusal = CreateRefusal.safeParse(parsed);
+  if (!refusal.success) {
+    return [];
+  }
+
+  return Object.entries(refusal.data.validation_errors).flatMap(([index, { errors = [] }]) => {
+    const pattern = toCreate[Number(index)];
+    if (pattern === undefined) {
+      return [];
+    }
+
+    const label = `${key}[${pattern.name}]`;
+    if (errors.length === 0) {
+      return [label];
+    }
+
+    return errors.map(({ code, message }) => {
+      const coded = code === undefined ? "" : ` (${code})`;
+      const said = message === undefined ? "" : `: ${message}`;
+      return `${label}${coded}${said}`;
+    });
+  });
+}
+
 /** The one bulk create, its drift and change lines one per pattern; undefined with nothing to create. */
-function createOp(toCreate: readonly SecretScanningPatternConfig[]): PatternOp | undefined {
+function createOp(
+  toCreate: readonly SecretScanningPatternConfig[],
+  path: string,
+): PatternOp | undefined {
   const [first, ...rest] = toCreate;
   if (first === undefined) {
     return undefined;
@@ -210,11 +255,25 @@ function createOp(toCreate: readonly SecretScanningPatternConfig[]): PatternOp |
   const missing = (p: SecretScanningPatternConfig): string => missingDrift(`${key}[${p.name}]`);
   const created = (p: SecretScanningPatternConfig): string =>
     `created secret scanning custom pattern "${p.name}"`;
+  const describe = `creating secret scanning ${agree(toCreate.length, "pattern", "patterns")} ${toCreate.map((p) => `"${p.name}"`).join(", ")}`;
   return {
     role: "create",
     payload: { patterns: toCreate.map(createBody) },
-    describe: `creating secret scanning ${agree(toCreate.length, "pattern", "patterns")} ${toCreate.map((p) => `"${p.name}"`).join(", ")}`,
+    describe,
     drift: [missing(first), ...rest.map(missing)],
+    tolerate: {
+      statuses: [422],
+      outcome: (error) => {
+        const refusals = createRefusals(error.body, toCreate);
+        const told =
+          refusals.length > 0
+            ? `GitHub refused ${refusals.join("; ")}. Fix each named pattern in the settings file to satisfy GitHub's message`
+            : "GitHub did not say which pattern it refused; check the regular expressions of the patterns named above";
+        return {
+          failure: `${key}: ${describe} failed - POST ${path}: ${error.status} ${error.message}. ${told}`,
+        };
+      },
+    },
     change: () => ok([created(first), ...rest.map(created)] as const),
   };
 }
@@ -332,7 +391,7 @@ export const secretScanningPatternsSection = {
           const { toCreate, updates } = declaredWrites(desired, liveByName);
           const toDelete = undeclaredPatterns(live, declaredNames, policy, plan);
 
-          const create = createOp(toCreate);
+          const create = createOp(toCreate, expand(ENDPOINTS.create, ctx));
           if (create !== undefined) {
             plan.ops.push(create);
           }
@@ -352,27 +411,10 @@ export const secretScanningPatternsSection = {
         return ok<SectionSnapshot<typeof key>, SectionFailure>({ value: undefined, notes: [] });
       }
       return patternsByName(this, live).map((): SectionSnapshot<typeof key> => {
-        const notes: string[] = [];
-        const entries: SecretScanningPatternConfig[] = [];
-        for (const pattern of live) {
-          const entry = projectOntoSchema(SecretScanningPatternConfig, pattern);
-          // A live value the syntax check cannot verify has no file-side fix: the entry is left out, the
-          // rest is written. A mis-shaped entry stays, for the engine's validation to name as the bug it is.
-          const unverifiable = unverifiableRegexFields(entry);
-          if (unverifiable.length > 0) {
-            notes.push(
-              leftOutOfSnapshot(
-                `${key}[${pattern.name}]`,
-                `its ${unverifiable.join(", ")} cannot be verified as ${agree(unverifiable.length, "a regular expression", "regular expressions")} by this tool; the pattern stays live and undeclared under the keep default`,
-              ),
-            );
-            continue;
-          }
-          entries.push(entry);
-        }
-        // Every entry left out still declares the section, empty: something exists on the repository,
-        // and the keep policy the empty declaration spells is what holds it.
-        return { value: knobbedSnapshot(this, entries), notes };
+        const entries = live.map((pattern) =>
+          projectOntoSchema(SecretScanningPatternConfig, pattern),
+        );
+        return { value: knobbedSnapshot(this, entries), notes: [] };
       });
     });
   },
