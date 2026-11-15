@@ -12,6 +12,8 @@ The library sections describe the public entry, `@vivswan/github-settings-as-cod
 
 The silent ones include the fallback, the renamed `GSAC_RETRY_BASE_MS`, the rendered file (it reorders once), and the snapshot file (it reorders once and no longer dates itself). Run `mode: check` before the first v3 apply and diff the first v3 rendered file.
 
+The eight topics below each have a detail page, listed in reading order in the [index by topic](v2-to-v3/README.md).
+
 The changelog entry for 3.0.0 carries the release-please footers in the [CHANGELOG](https://github.com/Vivswan/github-settings-as-code/blob/main/CHANGELOG.md).
 
 ## Run inputs and outputs
