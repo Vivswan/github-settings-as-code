@@ -10,8 +10,9 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { visitParents } from "unist-util-visit-parents";
 import { ROOT } from "../root.js";
-import { fencedBlocks } from "./markdown.js";
+import { type CodeFence, codeFences, markdownTree } from "./markdown.js";
 
 /** The tree whose every page is under test. */
 const DOCS = join(ROOT, "docs");
@@ -159,49 +160,81 @@ function insideGeneratedRegion(lines: readonly string[], line: number): boolean 
   return open;
 }
 
-/** The problems of the "Demonstrated by:" line the concept diagram opening at `index` needs before the next heading. */
-function demonstrationProblems(lines: readonly string[], index: number, root: string): string[] {
-  const fenceEnd = lines.indexOf("```", index + 1);
-  const close = fenceEnd === -1 ? lines.length : fenceEnd;
-  const after = lines.slice(close + 1);
-  const nextHeading = after.findIndex((text) => /^#{1,6}\s/.test(text));
-  const section = nextHeading === -1 ? after : after.slice(0, nextHeading);
-  const demo = section.find((text) => text.startsWith("Demonstrated by:"));
+/** A rendered "Demonstrated by:" paragraph: the line it opens on and the destinations it links. */
+interface Demonstration {
+  readonly line: number;
+  readonly links: readonly string[];
+}
+
+/** The headings' lines and the demonstration paragraphs of a page, read from its syntax tree: text inside a code block or an HTML comment is neither. */
+function pageLandmarks(markdown: string): { headings: number[]; demonstrations: Demonstration[] } {
+  const headings: number[] = [];
+  const demonstrations: Demonstration[] = [];
+  visitParents(markdownTree(markdown), (node) => {
+    const line = node.position?.start.line ?? 0;
+    if (node.type === "heading") {
+      headings.push(line);
+    }
+    if (node.type !== "paragraph") {
+      return;
+    }
+    const [lead] = node.children;
+    if (lead?.type === "text" && lead.value.startsWith("Demonstrated by:")) {
+      const links: string[] = [];
+      visitParents(node, "link", (link) => {
+        links.push(link.url);
+      });
+      demonstrations.push({ line, links });
+    }
+  });
+  return { headings, demonstrations };
+}
+
+/** The problems of the "Demonstrated by:" paragraph the concept diagram `fence` needs before the next heading. */
+function demonstrationProblems(
+  fence: CodeFence,
+  { headings, demonstrations }: ReturnType<typeof pageLandmarks>,
+  root: string,
+): string[] {
+  const nextHeading = headings.find((line) => line > fence.endLine) ?? Number.POSITIVE_INFINITY;
+  const demo = demonstrations.find(
+    (found) => found.line > fence.endLine && found.line < nextHeading,
+  );
   if (demo === undefined) {
     return [
-      `line ${index + 1}: the diagram has no "Demonstrated by:" line before the next heading`,
+      `line ${fence.line}: the diagram has no "Demonstrated by:" line before the next heading`,
     ];
   }
-  const links = [...demo.matchAll(/\]\(([^)]+)\)/g)].map((m) => m[1] ?? "");
-  if (links.length === 0) {
-    return [`line ${index + 1}: the "Demonstrated by:" line links nothing`];
+  if (demo.links.length === 0) {
+    return [`line ${fence.line}: the "Demonstrated by:" line links nothing`];
   }
   const problems: string[] = [];
-  for (const link of links) {
+  for (const link of demo.links) {
     if (!link.startsWith(REPO_FILE_URL)) {
-      problems.push(`line ${index + 1}: "${link}" is not a ${REPO_FILE_URL} link`);
+      problems.push(`line ${fence.line}: "${link}" is not a ${REPO_FILE_URL} link`);
     } else if (!existsSync(join(root, link.slice(REPO_FILE_URL.length)))) {
-      problems.push(`line ${index + 1}: "${link}" names a file that does not exist`);
+      problems.push(`line ${fence.line}: "${link}" names a file that does not exist`);
     }
   }
   return problems;
 }
 
 export function diagramProblems(markdown: string, root: string): string[] {
+  const lines = markdown.split("\n");
+  const landmarks = pageLandmarks(markdown);
   const problems: string[] = [];
-  for (const block of fencedBlocks(markdown, "mermaid")) {
-    const nodes = nodeLabels(block);
+  for (const fence of codeFences(markdown)) {
+    if (fence.info !== "mermaid") {
+      continue;
+    }
+    const nodes = nodeLabels(fence.body);
     problems.push(...nodes.problems);
     for (const label of nodes.labels) {
       problems.push(...labelProblems(label, root));
     }
-  }
-  const lines = markdown.split("\n");
-  for (const [index, line] of lines.entries()) {
-    if (line !== "```mermaid" || insideGeneratedRegion(lines, index)) {
-      continue;
+    if (!insideGeneratedRegion(lines, fence.line - 1)) {
+      problems.push(...demonstrationProblems(fence, landmarks, root));
     }
-    problems.push(...demonstrationProblems(lines, index, root));
   }
   return problems;
 }
@@ -363,6 +396,27 @@ describe("diagram guard (mutation checks)", () => {
       page(
         "src/engine/layers.ts",
         `Demonstrated by: [x](${REPO_FILE_URL}test/engine/nowhere.test.ts).`,
+      ),
+      [`line 3: "${REPO_FILE_URL}test/engine/nowhere.test.ts" names a file that does not exist`],
+    ],
+    [
+      "a concept diagram whose demonstration line sits in a code block, where it links nothing",
+      page("src/engine/layers.ts", `\`\`\`text\n${demo}\n\`\`\``),
+      ['line 3: the diagram has no "Demonstrated by:" line before the next heading'],
+    ],
+    [
+      "a concept diagram whose demonstration link holds a parenthesis",
+      page(
+        "src/engine/layers.ts",
+        `Demonstrated by: [x](${REPO_FILE_URL}test/(x)/nowhere.test.ts).`,
+      ),
+      [`line 3: "${REPO_FILE_URL}test/(x)/nowhere.test.ts" names a file that does not exist`],
+    ],
+    [
+      "a concept diagram whose demonstration link sits inside emphasis",
+      page(
+        "src/engine/layers.ts",
+        `Demonstrated by: **[x](${REPO_FILE_URL}test/engine/nowhere.test.ts)**.`,
       ),
       [`line 3: "${REPO_FILE_URL}test/engine/nowhere.test.ts" names a file that does not exist`],
     ],

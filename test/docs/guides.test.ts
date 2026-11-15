@@ -30,7 +30,7 @@ import { listLayering, SECTIONS } from "../../src/sections/registry.js";
 import { STALE_VERSION_HINT } from "../../src/sections/secret_scanning_custom_patterns/index.js";
 import { ROOT } from "../root.js";
 import { deleteEnumerationProblems } from "./claims.js";
-import { fencedBlocks, markdownTree, sectionLines, tableRows } from "./markdown.js";
+import { codeFences, fencedBlocks, markdownTree, sectionLines, tableRows } from "./markdown.js";
 import { assertValidSettingsExample } from "./settings-examples.js";
 import { stalePins } from "./version-pins.js";
 
@@ -100,40 +100,28 @@ function isSettingsShaped(doc: unknown): boolean {
 }
 
 /**
- * Fence-policy violations for one document. fencedBlocks (markdown.ts) needs the exact info string on a backtick fence preceded only by indent,
- * so a wrong tag, a tilde fence, or a blockquoted fence hides an example from it; column zero and exactly three backticks are the guides' own
- * convention.
+ * Fence-policy violations for one document: the guides write every fence at column zero with exactly three backticks,
+ * outside any list item or blockquote, under an info string from the closed vocabulary.
  */
 function fenceViolations(markdown: string, allowed: ReadonlySet<string>): string[] {
+  const malformed = (line: number, fence: string): string =>
+    `line ${line}: fence "${fence.trim()}" must start at column zero with exactly three backticks (no indent, no blockquote)`;
   const problems: string[] = [];
-  let open = false;
-  for (const [index, line] of markdown.split("\n").entries()) {
-    if (open) {
-      // Fence-like body lines (a guide showing markdown) are content, so a malformed closer surfaces as the unclosed-fence problem at the end.
-      if (line === "```") {
-        open = false;
-      }
+  for (const fence of codeFences(markdown)) {
+    if (fence.nested || !/^`{3}(?!`)/.test(fence.opener)) {
+      problems.push(malformed(fence.line, fence.opener));
       continue;
     }
-    if (/^[\s>]*(`{3,}|~{3,})/.test(line)) {
-      if (!/^`{3}(?!`)/.test(line)) {
-        problems.push(
-          `line ${index + 1}: fence "${line.trim()}" must start at column zero with exactly three backticks (no indent, no blockquote)`,
-        );
-        continue;
-      }
-      // No leading trim: "``` yaml settings" would pass a trimmed check while fencedBlocks cannot see it.
-      const info = line.slice(3).trimEnd();
-      if (!allowed.has(info)) {
-        problems.push(
-          `line ${index + 1}: fence info "${info}" is not in the allowed list (${[...allowed].join(", ")})`,
-        );
-      }
-      open = true;
+    if (!allowed.has(fence.info)) {
+      problems.push(
+        `line ${fence.line}: fence info "${fence.info}" is not in the allowed list (${[...allowed].join(", ")})`,
+      );
     }
-  }
-  if (open) {
-    problems.push("unclosed fence at end of document");
+    if (fence.closer === null) {
+      problems.push(`line ${fence.line}: the fence is never closed`);
+    } else if (fence.closer !== "```") {
+      problems.push(malformed(fence.endLine, fence.closer));
+    }
   }
   return problems;
 }
@@ -473,6 +461,16 @@ describe("docs/ guide pages", () => {
       }
     }
     expect(broken).toEqual([]);
+  });
+
+  test("no scanned file leaves a fence unclosed", () => {
+    // An unclosed fence turns the rest of its page into code, so every later link and heading would leave the link checks unseen.
+    const unclosed = linkScanFiles().flatMap((file) =>
+      codeFences(readFileSync(file.path, "utf8"))
+        .filter((fence) => fence.closer === null)
+        .map((fence) => `${file.label}:${fence.line}`),
+    );
+    expect(unclosed).toEqual([]);
   });
 
   /**
@@ -1080,7 +1078,7 @@ describe("refusal table parser (mutation checks)", () => {
 });
 
 describe("fence policy guard (mutation checks)", () => {
-  // Every mutation but the indented and four-backtick fences hides the example from fencedBlocks; those two break only the guides' one fence form.
+  // The reader sees every fence form, so the policy is what keeps the guides to one; a form it lets through is a second spelling of a fence tag.
   const notAllowed = (line: number, info: string): string =>
     `line ${line}: fence info "${info}" is not in the allowed list (${[...ALLOWED_FENCE_INFO].join(", ")})`;
   const malformed = (line: number, fence: string): string =>
@@ -1089,28 +1087,32 @@ describe("fence policy guard (mutation checks)", () => {
     "the canonical form": ["```yaml settings\nlabels: []\n```\n", []],
     "a missing tag": ["```\nlabels: []\n```\n", [notAllowed(1, "")]],
     "a misspelled tag": ["```yml settings\nlabels: []\n```\n", [notAllowed(1, "yml settings")]],
-    "a space before the tag": [
-      "``` yaml settings\nlabels: []\n```\n",
-      [notAllowed(1, " yaml settings")],
+    "a tag with an attribute": [
+      '```yaml title="x"\nlabels: []\n```\n',
+      [notAllowed(1, 'yaml title="x"')],
     ],
-    // A malformed opener never opens a block, so its closer is reported too.
     "an indented fence": [
       "  ```yaml settings\nlabels: []\n  ```\n",
-      [malformed(1, "```yaml settings"), malformed(3, "```")],
+      [malformed(1, "```yaml settings")],
+    ],
+    "a fence in a list item": [
+      "- item\n\n  ```yaml settings\n  labels: []\n  ```\n",
+      [malformed(3, "```yaml settings")],
     ],
     "a blockquoted fence": [
-      "> ```yaml settings\nlabels: []\n> ```\n",
-      [malformed(1, "> ```yaml settings"), malformed(3, "> ```")],
+      "> ```yaml settings\n> labels: []\n> ```\n",
+      [malformed(1, "> ```yaml settings")],
     ],
-    "a tilde fence": [
-      "~~~yaml settings\nlabels: []\n~~~\n",
-      [malformed(1, "~~~yaml settings"), malformed(3, "~~~")],
-    ],
+    "a tilde fence": ["~~~yaml settings\nlabels: []\n~~~\n", [malformed(1, "~~~yaml settings")]],
     "a four-backtick fence": [
       "````yaml settings\nlabels: []\n````\n",
-      [malformed(1, "````yaml settings"), malformed(3, "````")],
+      [malformed(1, "````yaml settings")],
     ],
-    "an unclosed fence": ["```yaml settings\nlabels: []\n", ["unclosed fence at end of document"]],
+    "a closing fence that is not three bare backticks": [
+      "```yaml settings\nlabels: []\n````\n",
+      [malformed(3, "````")],
+    ],
+    "an unclosed fence": ["```yaml settings\nlabels: []\n", ["line 1: the fence is never closed"]],
   };
   test.each(Object.entries(FORMS))(
     "%s yields exactly the pinned violations",
@@ -1118,6 +1120,51 @@ describe("fence policy guard (mutation checks)", () => {
       expect(fenceViolations(markdown, ALLOWED_FENCE_INFO)).toEqual(violations);
     },
   );
+});
+
+describe("code fence reader", () => {
+  // The example validators check what this reader returns, so a fence form it cannot see is an example nothing validates.
+  test.each<[string, string, string[]]>([
+    ["a tilde fence is read", "~~~yaml\na: 1\n~~~\n", ["a: 1"]],
+    ["a blockquoted fence is read without its markers", "> ```yaml\n> a: 1\n> ```\n", ["a: 1"]],
+    [
+      "a fence nested in a list item is read without its indent",
+      "1. Step\n\n   ```yaml\n   a:\n     b: 1\n   ```\n",
+      ["a:\n  b: 1"],
+    ],
+    [
+      "a fence shown inside a longer fence is that fence's text",
+      "````text\n```yaml\na: 1\n```\n````\n",
+      [],
+    ],
+    ["a fence inside an HTML comment renders nothing", "<!--\n```yaml\na: 1\n```\n-->\n", []],
+  ])("%s", (_case, markdown, blocks) => {
+    expect(fencedBlocks(markdown, "yaml")).toEqual(blocks);
+  });
+
+  test.each<[string, string, Array<string | null>]>([
+    [
+      "a closing fence is the parser's, so a code line that ends in backticks is not one",
+      "```text\nx\ntext```",
+      [null],
+    ],
+    [
+      "a CRLF document's fences read without the carriage return",
+      "```text\r\nx\r\n```\r\n",
+      ["```"],
+    ],
+    ["a fence the document ends before closing has no closer", "```text\nx\n", [null]],
+  ])("%s", (_case, markdown, closers) => {
+    expect(codeFences(markdown).map((fence) => fence.closer)).toEqual(closers);
+  });
+
+  test("the language is the info string's first word, whatever follows it", () => {
+    const markdown = '```yml\na: 1\n```\n\n```yaml title="x"\nb: 2\n```\n';
+    expect(codeFences(markdown).map((fence) => [fence.lang, fence.info])).toEqual([
+      ["yml", "yml"],
+      ["yaml", 'yaml title="x"'],
+    ]);
+  });
 });
 
 describe("github heading slugger", () => {

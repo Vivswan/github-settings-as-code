@@ -24,11 +24,14 @@ import { schemaNode } from "../../src/sections/shared/schema-node.js";
 import { ROOT } from "../root.js";
 import { readSettingsSchema } from "../settings-schema.js";
 import { defaultClaimProblems, deleteEnumerationProblems } from "./claims.js";
-import { fencedBlocks, sectionLines, tableRows } from "./markdown.js";
+import { codeFences, fencedBlocks, sectionLines, tableRows } from "./markdown.js";
 import { assertValidSettingsExample } from "./settings-examples.js";
 import { stalePins } from "./version-pins.js";
 
 const readme = readFileSync(join(ROOT, "README.md"), "utf8");
+
+/** The language words a renderer highlights as YAML. */
+const YAML_LANGS: ReadonlySet<string> = new Set(["yaml", "yml"]);
 
 function assertBacktickedEnumeration(
   text: string,
@@ -46,7 +49,9 @@ describe("README example settings.yml blocks", () => {
   test("every settings.yml example validates and its repository keys are known", () => {
     const known = new Set<string>(SECTION_KEYS);
     let validated = 0;
-    for (const block of fencedBlocks(readme, "yaml")) {
+    // Every YAML fence, whatever follows the language word: an example tagged `yml` or `yaml title="..."` is still an example.
+    const yamlBlocks = codeFences(readme).filter((fence) => YAML_LANGS.has(fence.lang));
+    for (const { body: block } of yamlBlocks) {
       let doc: unknown;
       try {
         doc = parseYaml(block);
