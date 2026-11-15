@@ -633,6 +633,33 @@ describe("checkLeaks (redaction leak invariant)", () => {
       ['leak: "acme/secret" present in the step summary'],
     ],
     [
+      "a private value the summary escaped: a needle holding a bracket or a star sits in a cell with backslashes, and a raw match alone would pass a real leak",
+      { ...quiet, summary: "| labels | drift | labels\\[secret/\\*]: missing live |" },
+      ["labels[secret/*]"],
+      ['leak: "labels[secret/*]" present in the step summary'],
+    ],
+    [
+      "a whole table row whose detail cell the summary escaped: escaping the needle would also escape its cell separators, so only the rendered row can match",
+      {
+        ...quiet,
+        summary:
+          "| Section | Status | Detail |\n|---|---|---|\n| labels | drift | labels\\[secret/\\*]: missing live<br>second line |",
+      },
+      ["| labels | drift | labels[secret/*]: missing live<br>second line |"],
+      [
+        'leak: "| labels | drift | labels[secret/*]: missing live<br>second line |" present in the step summary',
+      ],
+    ],
+    [
+      "two starred names in one cell: read as Markdown the needle itself would lose its stars, so the needle is taken as the text it is",
+      {
+        ...quiet,
+        summary: "| Detail |\n|---|\n| branches\\[release/\\*] and branches\\[feature/\\*] |",
+      },
+      ["branches[release/*] and branches[feature/*]"],
+      ['leak: "branches[release/*] and branches[feature/*]" present in the step summary'],
+    ],
+    [
       "a canary in stdout outside the mask directive",
       { ...quiet, stdout: "::add-mask::acme/secret\n::debug::CANARY-1 slipped out" },
       ["CANARY-1"],

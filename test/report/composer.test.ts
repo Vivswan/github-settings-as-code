@@ -34,7 +34,7 @@ describe("composeReport", () => {
         "|---|---|",
         "| Target | o/private-repo |",
         "| Admin repository | o/admin |",
-        "| Run | https://github.com/o/admin/actions/runs/42 |",
+        "| Run | <https://github.com/o/admin/actions/runs/42> |",
         "| Mode | check |",
         "| Result | drift |",
         "| Generated | 2026-07-22T10:00:00.000Z |",
@@ -43,7 +43,7 @@ describe("composeReport", () => {
         "",
         "| Section | Status | Detail |",
         "|---|---|---|",
-        "| labels | drift | labels[secret-project]: missing |",
+        "| labels | drift | labels\\[secret-project]: missing |",
         "| repository | clean |  |",
         "",
         "## Transcript",
@@ -55,6 +55,21 @@ describe("composeReport", () => {
         "",
       ].join("\n"),
     );
+  });
+
+  test("a target and a run URL with underscores at word edges render as written: the heading showed `acme/__init__` bold, and the Run link pointed at an escaped path", () => {
+    const report = composeReport(
+      input({
+        target: "acme/__init__",
+        runUrl: "https://github.com/acme/_admin_/actions/runs/1",
+      }),
+    );
+
+    expect(report.split("\n").filter((line) => /^# |^\| (Target|Run) /.test(line))).toEqual([
+      "# settings-as-code private report: acme/\\_\\_init\\_\\_",
+      "| Target | acme/\\_\\_init\\_\\_ |",
+      "| Run | <https://github.com/acme/_admin_/actions/runs/1> |",
+    ]);
   });
 
   test.each<[name: string, detail: string[], cell: string]>([
@@ -173,7 +188,7 @@ describe("composeReportWithin", () => {
     expect(marks).toHaveLength(2);
     expect(marks[1]).toBe(60);
     expect(head).toEqual([limit, (marks[0] as number) + 60, 121]);
-    expect(cut).toContain(`${long[0]}<br>`);
+    expect(cut).toContain("labels\\[entry-0]: undeclared, so apply deletes it<br>");
     expect(cut).toContain(`<br>(lines left out: ${marks[0]}) |`);
     expect(transcriptOf(cut)).toBe("## Transcript\n\n(lines left out: 60)\n");
   });
@@ -196,8 +211,8 @@ describe("composeReportWithin", () => {
     });
     // The fixed part is the body with all 42 lines left out: the heading, the notice, the run table, each section's
     // status, and the marks. Its length moves only with the digits of the limit its notice names.
-    const fixedPart = (limit: number): number =>
-      composeReportWithin(report, 0).length + String(limit).length - 1;
+    const bare = composeReportWithin(report, 0).length;
+    const fixedPart = (limit: number): number => bare + String(limit).length - 1;
     const cuts = Array.from({ length: composeReport(report).length }, (_, limit) => {
       const cut = composeReportWithin(report, limit);
       const { head, marks } = leftOut(cut);

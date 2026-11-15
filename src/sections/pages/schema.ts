@@ -22,7 +22,7 @@ type ReadOnlySiteField = Exclude<
 const READ_ONLY_SITE_FIELDS = {
   url: "GitHub mints the API address from the repository",
   html_url:
-    "GitHub mints the site address from the repository and `cname`; declare `cname` for a custom domain",
+    'GitHub mints the site address from the repository and "cname"; declare "cname" for a custom domain',
   status: "it reports the latest build's outcome",
   custom_404:
     "it reports whether the published site carries a 404.html; add that file to the source instead",
@@ -30,7 +30,7 @@ const READ_ONLY_SITE_FIELDS = {
     "it reports the custom domain's verification; verify the domain in the owner's Pages settings",
   pending_domain_unverified_at: "it reports the custom domain's verification deadline",
   https_certificate:
-    "GitHub provisions the certificate for `cname`; declare `cname` and `https_enforced`",
+    'GitHub provisions the certificate for "cname"; declare "cname" and "https_enforced"',
 } satisfies Record<ReadOnlySiteField, string>;
 
 /** The refusal for `pages: {}`: each of the three fixes is a different intent, so all three are named. */

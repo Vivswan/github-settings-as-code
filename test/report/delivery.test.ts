@@ -295,7 +295,7 @@ describe("the artifact channel", () => {
     await channel?.flush();
     const document = await decrypt(uploads[0]?.file.data as Uint8Array);
     expect(document.length).toBeGreaterThan(65536);
-    expect(document).toContain(detail.at(-1) as string);
+    expect(document).toContain(`labels\\[label-699]: ${"x".repeat(90)}`);
     expect(document).not.toContain("Cut to fit");
   });
 

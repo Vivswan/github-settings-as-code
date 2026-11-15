@@ -20,9 +20,18 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
+import { fromMarkdown } from "mdast-util-from-markdown";
+import { gfmAutolinkLiteralFromMarkdown } from "mdast-util-gfm-autolink-literal";
+import { gfmStrikethroughFromMarkdown } from "mdast-util-gfm-strikethrough";
+import { gfmTableFromMarkdown } from "mdast-util-gfm-table";
+import { toString as nodeText } from "mdast-util-to-string";
+import { gfmAutolinkLiteral } from "micromark-extension-gfm-autolink-literal";
+import { gfmStrikethrough } from "micromark-extension-gfm-strikethrough";
+import { gfmTable } from "micromark-extension-gfm-table";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { parseRepoSlug } from "../../../src/discovery/targets.js";
 import { type OutputName, redactRanges } from "../../../src/io.js";
+import { tableRow } from "../../../src/report/markdown.js";
 import { tableRows } from "../../docs/markdown.js";
 import { ROOT } from "../../root.js";
 import {
@@ -688,6 +697,48 @@ export function stripDebugLines(text: string): string {
 }
 
 /**
+ * The step summary as GitHub renders it, read with the GFM grammar: each table row as the product's own row of its
+ * cells' text, every other block as its text. A cell's escapes are gone (`labels\[x]` reads `labels[x]`), and a
+ * `<br>` inside a cell stays, since raw HTML is its own text.
+ */
+function renderedSummary(summary: string): string {
+  const tree = fromMarkdown(summary, {
+    extensions: [gfmTable(), gfmStrikethrough(), gfmAutolinkLiteral()],
+    mdastExtensions: [
+      gfmTableFromMarkdown(),
+      gfmStrikethroughFromMarkdown(),
+      gfmAutolinkLiteralFromMarkdown(),
+    ],
+  });
+  return tree.children
+    .map((block) =>
+      block.type === "table"
+        ? block.children
+            .map((row) => tableRow(row.children.map((cell) => nodeText(cell))))
+            .join("\n")
+        : nodeText(block),
+    )
+    .join("\n");
+}
+
+/**
+ * Whether a step summary carries a needle: in its raw Markdown, or in the text it renders to, read once for every
+ * needle of the summary. A needle is plain text and is never read as Markdown, which would eat its stars. Both
+ * forms count for a leak too.
+ */
+function summaryHolder(summary: string): (needle: string) => boolean {
+  let rendered: string | undefined;
+  return (needle) => {
+    if (summary.includes(needle)) {
+      return true;
+    }
+
+    rendered ??= renderedSummary(summary);
+    return rendered.includes(needle);
+  };
+}
+
+/**
  * The redaction LEAK INVARIANT, implemented once so a scenario and a fuzz iteration prove the exact
  * same property: no forbidden string on any publicly-readable surface. stderr counts because the
  * Actions run log captures it too; the `::add-mask::` lines are stripped first, since they carry the
@@ -700,8 +751,9 @@ export function checkLeaks(
   const failures: string[] = [];
   const maskedStdout = stripMaskLines(observed.stdout);
   const maskedStderr = stripMaskLines(observed.stderr);
+  const summaryHolds = summaryHolder(observed.summary);
   for (const needle of forbidden) {
-    if (observed.summary.includes(needle)) {
+    if (summaryHolds(needle)) {
       failures.push(`leak: "${needle}" present in the step summary`);
     }
     if (maskedStdout.includes(needle)) {
@@ -886,8 +938,9 @@ function outcomeFailures(exp: Expect, first: Invocation): string[] {
 
 function surfaceContainsFailures(exp: Expect, first: Invocation): string[] {
   const failures: string[] = [];
+  const summaryHolds = summaryHolder(first.summary);
   for (const needle of exp.summary_contains ?? []) {
-    if (!first.summary.includes(needle)) {
+    if (!summaryHolds(needle)) {
       failures.push(`summary missing: ${needle}`);
     }
   }
@@ -903,8 +956,9 @@ function surfaceContainsFailures(exp: Expect, first: Invocation): string[] {
 function surfaceLacksFailures(exp: Expect, first: Invocation): string[] {
   const failures: string[] = [];
   const maskedStdout = stripMaskLines(first.stdout);
+  const summaryHolds = summaryHolder(first.summary);
   for (const needle of exp.summary_lacks ?? []) {
-    if (first.summary.includes(needle)) {
+    if (summaryHolds(needle)) {
       failures.push(`summary must not contain: ${needle}`);
     }
   }

@@ -3,19 +3,88 @@
  * action-layer-free so the composer's independence holds.
  *
  * One renderer, two kinds of cell:
- *   step summary    -> free text the caller escapes with markdownCell(); never refused
+ *   step summary    -> free text the caller escapes with markdownCell(), or markdownText() outside a table; never refused
  *   generated page  -> authored prose refused rather than escaped, since an escape would change the author's text:
  *                      tableFault() before rendering, tableBody() when the committed page is read back
  */
 
+import { decodeHTMLStrict } from "entities";
+import {
+  gfmAutolinkLiteralFromMarkdown,
+  gfmAutolinkLiteralToMarkdown,
+} from "mdast-util-gfm-autolink-literal";
+import { gfmStrikethroughToMarkdown } from "mdast-util-gfm-strikethrough";
+import { gfmTableToMarkdown } from "mdast-util-gfm-table";
+import { toMarkdown } from "mdast-util-to-markdown";
 import { err, ok, type Result } from "neverthrow";
 
-/** Backslashes FIRST: a bare backslash before an escaped pipe would read as an escaped backslash plus a live pipe and split the row. */
+/** The autolink extension's own rules for what the serializer must escape so text is not linked by accident. */
+const AUTOLINK = gfmAutolinkLiteralToMarkdown();
+
+/** Its colon rule covers a colon after `p` or `s` and before `/`; GitHub also links an uppercase scheme, so the same rule is repeated for any letter before the colon. */
+const ANY_SCHEME = {
+  unsafe: (AUTOLINK.unsafe ?? [])
+    .filter((pattern) => pattern.character === ":")
+    .map((pattern) => ({ ...pattern, before: "[A-Za-z]" })),
+};
+
+/** The GFM constructs GitHub reads beyond CommonMark that free text could open: a table cell boundary, a strikethrough, and a bare URL or address. */
+const GFM = {
+  extensions: [gfmTableToMarkdown(), gfmStrikethroughToMarkdown(), AUTOLINK, ANY_SCHEME],
+};
+
+/** The same, with every link in the `[text](target)` form: a table escapes a pipe as `\|`, which an angle autolink would show percent-encoded in its text. */
+const GFM_PIPED = { ...GFM, resourceLink: true };
+
+/** The grammar's own finder of the bare URLs and addresses GitHub links in text: it turns each into a link node, so the serializer writes the target whole and escapes nothing inside it. */
+const LINK_BARE_URLS = gfmAutolinkLiteralFromMarkdown().transforms?.[0];
+
+/** The content of one line of running text, as the serializer takes it. */
+type Phrasing = Extract<Parameters<typeof toMarkdown>[0], { type: "paragraph" }>["children"];
+
+/**
+ * `value` as text and links: each bare URL the grammar finds is a link to itself. One holding a character
+ * reference (`&amp;`) stays text, since GitHub decodes a reference inside a link target and the link would
+ * point at another URL than the one written.
+ */
+function linked(value: string): Phrasing {
+  if (LINK_BARE_URLS === undefined) {
+    throw new Error(
+      "BUG: mdast-util-gfm-autolink-literal exposes no transform that finds bare URLs in text",
+    );
+  }
+
+  const children: Phrasing = [{ type: "text", value }];
+  LINK_BARE_URLS({ type: "root", children: [{ type: "paragraph", children }] });
+  return children.flatMap((node) =>
+    node.type === "link" && decodeHTMLStrict(node.url) !== node.url ? node.children : [node],
+  );
+}
+
+/** The serializer ends a non-empty node with one line feed; a line break in the text becomes a space first, so the text stays on its row or its line. */
+function serialized(type: "tableCell" | "paragraph", text: string): string {
+  const value = text.replace(/\r\n?|\n/g, " ");
+  const piped = type === "tableCell" && value.includes("|");
+  return toMarkdown({ type, children: linked(value) }, piped ? GFM_PIPED : GFM).replace(/\n$/, "");
+}
+
+/** `text` as the content of one table cell that renders literally: markup characters, pipes, and backslashes escaped. */
 export function markdownCell(text: string): string {
-  return text
-    .replace(/\\/g, "\\\\")
-    .replace(/\|/g, "\\|")
-    .replace(/\r\n?|\n/g, " ");
+  return serialized("tableCell", text);
+}
+
+/** `text` as running text outside a table that renders literally, a block opener at its start ("- ", "# ", "1. ") included. */
+export function markdownText(text: string): string {
+  return serialized("paragraph", text);
+}
+
+/** A URL the product built itself, as a link to exactly that URL showing the URL: never left to the reader's own autolink guess. */
+export function markdownLink(url: string): string {
+  const link = { type: "link" as const, url, children: [{ type: "text" as const, value: url }] };
+  return toMarkdown(
+    { type: "tableCell", children: [link] },
+    url.includes("|") ? GFM_PIPED : GFM,
+  ).replace(/\n$/, "");
 }
 
 export function tableRow(cells: readonly string[]): string {

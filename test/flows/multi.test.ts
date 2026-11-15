@@ -741,7 +741,7 @@ describe("runMulti private-report: issue wiring", () => {
     );
     // The transcript repeats the Sections table, so the cut falls there and no label is lost from the report.
     for (const label of live) {
-      expect(body).toContain(`labels[${label.name}]: undeclared`);
+      expect(body).toContain(`labels\\[${label.name}]: undeclared`);
     }
   });
 

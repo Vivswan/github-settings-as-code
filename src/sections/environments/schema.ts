@@ -143,8 +143,7 @@ export const EnvironmentConfig = open({
         refineCtx.addIssue({
           code: "custom",
           path: ["secret"],
-          message:
-            "environment secrets belong under the entry's `secrets` list, not a singular `secret` key; here it would pass through to the environment PUT verbatim and configure nothing",
+          message: `environment secrets belong under the entry's "secrets" list, not a singular "secret" key; here it would pass through to the environment PUT verbatim and configure nothing`,
         });
       }
       // The name may be raw beside its own shape issue, and a bare rendering can throw on a mapping.
