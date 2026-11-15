@@ -530,13 +530,17 @@ describe("pages null body", () => {
 
 describe("renderSnapshotYaml", () => {
   test("pins the schema, comments every outcome line (a multi-line message line by line), dates nothing, and writes the document", async () => {
-    // The labels note spans two physical lines (an API error body would) and a second note follows it: each line is
-    // commented on its own, every message of an outcome is kept in code-point order, and the file still parses.
+    // The labels note spans three physical lines (an API error body would), the last after a lone CR, which YAML reads
+    // as a line break, and a second note follows it: each line is commented on its own, every message of an outcome is kept in code-point order, and the file still parses.
     const original = labelsSection.snapshot;
     const stubbed = spyOn(labelsSection, "snapshot").mockImplementation(async (ctx) =>
       (await original.call(labelsSection, ctx)).map((snapshot) => ({
         ...snapshot,
-        notes: [...snapshot.notes, "retried once", "502 Bad Gateway\nupstream unavailable"],
+        notes: [
+          ...snapshot.notes,
+          "retried once",
+          "502 Bad Gateway\nupstream unavailable\rretry later",
+        ],
       })),
     );
     try {
@@ -560,6 +564,7 @@ describe("renderSnapshotYaml", () => {
           "# yaml-language-server: $schema=https://example.test/settings.schema.json",
           "# labels: 502 Bad Gateway",
           "# labels: upstream unavailable",
+          "# labels: retry later",
           "# labels: retried once",
           "# actions_secrets[DEPLOY_TOKEN]: value of DEPLOY_TOKEN is not readable; export it into the environment as SECRET_ACTIONS_DEPLOY_TOKEN before apply",
           "# check_suite_preferences: GitHub exposes no read endpoint for this section, so there is nothing to snapshot; apply re-asserts the declared value on every run",

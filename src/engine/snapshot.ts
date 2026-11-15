@@ -283,16 +283,16 @@ export async function snapshotRepository(
  * the document in the canonical order the merge flow writes too. Nothing in the file names the
  * moment it was taken (the run summary and a notice carry that), so a snapshot of an unchanged
  * repository is byte for byte the last one. A message spanning several physical lines (an API
- * error body) is commented line by line, so no line escapes the header.
+ * error body) is commented line by line, each under its key; a lone CR ends a line as YAML reads it.
  */
 export function renderSnapshotYaml(result: RenderableSnapshot, schemaUrl: string): string {
   const header = [
-    `# yaml-language-server: $schema=${schemaUrl}`,
+    `yaml-language-server: $schema=${schemaUrl}`,
     ...result.outcomes.flatMap((outcome) =>
       outcome.detail.flatMap((message) =>
-        message.split(/\r?\n/).map((line) => `# ${underKey(outcome.key, line)}`),
+        message.split(/\r\n?|\n/).map((line) => underKey(outcome.key, line)),
       ),
     ),
   ];
-  return `${header.join("\n")}\n${renderCanonicalYaml(result.settings)}`;
+  return renderCanonicalYaml(result.settings, header.map((line) => ` ${line}`).join("\n"));
 }

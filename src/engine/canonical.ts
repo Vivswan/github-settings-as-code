@@ -22,7 +22,7 @@
  * field its planner pairs live items on.
  */
 
-import { stringify as stringifyYaml } from "yaml";
+import { type YAMLMap, Document as YamlDocument } from "yaml";
 import type { z } from "zod";
 import { isPlainObject, own, put } from "../plain-data.js";
 import { SECTION_KEYS, SettingsFile } from "../schema.js";
@@ -318,7 +318,17 @@ export function canonicalDocument(
 /**
  * The document's YAML, the one rendering the snapshot file and the merged file share. The walk rebuilds every node,
  * so the writer meets no shared object and emits no alias (an alias would trip the reader's cap on the next run).
+ * `comment` is the text of a comment block ahead of the first key: the writer opens each of its lines with "#",
+ * so no text can leave the comment.
  */
-export function renderCanonicalYaml(document: Readonly<Record<string, unknown>>): string {
-  return stringifyYaml(canonicalDocument(document));
+export function renderCanonicalYaml(
+  document: Readonly<Record<string, unknown>>,
+  comment?: string,
+): string {
+  const yaml = new YamlDocument<YAMLMap, false>(canonicalDocument(document));
+  if (comment !== undefined) {
+    yaml.contents.commentBefore = comment;
+  }
+
+  return yaml.toString();
 }
