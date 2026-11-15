@@ -412,4 +412,19 @@ describe("compileHiddenExcludePattern", () => {
       );
     },
   );
+
+  // The reported input: two flaws in one class, where the shown refusal quotes the class twice and both suggested rewrites.
+  test("a class with two flaws is told by both kinds, quoting neither the class nor a rewrite of it", () => {
+    const hidden = compileHiddenExcludePattern("[secret-repo?]", 1)._unsafeUnwrapErr();
+    const shown = compileExcludePattern("[secret-repo?]")._unsafeUnwrapErr();
+    expect(hidden.reason).toBe(
+      `${HIDDEN_FLAW["class-operators"]}, and ${HIDDEN_FLAW["class-backwards"]}`,
+    );
+    expectSealed({ refusal: describeProblem(hidden) }, { refusal: describeProblem(shown) }, [
+      '"[secret-repo?]"',
+      '"[secret-repo]"',
+      '"t-r"',
+      "secre",
+    ]);
+  });
 });
