@@ -2,7 +2,7 @@
  * How a script under .github/scripts enters and exits: the subcommand a workflow step names, and the one exit path a
  * refusal takes. A handler ends the step by returning its status or by throwing the refusal; the runner prints the
  * refusal as `<script> <command>: <message>` and sets the status, so no script prints and exits on its own.
- * Node builtins only: the release and post-green jobs run their scripts before any install.
+ * Node builtins only: the release job and the commit-back push jobs run their scripts with nothing installed.
  */
 
 // biome-ignore lint/suspicious/noConfusingVoidType: a handler that ends without a status returns void, which TypeScript does not read as undefined

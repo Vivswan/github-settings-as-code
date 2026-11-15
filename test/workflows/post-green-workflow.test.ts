@@ -3,8 +3,8 @@
  * they can do follows from where they are reachable and what each job is granted. The relations here: every hook is reachable
  * through workflow_call alone and its ci.yml caller sits downstream of all-green; a job's effective grant covers what its steps
  * consume; a hook job's own condition is the fork guard or nothing; post-green's judged sha reaches every checkout and every step
- * that names a source; every output a step writes is read by a later step, and every gate reads an output an earlier step
- * writes, back to the probe. The push probe's script also runs against a stubbed git, since no pin shows what a branch does.
+ * that names a source; no step runs under a condition of its own, every output a step writes is read by a later step, and
+ * every read names an output an earlier step writes.
  * The static guards catch ACCIDENTAL drift: a trigger, grant, gate, or step added or dropped in plain YAML. Deliberately hiding
  * one behind other syntax is out of scope.
  */
@@ -12,10 +12,6 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-  COMMANDS as POST_GREEN_COMMANDS,
-  STEP_OUTPUTS,
-} from "../../.github/scripts/post-green-steps.js";
 import { STEP_OUTPUTS as RELEASE_PIPELINE_OUTPUTS } from "../../.github/scripts/release-pipeline/draft.js";
 import { COMMANDS as RELEASE_PIPELINE_COMMANDS } from "../../.github/scripts/release-pipeline.js";
 import { tableRows } from "../docs/markdown.js";
@@ -192,7 +188,6 @@ function grantProblems(
 
 describe("the hooks' grants", () => {
   test("every job's effective grant covers what its steps consume", () => {
-    // A missing grant is quiet here: the push probe warns and skips, and the job stays green.
     const consumers = HOOKS.flatMap(({ file }) =>
       Object.values(readWorkflow(file).jobs).flatMap((job) =>
         (job.steps ?? []).flatMap(consumedGrants),
@@ -283,16 +278,13 @@ function hookFor(claim: string): { file: string; workflow: Workflow } {
   return { file: hook.file, workflow: readWorkflow(hook.file) };
 }
 
-/** A step gate that reads a verdict (`steps.<id>.outputs.<x> == 'true'`); every other condition can skip the step on the caller's own event. */
-const VERDICT_GATE = /^steps\.[\w-]+\.outputs\.[\w-]+ == 'true'$/;
-
-/** Whether some step of the workflow runs the pipeline subcommand (with its argument, when one is named) on every run its job takes: the step carries no condition, or a verdict gate the wiring relation ties to a probe. */
+/** Whether some step of the workflow runs the pipeline subcommand (with its argument, when one is named) on every run its job takes: the step carries no condition. */
 const runsSubcommand = (workflow: Workflow, subcommand: string): boolean =>
   Object.values(workflow.jobs).some((job) =>
     (job.steps ?? []).some(
       (step) =>
         new RegExp(`release-pipeline\\.ts ${subcommand}(?![\\w-])`).test(step.run ?? "") &&
-        (step.if === undefined || VERDICT_GATE.test(condition(step.if))),
+        step.if === undefined,
     ),
   );
 
@@ -383,7 +375,6 @@ const SCRIPTS = new Map<
   string,
   { commands: Readonly<Record<string, unknown>>; outputs: Record<string, readonly string[]> }
 >([
-  ["post-green-steps", { commands: POST_GREEN_COMMANDS, outputs: STEP_OUTPUTS }],
   ["release-pipeline", { commands: RELEASE_PIPELINE_COMMANDS, outputs: RELEASE_PIPELINE_OUTPUTS }],
 ]);
 
@@ -416,21 +407,6 @@ const outputsRead = (step: Step): Array<[id: string, name: string]> =>
       (m) => [m[1] ?? "", m[2] ?? ""] as [string, string],
     ),
   );
-
-/** The probe steps: each writes a `proceed=` verdict for the steps after it to read. */
-const isProbe = (step: Step) => outputsWritten(step).includes("proceed");
-
-/**
- * Whether the step at `index` runs on a verdict: its condition is `steps.<id>.outputs.<name> == 'true'` where an earlier step `<id>`
- * writes `<name>` and is the probe itself or is gated the same way (a chain back to the probe).
- */
-function gatedOnProbe(steps: Step[], index: number, probe: number): boolean {
-  const match = condition(steps[index]?.if).match(/^steps\.([\w-]+)\.outputs\.([\w-]+) == 'true'$/);
-  if (!match) return false;
-  const source = steps.findIndex((step, at) => at < index && step.id === match[1]);
-  if (source < 0 || !outputsWritten(steps[source] as Step).includes(match[2] ?? "")) return false;
-  return source === probe || gatedOnProbe(steps, source, probe);
-}
 
 /** The fault in a steps-script step, as the clause after its name: a script this relation does not know, or a subcommand its script does not dispatch; null for any other step. */
 function scriptFault(step: Step): string | null {
@@ -468,17 +444,13 @@ function unreadWrites(steps: Step[], index: number): string[] {
 }
 
 /** The wiring faults of the step at `index`, each as the clause after the step's name. */
-function stepWiringFaults(steps: Step[], index: number, probe: number): string[] {
+function stepWiringFaults(steps: Step[], index: number): string[] {
   const step = steps[index] as Step;
   const faults: string[] = [];
   const script = scriptFault(step);
   if (script !== null) faults.push(script);
-  if (probe >= 0 && index > probe && !gatedOnProbe(steps, index, probe)) {
-    faults.push("runs whatever the probe found");
-  }
-  if ((probe < 0 || index < probe) && step.if !== undefined) {
-    // A hook runs on the caller's event, so a step's own condition skips it quietly: retag-major on a release, or the checkout
-    // the probe judges an empty workspace without.
+  if (step.if !== undefined) {
+    // A hook runs on the caller's event, so a step's own condition skips it quietly: retag-major on a release.
     faults.push("runs under a condition of its own");
   }
   for (const read of unwrittenReads(steps, index)) {
@@ -491,24 +463,17 @@ function stepWiringFaults(steps: Step[], index: number, probe: number): string[]
 }
 
 /**
- * Every wiring fault in a job's steps: a step conditioned on anything but a verdict (it would skip on the caller's own event), a step
- * after the probe not gated on it, a read of an output no earlier step writes, a written output nobody reads, and a steps-script
- * step naming a script or subcommand nothing dispatches (bun would end it red, but only once the hook runs on main).
+ * Every wiring fault in a job's steps: a step under a condition of its own (it would skip on the caller's own event), a read of
+ * an output no earlier step writes, a written output nobody reads, and a steps-script step naming a script or subcommand
+ * nothing dispatches (bun would end it red, but only once the hook runs on main).
  */
 function wiringProblems(workflow: Workflow): string[] {
   return Object.entries(workflow.jobs).flatMap(([id, job]) => {
     const steps = job.steps ?? [];
-    const probe = steps.findIndex(isProbe);
     const label = (step: Step) => `"${step.name ?? step.uses ?? "unnamed step"}"`;
     const problems: string[] = [];
-    if (probe >= 0 && steps[probe]?.if !== undefined) {
-      // A probe that skips writes no verdict, and every gate on it reads empty: the whole job stands down quietly.
-      problems.push(
-        `${id}: the probe ${label(steps[probe] as Step)} runs under a condition of its own`,
-      );
-    }
     steps.forEach((step, index) => {
-      for (const fault of stepWiringFaults(steps, index, probe)) {
+      for (const fault of stepWiringFaults(steps, index)) {
         problems.push(`${id}: ${label(step)} ${fault}`);
       }
     });
@@ -522,18 +487,14 @@ const POST_GREEN = "post-green.yml";
 /** The release hook. */
 const RELEASE = "update-release.yml";
 
-describe("the probed hooks' wiring", () => {
+describe("the hooks' wiring", () => {
   const workflow = readWorkflow(POST_GREEN);
   const caller = must(
     HOOKS.find((call) => call.file === POST_GREEN),
     "post-green caller",
   ).job;
 
-  test("every step after a probe runs on its verdict, every read names a written output, every output is read, in every hook", () => {
-    const probed = (file: string) =>
-      Object.values(readWorkflow(file).jobs).filter((job) => (job.steps ?? []).some(isProbe));
-    // post-green's one job opens with a probe today; the release-hook jobs have none, and their output reads are judged the same way.
-    expect(probed(POST_GREEN).length).toBe(Object.keys(workflow.jobs).length);
+  test("no step runs under a condition of its own, every read names a written output, every output is read, in every hook", () => {
     // Every step that runs a steps script is one the relation reads: a run shape SCRIPT_STEP misses would pass unjudged.
     const scriptSteps = HOOKS.flatMap(({ file }) =>
       Object.values(readWorkflow(file).jobs).flatMap((job) =>
@@ -550,7 +511,7 @@ describe("the probed hooks' wiring", () => {
       "bun --silent .github/scripts/release-pipeline.ts package",
       "bun run .github/scripts/release-pipeline.ts package",
       "bun \\\n  .github/scripts/release-pipeline.ts package",
-      '1PAT_SET="true" bun .github/scripts/post-green-steps.ts probe',
+      '1GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts package',
     ]) {
       expect([RUNS_SCRIPT.test(run), scriptStep({ run })], run).toEqual([true, undefined]);
     }
@@ -561,43 +522,6 @@ describe("the probed hooks' wiring", () => {
 
   test.each<[string, string, (w: Workflow) => void, RegExp]>([
     [
-      "the packaging step without its gate",
-      POST_GREEN,
-      (w) => delete must(must(w.jobs.build, "build").steps?.at(-1), "step").if,
-      /runs whatever the probe found/,
-    ],
-    [
-      "the packaging step gated on a step that is not gated itself",
-      POST_GREEN,
-      (w) => {
-        const steps = must(must(w.jobs.build, "build").steps, "steps");
-        must(steps.at(-1), "packaging step").if = "steps.token-copy.outputs.proceed == 'true'";
-        steps.splice(steps.findIndex(isProbe) + 1, 0, {
-          id: "token-copy",
-          run: 'echo "proceed=true" >> "$GITHUB_OUTPUT"',
-        });
-      },
-      /runs whatever the probe found/,
-    ],
-    [
-      "a gate that is not an equality on true",
-      POST_GREEN,
-      (w) => {
-        must(must(w.jobs.build, "build").steps?.at(-1), "step").if =
-          "always() || steps.token.outputs.proceed == 'true'";
-      },
-      /runs whatever the probe found/,
-    ],
-    [
-      "a gate on an output the probe never writes",
-      POST_GREEN,
-      (w) => {
-        must(must(w.jobs.build, "build").steps?.at(-1), "step").if =
-          "steps.token.outputs.published == 'true'";
-      },
-      /reads steps\.token\.outputs\.published, which no earlier step writes/,
-    ],
-    [
       "the source step's readers gone, leaving the resolved sha unread",
       RELEASE,
       (w) => {
@@ -607,22 +531,13 @@ describe("the probed hooks' wiring", () => {
       /writes sha, which no later step reads/,
     ],
     [
-      "the checkout ahead of the probe under a condition of its own",
+      "a checkout under a condition of its own",
       POST_GREEN,
       (w) => {
         must(must(w.jobs.build, "build").steps?.[0], "checkout").if =
           "github.event_name == 'release'";
       },
       /"actions\/checkout@[0-9a-f]+" runs under a condition of its own/,
-    ],
-    [
-      "a probe under a condition of its own",
-      POST_GREEN,
-      (w) => {
-        must(must(w.jobs.build, "build").steps?.find(isProbe), "probe").if =
-          "github.event_name == 'release'";
-      },
-      /the probe "Check the token can push" runs under a condition of its own/,
     ],
     [
       "the resolved sha no longer written",
@@ -638,25 +553,37 @@ describe("the probed hooks' wiring", () => {
       /reads steps\.source\.outputs\.sha, which no earlier step writes/,
     ],
     [
+      "the source step without its id, leaving its readers no writer",
+      RELEASE,
+      (w) => {
+        const steps = must(w.jobs["package-release"], "package-release").steps ?? [];
+        delete must(
+          steps.find((candidate) => candidate.id === "source"),
+          "source",
+        ).id;
+      },
+      /reads steps\.source\.outputs\.sha, which no earlier step writes/,
+    ],
+    [
       "a step running a script that does not exist, its tokens spaced as the shell allows",
       POST_GREEN,
       (w) => {
-        const probe = must(must(w.jobs.build, "build").steps?.find(isProbe), "probe");
-        probe.run = probe.run?.replace(
-          "bun .github/scripts/post-green-steps.ts",
-          "bun  .github/scripts/post-gren-steps.ts",
+        const step = must(must(w.jobs.build, "build").steps?.at(-1), "packaging step");
+        step.run = step.run?.replace(
+          "bun .github/scripts/release-pipeline.ts",
+          "bun  .github/scripts/release-pipe.ts",
         );
       },
-      /"Check the token can push" runs \.github\/scripts\/post-gren-steps\.ts, a script this relation does not know/,
+      /runs \.github\/scripts\/release-pipe\.ts, a script this relation does not know/,
     ],
     [
       "a step running a script named like a property every object inherits",
       POST_GREEN,
       (w) => {
-        const probe = must(must(w.jobs.build, "build").steps?.find(isProbe), "probe");
-        probe.run = probe.run?.replace("post-green-steps.ts", "constructor.ts");
+        const step = must(must(w.jobs.build, "build").steps?.at(-1), "packaging step");
+        step.run = step.run?.replace("release-pipeline.ts", "constructor.ts");
       },
-      /"Check the token can push" runs \.github\/scripts\/constructor\.ts, a script this relation does not know/,
+      /runs \.github\/scripts\/constructor\.ts, a script this relation does not know/,
     ],
     [
       "a known script with a subcommand it does not dispatch",
@@ -699,11 +626,6 @@ describe("the probed hooks' wiring", () => {
       "a release-hook step under a condition of its own",
       (w) => gateSteps(w, /retag-major/, "github.event_name == 'release'"),
       /"Move the major tag to the packaged commit" runs under a condition of its own/,
-    ],
-    [
-      "a verdict gate copied onto a hook without that probe",
-      (w) => gateSteps(w, /rename-draft/, "steps.token.outputs.proceed == 'true'"),
-      /reads steps\.token\.outputs\.proceed, which no earlier step writes/,
     ],
   ])("%s fails the wiring there (negative control)", (_case, mutate, message) => {
     const stable = readWorkflow("update-release.yml");
@@ -749,226 +671,9 @@ describe("the probed hooks' wiring", () => {
     expect(condition(caller.with?.[input ?? ""])).toBe("github.sha");
     expectSource(POST_GREEN, `inputs.${input}`, { checkouts: 1, sources: 1 });
   });
-
-  test("the push probe tells a rejected PAT from a read ceiling by the same secret the checkout falls back from", () => {
-    const steps = must(workflow.jobs.build, "build job").steps ?? [];
-    const checkout = must(
-      steps.find((step) => (step.uses ?? "").startsWith("actions/checkout@")),
-      "checkout",
-    );
-    const secret = must(
-      String(checkout.with?.token).match(
-        /^\$\{\{\s*secrets\.(\w+)\s*\|\|\s*github\.token\s*\}\}$/,
-      )?.[1],
-      "a `secrets.X || github.token` checkout token",
-    );
-    const probe = must(steps.find(isProbe), "probe step");
-    const flag = Object.entries(probe.env ?? {}).find(([, value]) =>
-      value.includes(`secrets.${secret}`),
-    );
-    expect(flag, `the probe's env does not read secrets.${secret}`).toBeDefined();
-    expect(condition(flag?.[1])).toBe(`secrets.${secret} != ''`);
-    // The script branches on that variable, so the env name and the script agree.
-    const [script] = must(scriptStep(probe), "a steps-script probe");
-    expect(readFileSync(join(ROOT, ".github", "scripts", `${script}.ts`), "utf8")).toContain(
-      `requireEnv("${flag?.[0]}")`,
-    );
-  });
 });
 
-/** The probe's step as the runner reads it: stdout one entry per line, its status, and the GITHUB_OUTPUT lines. */
-interface ProbeRun {
-  lines: string[];
-  stderr: string;
-  status: number;
-  outputs: string[];
-}
-
-/** The script and subcommand the workflow's probe step runs, so this runs what the yaml names. */
-function probeInvocation(): [script: string, command: string] {
-  const steps = must(readWorkflow(POST_GREEN).jobs.build, "build job").steps ?? [];
-  return must(scriptStep(must(steps.find(isProbe), "probe step")), "a steps-script probe");
-}
-
-/**
- * Run the probe as the workflow does with git stubbed to write `stderr` and exit `gitStatus`, or with no git on PATH at all
- * (`gitStatus: null`); the scratch directory is removed on every path.
- */
-function runProbe(stderr: string, gitStatus: number | null, patSet: boolean): Promise<ProbeRun> {
-  return withTempDir("post-green-probe-", (dir) => {
-    const bin = join(dir, "bin");
-    mkdirSync(bin);
-    if (gitStatus !== null) {
-      writeFileSync(
-        join(bin, "git"),
-        `#!/bin/sh\nprintf '%s' "$STUB_STDERR" >&2\nexit ${gitStatus}\n`,
-        { mode: 0o755 },
-      );
-    }
-    const [script, command] = probeInvocation();
-    const result = runStep(
-      script,
-      dir,
-      join(dir, "runner-temp"),
-      {
-        PATH: gitStatus === null ? bin : `${bin}:${process.env.PATH ?? ""}`,
-        PAT_SET: patSet ? "true" : "false",
-        STUB_STDERR: stderr,
-      },
-      command,
-    );
-    return {
-      lines: result.stdout.split("\n"),
-      stderr: result.stderr,
-      status: result.status,
-      outputs: result.outputs,
-    };
-  });
-}
-
-const FENCE_OPEN = /^::stop-commands::([0-9a-f]{32})$/;
-
-describe("the push probe", () => {
-  const REFUSED =
-    "::error::REPO_PLATFORM_TOKEN cannot push to this repository; git's refusal is in the probe stderr lines above.";
-  /** The two ways to let the hook push: a wider caller ceiling, or the PAT the checkout falls back from. */
-  const NO_PAT =
-    "::warning::this run's token cannot push (the caller grants contents: read); this commit was not packaged and the " +
-    "latest tag was not moved here (the release hook packages each release and moves latest itself). Raise the caller's " +
-    "ceiling to contents: write, or add a REPO_PLATFORM_TOKEN PAT secret with Contents (read and write) on this " +
-    "repository, to publish every green push to @latest.";
-
-  /** The fence token a run minted, from its opening line; undefined when no fence opened. */
-  const fenceToken = (probe: ProbeRun): string | undefined =>
-    probe.lines[0]?.match(FENCE_OPEN)?.[1];
-
-  /** A fenced row with the minted 32-hex token in place of `<token>`; a run that opened no such fence fails here, and the
-   * probe's own lines are compared untouched, so a literal `<token>` printed in either fence line cannot pass. */
-  function withToken(expected: ProbeRun, probe: ProbeRun): ProbeRun {
-    if (!expected.lines.some((line) => line.includes("<token>"))) {
-      return expected;
-    }
-    const token = must(fenceToken(probe), "a stop-commands line with a 32-hex token");
-    return { ...expected, lines: expected.lines.map((line) => line.replaceAll("<token>", token)) };
-  }
-
-  // The whole run per case. Git's stderr sits indented inside the fence (the runner trims, so an unindented "::error::forged"
-  // would read as a command) with one static error after it; without a PAT the probe warns and skips; a passing push prints nothing.
-  test.each<[name: string, stderr: string, gitStatus: number, patSet: boolean, expected: ProbeRun]>(
-    [
-      [
-        "a PAT refused with a stderr that does not end in a newline still closes the fence on a line of its own",
-        "refused",
-        1,
-        true,
-        {
-          lines: [
-            "::stop-commands::<token>",
-            "probe stderr:",
-            "  refused",
-            "::<token>::",
-            REFUSED,
-            "",
-          ],
-          stderr: "",
-          status: 1,
-          outputs: [],
-        },
-      ],
-      [
-        "a PAT refused with a stderr carrying workflow-command text keeps it on indented lines inside the fence",
-        "::stop-commands::probe-marker\nremote: %25 done\r\n::error::forged\n",
-        1,
-        true,
-        {
-          lines: [
-            "::stop-commands::<token>",
-            "probe stderr:",
-            "  ::stop-commands::probe-marker",
-            "  remote: %25 done\r",
-            "  ::error::forged",
-            "::<token>::",
-            REFUSED,
-            "",
-          ],
-          stderr: "",
-          status: 1,
-          outputs: [],
-        },
-      ],
-      [
-        "a PAT refused with an empty stderr opens and closes the fence around nothing",
-        "",
-        1,
-        true,
-        {
-          lines: ["::stop-commands::<token>", "probe stderr:", "::<token>::", REFUSED, ""],
-          stderr: "",
-          status: 1,
-          outputs: [],
-        },
-      ],
-      [
-        "without a PAT a refused probe warns naming both remedies, skips, and prints no stderr (control)",
-        "refused\n",
-        1,
-        false,
-        { lines: [NO_PAT, ""], stderr: "", status: 0, outputs: ["proceed=false"] },
-      ],
-      [
-        "a probe the token passes proceeds and prints nothing (control)",
-        "",
-        0,
-        true,
-        { lines: [""], stderr: "", status: 0, outputs: ["proceed=true"] },
-      ],
-    ],
-  )("%s", async (_name, stderr, gitStatus, patSet, expected) => {
-    const probe = await runProbe(stderr, gitStatus, patSet);
-    expect(probe).toEqual(withToken(expected, probe));
-  });
-
-  test("the fence token is fresh per run: a fixed one is a token remote text could name to resume command processing", async () => {
-    const first = must(fenceToken(await runProbe("refused", 1, true)), "a fence token");
-    const second = must(fenceToken(await runProbe("refused", 1, true)), "a fence token");
-    expect(first).not.toBe(second);
-  });
-
-  // The shell's `if git push ...` took the failure branch when git itself could not run; a probe that ends with the spawn
-  // error instead would write no verdict and no warning.
-  test.each<[name: string, patSet: boolean, expected: ProbeRun]>([
-    [
-      "with a PAT, a git that cannot be run is a fenced refusal naming the spawn error, exit 1",
-      true,
-      {
-        lines: [
-          "::stop-commands::<token>",
-          "probe stderr:",
-          "  git: <message>",
-          "::<token>::",
-          REFUSED,
-          "",
-        ],
-        stderr: "",
-        status: 1,
-        outputs: [],
-      },
-    ],
-    [
-      "without a PAT, a git that cannot be run warns and skips like a refusal",
-      false,
-      { lines: [NO_PAT, ""], stderr: "", status: 0, outputs: ["proceed=false"] },
-    ],
-  ])("%s", async (_name, patSet, expected) => {
-    const probe = await runProbe("", null, patSet);
-    // The spawn error's words are the runtime's; the line's shape (git's name, then a non-empty message) is the pin.
-    const message = probe.lines[2]?.match(/^ {2}git: (\S.*)$/)?.[1];
-    const lines = expected.lines.map((line) =>
-      line.replace("<message>", message ?? "<no spawn error line>"),
-    );
-    expect(probe).toEqual(withToken({ ...expected, lines }, probe));
-  });
-
+describe("the outputs the steps scripts declare", () => {
   /** release-pipeline's draft reads, run as the workflow does with gh stubbed to answer `stdout` or fail with `status`;
    * the branch must have reached gh and ended with `ends`, or an empty output list could stand for a step that never ran. */
   function runDraftRead(
@@ -1003,7 +708,6 @@ describe("the push probe", () => {
   }
 
   test("the outputs each script declares are exactly the ones its subcommands' branches write, so the wiring relation reads the truth", async () => {
-    const [, probe] = probeInvocation();
     const sha = "b8df084c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a";
     const release = (isDraft: boolean, targetCommitish: string) =>
       JSON.stringify({ isDraft, targetCommitish });
@@ -1012,16 +716,6 @@ describe("the push probe", () => {
     // Every branch of every subcommand a script dispatches from a workflow step, as runs; a declared subcommand this
     // table does not run, or a script the table does not know, fails the pin instead of passing vacuously.
     const branches: Record<string, Record<string, () => Promise<string[]>>> = {
-      "post-green-steps": {
-        [probe]: async () =>
-          (
-            await Promise.all([
-              runProbe("", 0, true),
-              runProbe("refused\n", 1, false),
-              runProbe("refused", 1, true),
-            ])
-          ).flatMap((run) => run.outputs),
-      },
       "release-pipeline": {
         "resolve-source": async () =>
           (

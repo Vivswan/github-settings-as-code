@@ -14,10 +14,9 @@ on:
         type: string
 
 jobs:
-  # No permissions key: the job inherits the caller's grant, which is enough because a packaged commit changes no
-  # workflow file against its parent (the main commit), the diff GitHub judges a token's workflows grant on.
-  #   GITHUB_TOKEN at contents: write, or a PAT  -> pushes the build tag and latest
-  #   a read ceiling and no PAT                  -> warns and skips; the release hook packages each release and moves latest itself
+  # No permissions key: the job inherits the caller's grant, the contents: write the managed ci.yml gives this call.
+  # That is enough because a packaged commit changes no workflow file against its parent (the main commit), the diff
+  # GitHub judges a token's workflows grant on. A token that cannot push fails the packaging step with git's refusal.
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -29,25 +28,13 @@ jobs:
           # history; a shallow checkout can do neither.
           fetch-depth: 0
           token: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
-      # bun alone: the probe runs before anything is installed for a commit the job may not publish.
       - uses: ./.github/actions/setup
-        with:
-          install: "false"
-      - name: Check the token can push
-        id: token
-        env:
-          PAT_SET: ${{ secrets.REPO_PLATFORM_TOKEN != '' }}
-        run: bun .github/scripts/post-green-steps.ts probe
-      - uses: ./.github/actions/setup
-        if: steps.token.outputs.proceed == 'true'
       - name: Build the bundle, the schema, and the library
-        if: steps.token.outputs.proceed == 'true'
         run: |
           bun run build:bundle
           bun run build:schema
           bun run build:lib
       - name: Package this commit under its build tag, prune the window, and point latest at the newest main source
-        if: steps.token.outputs.proceed == 'true'
         env:
           SOURCE_SHA: ${{ inputs.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
