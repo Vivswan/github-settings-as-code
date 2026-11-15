@@ -1,6 +1,7 @@
 import type { MultiRepo, Scenario } from "../scenario.js";
 import type { Rng } from "./prng.js";
 
+/** The topics a pool repo carries and a topics filter names. */
 const TOPIC_POOL = ["platform", "infra", "legacy", "misc"];
 
 /** The owner every pool repo sits under. */

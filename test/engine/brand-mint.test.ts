@@ -468,7 +468,7 @@ class Tree {
     return found;
   }
 
-  /** What a node says by itself: a function position, an identifier, a resolvable indexed access; undefined for a node judged by its children. */
+  /** What a node says by itself: a function position, an identifier, a named property, a resolvable indexed access; undefined for a node judged by its children. */
   private ownVerdict(
     file: string,
     node: Node,
@@ -480,6 +480,11 @@ class Tree {
     }
     if (node.type === "Identifier") {
       return this.identifierMentions(file, node.name as string, carriers, bound);
+    }
+    // A written property name is a key, not a type: only its annotation can carry. A computed key may name a brand symbol.
+    if (node.type === "TSPropertySignature" && node.computed !== true) {
+      const annotation = node.typeAnnotation;
+      return isNode(annotation) && this.mentions(file, annotation, carriers, bound);
     }
     if (node.type === "TSIndexedAccessType" && !isBound(node.objectType as Node, bound)) {
       const picked = this.pickedMember(file, node);
@@ -817,12 +822,17 @@ describe("the validated brand's mint", () => {
           'export const b = raw as S["settings"];',
           'export const c = raw as S["name"];',
           "export const d = raw as VSS;",
+          "type Plain = { VS: string };",
+          "export const e = raw as { VS: string };",
+          "export const f = raw as Plain;",
+          "export const g = raw as { [VS]: string };",
         ].join("\n"),
       },
     ];
     expect(scanBrand(files).casts.map((c) => `${c.file}: ${c.text}`)).toEqual([
       "alias.ts: raw as VS",
       'alias.ts: raw as S["settings"]',
+      "alias.ts: raw as { [VS]: string }",
     ]);
   });
 });
