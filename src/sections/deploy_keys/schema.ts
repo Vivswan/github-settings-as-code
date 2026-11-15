@@ -35,8 +35,6 @@ const LINE_BREAK = /[\r\n]/;
 const ODD_WHITESPACE = /[^\S \t\r\n]/;
 
 const BASE64_QUARTET = "[A-Za-z0-9+/]{4}";
-
-/** The character before the padding carries 2 data bits before `==` and 4 before `=`; canonical base64 zeroes the rest. */
 const BASE64_CANONICAL_TAIL = "[A-Za-z0-9+/][AQgw]==|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=";
 const BASE64_PATTERN = `(?:${BASE64_QUARTET})*(?:${BASE64_QUARTET}|${BASE64_CANONICAL_TAIL})`;
 const PUBLIC_KEY_PATTERN = new RegExp(
@@ -117,8 +115,6 @@ function declaredBlobRejection(blob: string): string | undefined {
 }
 
 const DECLARED: SideRules = { algorithm: declaredAlgorithmRejection, blob: declaredBlobRejection };
-
-/** GitHub is the authority on what it stored: any algorithm, and the blob as it returned it. */
 const STORED: SideRules = { algorithm: () => undefined, blob: () => undefined };
 
 /**
@@ -175,7 +171,7 @@ export function parsePublicKey(raw: string): Result<PublicKeyMaterial, string> {
   );
 }
 
-/** The reading of material GitHub returned: the same comparable form, with GitHub the authority on the algorithm. */
+/** The reading of material GitHub returned: the same comparable form, with GitHub the authority on the algorithm and the blob. */
 export function parseStoredKey(raw: string): Result<PublicKeyMaterial, string> {
   return parseMaterial(raw, STORED);
 }

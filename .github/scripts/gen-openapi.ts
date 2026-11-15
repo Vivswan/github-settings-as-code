@@ -813,7 +813,6 @@ ${shapes.join("\n\n")}
 
 const WEBHOOKS_PATH = "src/generated/spec-webhooks.ts";
 
-/** The one dot-com file of the eight the package ships; its index would load every GHES descriptor too. */
 const WEBHOOKS_DESCRIPTOR_PATH = fileURLToPath(
   import.meta.resolve("@octokit/openapi-webhooks/generated/api.github.com.json"),
 );
