@@ -10,6 +10,7 @@ import type { ReplaceSweep } from "../../engine/diff.js";
 import { isPlainObject } from "../../plain-data.js";
 import type { UndeclaredPolicySection } from "../../schema.js";
 import type { UndeclaredPolicyList } from "../../types.js";
+import { isDotSegment } from "../contract/endpoints.js";
 import type { SectionFailure } from "../contract/errors.js";
 import { defaultUndeclaredPolicy, type SectionMeta } from "../contract/module.js";
 import type { SnapshotContext } from "../contract/plan.js";
@@ -149,6 +150,20 @@ function collectSweep(
  */
 export function leftOutOfSnapshot(label: string, reason: string): string {
   return `${label}: left out of the snapshot - ${reason}`;
+}
+
+/**
+ * The left-out note when one of `names` is "." or "..", else null. Such a live item is judged where it is read,
+ * ahead of any request by its name: no path can address it and the section's schema refuses the name, so an
+ * emitted entry would fail the snapshot's own validation.
+ */
+export function dotSegmentNote(label: string, names: readonly string[]): string | null {
+  return names.some(isDotSegment)
+    ? leftOutOfSnapshot(
+        label,
+        'a name of "." or ".." cannot be a URL path segment, so the settings file cannot declare it; rename or delete it on GitHub',
+      )
+    : null;
 }
 
 /**

@@ -248,6 +248,8 @@ describe("deltas", () => {
       deltas({ list: ["x", { a: 1, optional: undefined }] }, { list: ["x", { a: 1 }] }),
     ).toEqual([]);
     expect(deltas({ list: ["x", bare] }, { list: [{ a: 1 }, "x"] })).toEqual([]);
+    // JSON has one zero: a declared -0 is the 0 GitHub returns.
+    expect(deltas({ list: [-0] }, { list: [0] })).toEqual([]);
   });
 
   test("a value repeated on one side is one delta when the other side lacks it, and none when the other side has it once", () => {

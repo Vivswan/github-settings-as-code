@@ -218,6 +218,11 @@ export function matchesTemplate(template: string, concretePath: string): boolean
   return true;
 }
 
+/** Whether a live name is "." or "..", which can never be a URL path segment: read by expand() and by the snapshot's left-out note. A declared name is refused by the schema's own pattern, the form a JSON Schema can carry. */
+export function isDotSegment(name: string): boolean {
+  return name === "." || name === "..";
+}
+
 /**
  * The one place a SECTION's path values are URL-encoded (github/repo-file.ts encodes its own). Only the
  * RepoRef half of the context is read, so non-section callers (the private-report module) can pass a bare `{ repo }`.
@@ -260,7 +265,7 @@ export function expand(
       throw new Error(`BUG: ${route} needs a "${token}" param, but none was supplied`);
     }
     supplied.delete(token);
-    if (value === "." || value === "..") {
+    if (isDotSegment(value)) {
       dotSegments.push(`${token} "${value}"`);
     }
     return encodeURIComponent(value);

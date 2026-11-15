@@ -13,6 +13,7 @@ import { liveByIdentity, liveIdentity } from "../../contract/live.js";
 import type { SectionMeta } from "../../contract/module.js";
 import type { PlanContext } from "../../contract/plan.js";
 import {
+  dotSegmentNote,
   knobbedSnapshot,
   leftOutOfSnapshot,
   projectOntoSchema,
@@ -59,8 +60,11 @@ export async function snapshotList(
       (item) => item.key,
       (item) => liveIdentity(item.name, decl.address(item.item)),
     );
+    const undeclarable = (live: (typeof items)[number]): string | null =>
+      dotSegmentNote(`${key}[${live.name}]`, Object.values(decl.address(live.item)));
+    notes.push(...items.flatMap((live) => undeclarable(live) ?? []));
     const entries: object[] = [];
-    for (const { item, name } of items) {
+    for (const { item, name } of items.filter((live) => undeclarable(live) === null)) {
       const label = `${key}[${name}]`;
       const body = yield* await readItem(decl, ctx, item);
       const hidden = decl.concealed?.(body) ?? [];

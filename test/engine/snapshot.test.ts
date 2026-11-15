@@ -528,6 +528,69 @@ describe("pages null body", () => {
   });
 });
 
+describe("a live name the settings file cannot declare is left out of the snapshot", () => {
+  const LEFT_OUT =
+    'left out of the snapshot - a name of "." or ".." cannot be a URL path segment, so the settings file cannot declare it; rename or delete it on GitHub';
+
+  // The section schemas refuse "." and ".." as these names, so an emitted entry failed the snapshot's own validation and the whole run.
+  test.each<
+    [
+      key: "labels" | "environments" | "collaborators" | "branches",
+      live: LiveState,
+      kept: unknown,
+      note: string,
+    ]
+  >([
+    [
+      "labels",
+      {
+        labels: [
+          { name: "..", color: "ededed" },
+          { name: "bug", color: "d73a4a" },
+        ],
+      },
+      { _undeclared: "delete", entries: [{ name: "bug", color: "d73a4a", description: "" }] },
+      `labels[..]: ${LEFT_OUT}`,
+    ],
+    [
+      "environments",
+      { environments: { ".": { name: "." }, production: { name: "production" } } },
+      [{ name: "production", wait_timer: 0, prevent_self_review: false, reviewers: [] }],
+      `environments[.]: ${LEFT_OUT}`,
+    ],
+    [
+      "collaborators",
+      {
+        collaborators: [
+          { login: "..", role_name: "write" },
+          { login: "octocat", role_name: "write" },
+        ],
+      },
+      { _undeclared: "delete", entries: [{ username: "octocat", permission: "push" }] },
+      `collaborators[..]: ${LEFT_OUT}`,
+    ],
+    [
+      "branches",
+      { branches: ["..", "main"], branch_protection: { "..": {}, main: {} } },
+      [{ name: "main", protection: {} }],
+      `branches[..]: ${LEFT_OUT}`,
+    ],
+  ])("%s", async (key, live, kept, note) => {
+    const { io } = captureIo();
+    const result = await snapshotRepository(
+      registryFake(live),
+      { ...opts(), sections: SectionSelection.of({ only: [key] })._unsafeUnwrap() },
+      io,
+    );
+
+    expect<unknown>([result.result, result.outcomes, result.settings?.[key]]).toEqual([
+      "snapshot",
+      [{ key, status: "snapshot", detail: [note] }],
+      kept,
+    ]);
+  });
+});
+
 describe("renderSnapshotYaml", () => {
   test("pins the schema, comments every outcome line (a multi-line message line by line), dates nothing, and writes the document", async () => {
     // The labels note spans three physical lines (an API error body would), the last after a lone CR, which YAML reads

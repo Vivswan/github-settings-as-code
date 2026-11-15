@@ -27,7 +27,7 @@ import type { SectionPermission } from "../contract/permissions.js";
 import type { PlanContext, PlannedOp, Read, SectionPlan } from "../contract/plan.js";
 import { DEFAULT_ROLE, readBackPermission, roleForPermission } from "../shared/roles.js";
 import { knobbed, routed } from "../shared/schema-helpers.js";
-import { knobbedSnapshot, leftOutOfSnapshot } from "../shared/snapshot-helpers.js";
+import { dotSegmentNote, knobbedSnapshot, leftOutOfSnapshot } from "../shared/snapshot-helpers.js";
 import { CollaboratorConfig } from "./schema.js";
 
 const LiveCollaborator = z.looseObject({
@@ -390,6 +390,12 @@ function collaboratorEntries(
     const entries: CollaboratorConfig[] = [];
     for (const collaborator of collaborators) {
       const label = `collaborators[${collaborator.login}]`;
+      const undeclarable = dotSegmentNote(label, [collaborator.login]);
+      if (undeclarable !== null) {
+        notes.push(undeclarable);
+        continue;
+      }
+
       if (isOwner(ctx, loginKey(collaborator.login))) {
         notes.push(
           leftOutOfSnapshot(label, "the repository owner's access is implicit and never managed"),
@@ -429,6 +435,12 @@ function invitationEntries(
     for (const invitation of invitations) {
       const login = invitation.invitee.login;
       const label = `collaborators[${login}]`;
+      const undeclarable = dotSegmentNote(label, [login]);
+      if (undeclarable !== null) {
+        notes.push(undeclarable);
+        continue;
+      }
+
       if (invitation.expired === true) {
         expired.push(label);
         continue;
