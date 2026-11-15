@@ -439,10 +439,11 @@ Both channels publish through the platform's npm module, from the `npm-next` and
 - `next` is never older than `latest`: a release moves `next` to itself.
   - After `2.1.0` publishes, `next` names `2.1.0` until the first releasable commit of the next cycle refreshes the release PR, which publishes `2.1.1-main.<count>.<date>.g<sha7>`.
   - A release moves `next` only when it is the release `latest` names and `next` is missing or below it. A rerun of a release that a newer one overtook, or one that finds `next` already ahead, leaves `next` where it is.
-- `next` never moves back. The publish reads the registry's record before the build and again before the publish:
+- `next` never moves back, as far as the registry's record shows. The publish reads the record before the build and again before the publish:
   - the version already on the registry (a rerun): publishes nothing, and fails when `next` is behind that version;
   - a release on the registry at or above this version: the run fails, since the `package.json` on `main` is behind the registry;
   - `next` already at or above this commit's version (a stale run): publishes nothing, with a notice.
+  - The one window left: a publish the registry still does not show after the two-minute wait. That run fails. An older commit's run that reads the record before it shows can then publish and move `next` back to its own version; the next release-PR refresh moves it forward again.
 - A `next` build appears when release-please creates or refreshes the release PR, and on no other push: the `npm-next` leg publishes in the run that refreshed it, from that run's commit.
   - release-please refreshes the PR only when the release notes change (`always-update` is off in `release-please-config.json`), which a releasable commit does: feat, fix, perf, revert, or a breaking marker. A merge of hidden types alone (chore, build, ci, test, docs, refactor) refreshes nothing and publishes nothing, a dependency bump under `build(deps)` included.
   - No check of the repository's own decides a publish.
