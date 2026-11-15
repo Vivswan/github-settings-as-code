@@ -20,10 +20,16 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
+import { fromMarkdown } from "mdast-util-from-markdown";
+import { gfmStrikethroughFromMarkdown } from "mdast-util-gfm-strikethrough";
+import { gfmTableFromMarkdown } from "mdast-util-gfm-table";
+import { toString as nodeText } from "mdast-util-to-string";
+import { gfmStrikethrough } from "micromark-extension-gfm-strikethrough";
+import { gfmTable } from "micromark-extension-gfm-table";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { parseRepoSlug } from "../../../src/discovery/targets.js";
 import { type OutputName, redactRanges } from "../../../src/io.js";
-import { markdownCell, markdownText } from "../../../src/report/markdown.js";
+import { tableRow } from "../../../src/report/markdown.js";
 import { tableRows } from "../../docs/markdown.js";
 import { ROOT } from "../../root.js";
 import {
@@ -689,13 +695,32 @@ export function stripDebugLines(text: string): string {
 }
 
 /**
- * Whether the step summary carries `needle`, as written or as the product renders free text: in a table cell or on a
- * line of its own it escapes markup characters, so a needle holding "[" or "*" sits there with a backslash before each.
+ * The step summary as GitHub renders it, read with the GFM grammar: each table row as the product's own row of its
+ * cells' text, every other block as its text. A cell's escapes are gone (`labels\[x]` reads `labels[x]`), and a
+ * `<br>` inside a cell stays, since raw HTML is its own text.
+ */
+function renderedSummary(summary: string): string {
+  const tree = fromMarkdown(summary, {
+    extensions: [gfmTable(), gfmStrikethrough()],
+    mdastExtensions: [gfmTableFromMarkdown(), gfmStrikethroughFromMarkdown()],
+  });
+  return tree.children
+    .map((block) =>
+      block.type === "table"
+        ? block.children
+            .map((row) => tableRow(row.children.map((cell) => nodeText(cell))))
+            .join("\n")
+        : nodeText(block),
+    )
+    .join("\n");
+}
+
+/**
+ * Whether the step summary carries `needle`: in its raw Markdown, or in the text it renders to. A needle is plain
+ * text and is never read as Markdown, which would eat its stars. Both forms count for a leak too.
  */
 function summaryHolds(summary: string, needle: string): boolean {
-  return [needle, markdownCell(needle), markdownText(needle)].some((form) =>
-    summary.includes(form),
-  );
+  return summary.includes(needle) || renderedSummary(summary).includes(needle);
 }
 
 /**
