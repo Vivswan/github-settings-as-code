@@ -35,8 +35,7 @@ const LINE_BREAK = /[\r\n]/;
 const ODD_WHITESPACE = /[^\S \t\r\n]/;
 
 const BASE64_QUARTET = "[A-Za-z0-9+/]{4}";
-const BASE64_CANONICAL_TAIL = "[A-Za-z0-9+/][AQgw]==|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=";
-const BASE64_PATTERN = `(?:${BASE64_QUARTET})*(?:${BASE64_QUARTET}|${BASE64_CANONICAL_TAIL})`;
+const BASE64_PATTERN = `(?:${BASE64_QUARTET})*(?:${BASE64_QUARTET}|[A-Za-z0-9+/][AQgw]==|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=)`;
 const PUBLIC_KEY_PATTERN = new RegExp(
   `^${FIELD_SEPARATOR}*(?:${ALGORITHM_ALTERNATION})${FIELD_SEPARATOR}+${BASE64_PATTERN}(?:${FIELD_SEPARATOR}[^\\r\\n]*)?$`,
 );
