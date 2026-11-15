@@ -443,13 +443,13 @@ Both channels publish through the platform's npm module, from the `npm-next` and
   - the version already on the registry (a rerun): publishes nothing, and fails when `next` is behind that version;
   - a release on the registry at or above this version: the run fails, since the `package.json` on `main` is behind the registry;
   - `next` already at or above this commit's version (a stale run): publishes nothing, with a notice.
-  - The one window left: a publish the registry still does not show after the two-minute wait. That run fails. An older commit's run that reads the record before it shows can then publish and move `next` back to its own version; the next release-PR refresh moves it forward again.
+  - The one window left: a publish the registry still does not show after the module's confirmation wait. That run fails. An older commit's run that reads the record before it shows can then publish and move `next` back to its own version; the next release-PR refresh moves it forward again.
 - A `next` build appears when release-please creates or refreshes the release PR, and on no other push: the `npm-next` leg publishes in the run that refreshed it, from that run's commit.
   - release-please refreshes the PR only when the release notes change (`always-update` is off in `release-please-config.json`), which a releasable commit does: feat, fix, perf, revert, or a breaking marker. A merge of hidden types alone (chore, build, ci, test, docs, refactor) refreshes nothing and publishes nothing, a dependency bump under `build(deps)` included.
   - No check of the repository's own decides a publish.
 - `latest` never moves back: a release publishes nothing when its version is already there (a rerun, which fails when `latest` is behind that version), and fails before any publish when the registry holds a release at or above it.
 - The channel alone decides the dist-tag, and registry.npmjs.org is the one registry. The publish refuses a `package.json` that is `private: true` or sets `tag`, `publishConfig.tag`, or a registry in `publishConfig`, and an npm configuration (an `.npmrc` or a variable) with a non-default tag or another registry.
-- Every registry read misses the CDN cache (a cached packument lags a publish by up to 300 s), and a publish ends only once the registry's record shows its version: a version that does not show within two minutes fails the job, and a rerun finds what did land.
+- Every registry read misses the CDN cache (a cached packument lags a publish by up to 300 s), and a publish ends only once the registry's record shows its version: a version that does not show within the module's confirmation wait fails the job, and a rerun finds what did land.
   - Both channels share one lane, so one publish at a time judges and lands.
 - Both channels publish through npm trusted publishing (OIDC): no registry token exists anywhere.
   - npm attaches a provenance attestation to every version CI publishes, which `npm audit signatures` checks in a project that installs it.
