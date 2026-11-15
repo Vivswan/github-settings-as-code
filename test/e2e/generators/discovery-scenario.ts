@@ -3,6 +3,65 @@ import type { Rng } from "./prng.js";
 
 const TOPIC_POOL = ["platform", "infra", "legacy", "misc"];
 
+/** The owner every pool repo sits under. */
+const POOL_OWNER = "e2e-owner";
+
+/** Patterns the exclude grammar refuses, one flaw each: an unpaired bracket, a backwards range, an empty class, a stray character, a run of stars, a second "/", a dots-only name, a bare "!", a leading "./", and an operator inside a class. */
+export const REFUSED_EXCLUDE_PATTERNS: readonly string[] = [
+  "disc-[",
+  "disc-[9-0]",
+  "disc-[]",
+  "(disc)+",
+  "disc-**",
+  `${POOL_OWNER}/disc/0`,
+  "..",
+  "!",
+  "./disc-0",
+  "disc-[*]",
+];
+
+/** The accepted shapes that drop a repo or two, aimed at pool repo `n`: literals, either case, "*", "?", classes, slugs, and ones that match nothing. */
+export function narrowExcludePatterns(n: number): readonly string[] {
+  const name = `disc-${n}`;
+  return [
+    name,
+    name.toUpperCase(),
+    `*-${n}`,
+    `d?sc-${n}`,
+    `disc-[${n}]`,
+    `disc-[${n}-${Math.min(n + 1, 9)}]`,
+    `[a-d]isc-${n}`,
+    `[D-Z]isc-${n}`,
+    `${POOL_OWNER}/${name}`,
+    `*/${name}`,
+    `E2E-Owner/Disc-${n}`,
+    "other-owner/*",
+    "tmp-*",
+  ];
+}
+
+/** The accepted shapes that drop most of the pool, drawn rarely so the kept set is seldom empty: bare stars, a negated class, and negated patterns. */
+export function wideExcludePatterns(n: number): readonly string[] {
+  const name = `disc-${n}`;
+  return [
+    "*",
+    "disc-*",
+    "disc-?",
+    `${POOL_OWNER}/*`,
+    `disc-[!${n}]`,
+    `disc-[^0-${n}]`,
+    `!${name}`,
+    `!${POOL_OWNER}/disc-[0-${n}]`,
+  ];
+}
+
+/**
+ * Battery construction, deterministic per (seed, force), so a replay reapplies it:
+ *   "converges" -> pool repo 0 non-archived and no filters, so the kept set is never empty
+ *   "lists"     -> no refused exclude pattern, so the run reaches the repository listing a fault targets
+ */
+export type DiscoveryForce = "converges" | "lists";
+
 export interface DiscoveryScenarioMeta {
   /** What the mock's /user/repos listing enumerates, each repo carrying the attributes the filters read. */
   pool: Array<{
@@ -22,6 +81,9 @@ export interface DiscoveryScenarioMeta {
     exclude?: string;
   };
 
+  /** Whether `filters.exclude` holds a pattern the grammar refuses, so the run stops at its inputs and discovers nothing. */
+  excludeRefused: boolean;
+
   /** Always "redact": discovery targets' names come only from the private /user/repos listing, so the fuzzer checks a kept private repo is keyed by a placeholder and its slug leaks nowhere. */
   privateRepos: "redact" | "show";
 }
@@ -30,12 +92,12 @@ export interface DiscoveryScenarioMeta {
 function genDiscoveryPool(
   rng: Rng,
   count: number,
-  force?: "converges",
+  force?: DiscoveryForce,
 ): DiscoveryScenarioMeta["pool"] {
   const forcedPrivateIndex = rng.int(count);
   const pool: DiscoveryScenarioMeta["pool"] = [];
   for (let i = 0; i < count; i++) {
-    const repo: DiscoveryScenarioMeta["pool"][number] = { slug: `e2e-owner/disc-${i}` };
+    const repo: DiscoveryScenarioMeta["pool"][number] = { slug: `${POOL_OWNER}/disc-${i}` };
     if (rng.bool(0.3) && !(force === "converges" && i === 0)) {
       repo.archived = true;
     }
@@ -54,12 +116,34 @@ function genDiscoveryPool(
   return pool;
 }
 
+/**
+ * The `exclude` input aimed at pool repo `n`: one to three patterns, comma-joined with or without a space, one of
+ * them refused about one draw in six, never under "lists". `rng` is the exclude fork, so its draws move no other field.
+ */
+function genExclude(
+  rng: Rng,
+  n: number,
+  count: number,
+  force?: DiscoveryForce,
+): { exclude: string; refused: boolean } {
+  // Rolled under "lists" too and then discarded, as the main stream's rolls are.
+  const refused = rng.bool(1 / 6) && force !== "lists";
+  const patterns = Array.from({ length: rng.int(3) + 1 }, () => {
+    const target = rng.bool(0.7) ? n : rng.int(count);
+    return rng.pick(rng.bool(0.06) ? wideExcludePatterns(target) : narrowExcludePatterns(target));
+  });
+  if (refused) {
+    patterns[rng.int(patterns.length)] = rng.pick(REFUSED_EXCLUDE_PATTERNS);
+  }
+  return { exclude: patterns.join(rng.pick([",", ", "])), refused };
+}
+
 /** Rolled under a force too, so the main stream and every recorded seed stay stable; "converges" then discards the roll. */
 function genDiscoveryFilters(
   rng: Rng,
   count: number,
-  force?: "converges",
-): DiscoveryScenarioMeta["filters"] {
+  force?: DiscoveryForce,
+): { filters: DiscoveryScenarioMeta["filters"]; excludeRefused: boolean } {
   const rolled: DiscoveryScenarioMeta["filters"] = {};
   if (rng.bool(0.4)) {
     rolled.visibility = rng.pick(["all", "public", "private", "internal"]);
@@ -73,10 +157,16 @@ function genDiscoveryFilters(
   if (rng.bool(0.4)) {
     rolled.topics = rng.pick(TOPIC_POOL);
   }
+  let excludeRefused = false;
   if (rng.bool(0.3)) {
-    rolled.exclude = `disc-${rng.int(count)}`;
+    // The main stream still spends the one draw the literal `disc-N` took, so every other field of a recorded seed reproduces.
+    const drawn = genExclude(rng.fork("discovery-exclude"), rng.int(count), count, force);
+    rolled.exclude = drawn.exclude;
+    excludeRefused = drawn.refused;
   }
-  return force === "converges" ? {} : rolled;
+  return force === "converges"
+    ? { filters: {}, excludeRefused: false }
+    : { filters: rolled, excludeRefused };
 }
 
 /**
@@ -85,18 +175,15 @@ function genDiscoveryFilters(
  */
 export function genDiscoveryScenario(
   rng: Rng,
-  /**
-   * Battery construction: "converges" pins pool repo 0 non-archived with no filters, so the convergence battery entry
-   * exists for every master seed instead of being rejection-sampled. Deterministic per (seed, force); replays reapply it.
-   */
-  force?: "converges",
+  /** Constructs a battery entry for every master seed instead of rejection-sampling one. */
+  force?: DiscoveryForce,
 ): {
   scenario: Scenario;
   meta: DiscoveryScenarioMeta;
 } {
   const count = rng.int(5) + 4;
   const pool = genDiscoveryPool(rng, count, force);
-  const filters = genDiscoveryFilters(rng, count, force);
+  const { filters, excludeRefused } = genDiscoveryFilters(rng, count, force);
 
   const repos: Record<string, MultiRepo> = {};
   for (const repo of pool) {
@@ -124,5 +211,5 @@ export function genDiscoveryScenario(
     token_permissions: { issues: "write", contents: "read" },
     expect: { exit_code: 0 },
   };
-  return { scenario, meta: { pool, filters, privateRepos } };
+  return { scenario, meta: { pool, filters, excludeRefused, privateRepos } };
 }

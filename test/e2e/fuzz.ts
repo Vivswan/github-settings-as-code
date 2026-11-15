@@ -764,9 +764,14 @@ function multiIdempotenceEligible(meta: MultiScenarioMeta): boolean {
   );
 }
 
+/** The slugs the run keeps: none when an exclude pattern is refused, since the action stops at its inputs before it lists a repository. */
+function predictedKept(meta: DiscoveryScenarioMeta): string[] {
+  return meta.excludeRefused ? [] : predictDiscovery(meta.pool, meta.filters);
+}
+
 /** Shared by the gate and the battery draw so they cannot diverge; an empty kept set exits 1 by design. */
 function discoveryConvergeEligible(meta: DiscoveryScenarioMeta): boolean {
-  return predictDiscovery(meta.pool, meta.filters).length > 0;
+  return predictedKept(meta).length > 0;
 }
 
 /** Compared on displayKey: a redacted target is keyed "private repository #N", never its slug; a real slug where a placeholder was expected shows up as an unpredicted key. */
@@ -1143,7 +1148,7 @@ async function runDiscoveryPredicted(
   meta: DiscoveryScenarioMeta,
   opts: { fault?: InjectedFault } = {},
 ): Promise<IterationResult> {
-  const kept = predictDiscovery(meta.pool, meta.filters);
+  const kept = predictedKept(meta);
   // An empty kept set exits 1 by design. The discovery scenario pins fully-granted labels in apply
   // mode, so a fault-free non-empty run must converge.
   const proof =
@@ -1162,6 +1167,14 @@ async function runDiscoveryPredicted(
   problems.push(
     ...discoveryKeyProblems(expectedDiscoveryKeys(kept, meta), new Set(Object.keys(results))),
   );
+  if (
+    meta.excludeRefused &&
+    report.requests.some((request) => request.pathname === "/user/repos")
+  ) {
+    problems.push(
+      `exclude "${meta.filters.exclude}" holds a refused pattern, yet the run listed repositories`,
+    );
+  }
   problems.push(...discoveryLeakProblems(meta, report));
   problems.push(...reposResultFoldProblems(report, false));
   return iterationResult(
@@ -1558,7 +1571,7 @@ function injectContentsFault(
 
 /** A fatal listing fault must exit 1 before any target runs: a silent empty pool instead of a loud failure is the bug this hunts. */
 async function discoveryFaultIteration(seed: number): Promise<IterationResult> {
-  const { scenario, meta } = genDiscoveryScenario(new Rng(seed));
+  const { scenario, meta } = genDiscoveryScenario(new Rng(seed), "lists");
   const roll = new Rng(seed ^ 0x2545f491);
   const kind = roll.pick([...FAULT_KINDS]);
   const exhausting = roll.bool();
@@ -1611,7 +1624,7 @@ async function fatalDiscoveryRun(
 }
 
 function discoveryFaultBatteryRun(seed: number): Promise<IterationResult> {
-  const { scenario, meta } = genDiscoveryScenario(new Rng(seed));
+  const { scenario, meta } = genDiscoveryScenario(new Rng(seed), "lists");
   scenario.faults = [{ endpoint: "core.discoveryList", kind: "server_error", times: RETRY_BUDGET }];
   return fatalDiscoveryRun(
     scenario,
