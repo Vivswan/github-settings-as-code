@@ -1,13 +1,61 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { type Node as ESTreeNode, walk } from "estree-walker";
+import { type Node, parseSync } from "oxc-parser";
 import { actionsIo } from "../../src/action/io.js";
 import { ROOT } from "../root.js";
 import { withTempDir } from "../temp-dir.js";
 
-/** A static import, a re-export, a dynamic import(), or a require() all quote the specifier; a comment mentioning it bare does not. */
+/** The node types whose `source` names the module they load. */
+const LOADS_BY_SOURCE: ReadonlySet<string> = new Set([
+  "ImportDeclaration",
+  "ExportNamedDeclaration",
+  "ExportAllDeclaration",
+  "ImportExpression",
+  "TSImportType",
+]);
+
+/** The specifier a module-loading node names by a literal (a template with no expressions is one), else undefined. */
+function loadedSpecifier(node: Node): string | undefined {
+  const isRequire =
+    node.type === "CallExpression" &&
+    node.callee.type === "Identifier" &&
+    node.callee.name === "require";
+  let request: Node | null | undefined;
+  if (isRequire) {
+    request = node.arguments[0];
+  } else if (node.type === "TSExternalModuleReference") {
+    request = node.expression;
+  } else if (LOADS_BY_SOURCE.has(node.type) && "source" in node) {
+    request = node.source;
+  }
+
+  if (request?.type === "Literal" && typeof request.value === "string") {
+    return request.value;
+  }
+  if (request?.type === "TemplateLiteral" && request.expressions.length === 0) {
+    return request.quasis[0]?.value.cooked ?? undefined;
+  }
+  return undefined;
+}
+
+/** Whether `source` loads @actions/core: by a static import, a re-export, import(), require(), or an import type. */
 function namesActionsCore(source: string): boolean {
-  return /["']@actions\/core["']/.test(source);
+  const { program, errors } = parseSync("module.ts", source);
+  if (errors.length > 0) {
+    // A file the parser gave up on has an incomplete tree, which would read as "loads nothing".
+    throw new Error(
+      `the source does not parse: ${errors.map((error) => error.message).join("; ")}`,
+    );
+  }
+  let named = false;
+  walk(program as unknown as ESTreeNode, {
+    enter(node) {
+      named ||= loadedSpecifier(node as unknown as Node) === "@actions/core";
+    },
+  });
+  return named;
 }
 
 describe("the Io port boundary", () => {
@@ -18,7 +66,11 @@ describe("the Io port boundary", () => {
     ['export { setSecret } from "@actions/core";', true],
     ['const core = await import("@actions/core");', true],
     ['const core = require("@actions/core");', true],
+    ["const core = await import(`@actions/core`);", true],
+    ['import core = require("@actions/core");', true],
+    ['type Core = typeof import("@actions/core");', true],
     ["// the action layer implements it over @actions/core", false],
+    ['const why = "@actions/core";', false],
     ['import { retry } from "@octokit/plugin-retry";', false],
   ])("the specifier check classifies %j as %p", (source, named) => {
     expect(namesActionsCore(source)).toBe(named);

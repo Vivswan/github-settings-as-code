@@ -8,10 +8,12 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { parseSync } from "oxc-parser";
 import { visitParents } from "unist-util-visit-parents";
 import { ROOT } from "../root.js";
+import { withTempDir } from "../temp-dir.js";
 import { type CodeFence, codeFences, markdownTree } from "./markdown.js";
 
 /** The tree whose every page is under test. */
@@ -26,13 +28,16 @@ const PATH_TOKEN = /^(?:src|test|docs|lib|\.github)\/[\w./-]*$/;
 /** An exported symbol as a label token spells it: an identifier, with `()` allowed after a function's. */
 const SYMBOL_TOKEN = /^[A-Za-z_]\w*(?:\(\))?$/;
 
-/** Whether `file` exports `name` at its top level, under any declaration keyword. */
+/** Whether `file` exports `name`: a declaration, an `export { }` list, or a re-export, as the parser's export record lists them. */
 function exportsSymbol(file: string, name: string): boolean {
-  const text = readFileSync(file, "utf8");
-  return new RegExp(
-    String.raw`^export\s+(?:async\s+)?(?:function|const|let|class|interface|type|enum)\s+${name}\b`,
-    "m",
-  ).test(text);
+  const { module, errors } = parseSync(file, readFileSync(file, "utf8"));
+  if (errors.length > 0) {
+    // A file the parser gave up on has an incomplete export record, which would read as "exports no such name".
+    throw new Error(`${file} does not parse: ${errors.map((error) => error.message).join("; ")}`);
+  }
+  return module.staticExports.some((statement) =>
+    statement.entries.some((entry) => entry.exportName.name === name),
+  );
 }
 
 const NODE_DEFINITION = /(?<![\w"-])([A-Za-z_][\w-]*)([[({>]+)(?![-|])/g;
@@ -427,5 +432,33 @@ describe("diagram guard (mutation checks)", () => {
     ],
   ])("%s", (_name, markdown, problems) => {
     expect(diagramProblems(markdown, ROOT)).toEqual(problems);
+  });
+});
+
+describe("a label's symbols are the module's exports", () => {
+  /** A module whose exports are spelled every way but `export const`, and whose one template literal shows a declaration it never makes. */
+  const MODULE = [
+    "const shown = `",
+    "export function ghost() {}",
+    "`;",
+    "const listed = 1;",
+    "export { listed, shown };",
+    'export { inner as renamed } from "./inner.js";',
+    "export function* walk() {}",
+    "export abstract class Base {}",
+    "",
+  ].join("\n");
+
+  // A regex over the source took the shown declaration for an export and missed every form below it, so a diagram could name a symbol the module never exports.
+  test("read from the syntax tree: a list, a re-export, a generator, an abstract class, and nothing a string shows", async () => {
+    await withTempDir("gsac-diagram-exports-", async (root) => {
+      mkdirSync(join(root, "src"));
+      writeFileSync(join(root, "src", "forms.ts"), MODULE);
+      const label = "src/forms.ts<br>listed, shown, renamed, walk(), Base, ghost()";
+      const markdown = `\`\`\`mermaid\nflowchart LR\n  a["${label}"]\n\`\`\`\n\nDemonstrated by: [x](${REPO_FILE_URL}src/forms.ts).\n`;
+      expect(diagramProblems(markdown, root)).toEqual([
+        `"${label}": src/forms.ts exports no ghost`,
+      ]);
+    });
   });
 });
