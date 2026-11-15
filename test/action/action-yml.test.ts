@@ -15,6 +15,7 @@ import { ROOT } from "../root.js";
 
 interface ActionYml {
   name: string;
+  runs?: { using?: string; main?: string };
 }
 
 const actionYml = parseYaml(readFileSync(join(ROOT, "action.yml"), "utf8")) as ActionYml;
@@ -24,6 +25,14 @@ describe("action.yml <-> README", () => {
     const readme = readFileSync(join(ROOT, "README.md"), "utf8");
     const h1 = readme.match(/^# (.+)$/m)?.[1];
     expect(actionYml.name).toBe(h1 as string);
+  });
+});
+
+describe("action.yml outside its generated regions", () => {
+  test("the manifest still says how the action runs", () => {
+    // A generated region is overwritten unread, so an END marker moved below `runs:` would regenerate the key away;
+    // nothing else in the unit tests reads it, and an action without it cannot load.
+    expect(actionYml.runs).toEqual({ using: expect.any(String), main: expect.any(String) });
   });
 });
 

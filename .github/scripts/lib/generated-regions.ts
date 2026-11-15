@@ -1,12 +1,11 @@
 /**
  * The marker grammar every generator splices through: `BEGIN GENERATED: <name> (hint)` to
  * `END GENERATED: <name>`, each written in the comment syntax of the file's own language, and
- * the two checks each region passes before its splice: its markers pair up, and they sit where
- * the region's declaration says.
- *
- * A region belongs to its generator. Whatever sits between its markers is overwritten on the next
- * regeneration, unread: hand-written text belongs outside the markers. Committed text that lands
- * inside shows in the diff of the regenerated file and stays in git; uncommitted text is gone.
+ * the three checks each region passes before its splice: its markers pair up, they sit where the
+ * region's declaration says, and no other region's marker sits between them. A region belongs to
+ * its generator: whatever sits between its markers is overwritten on the next regeneration, unread,
+ * so hand-written text belongs outside the markers. Committed text that lands inside shows in the
+ * diff of the regenerated file and stays in git; uncommitted text is gone.
  */
 
 import { extname } from "node:path";
@@ -59,17 +58,21 @@ function markerText(kind: "BEGIN" | "END", name: string): string {
 const LEXER_SIGNALS: ReadonlySet<string> = new Set([CST.DOCUMENT, CST.FLOW_END, CST.SCALAR]);
 
 // Every comment the YAML lexer sees, so a marker-shaped line inside a block or quoted scalar
-// (content, not a comment) can never pass as a marker.
+// (content, not a comment) can never pass as a marker. The token after the scalar signal is the
+// scalar's own source, whatever it opens with.
 function yamlComments(text: string): Array<{ offset: number; source: string }> {
   const comments: Array<{ offset: number; source: string }> = [];
   let offset = 0;
+  let scalar = false;
   for (const source of new Lexer().lex(text)) {
     if (LEXER_SIGNALS.has(source)) {
+      scalar = source === CST.SCALAR;
       continue;
     }
-    if (CST.tokenType(source) === "comment") {
+    if (!scalar && CST.tokenType(source) === "comment") {
       comments.push({ offset, source });
     }
+    scalar = false;
     offset += source.length;
   }
   return comments;

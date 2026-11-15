@@ -178,6 +178,13 @@ describe("replaceRegion", () => {
       "x",
       "found 0 and 0",
     ],
+    [
+      "a marker-shaped line inside a block scalar that is the whole document",
+      "yaml",
+      "|\n# BEGIN GENERATED: x\n",
+      "x",
+      "found 0 and 0",
+    ],
     ["a missing END marker", "html", "<!-- BEGIN GENERATED: x -->\nbody", "x", "found 1 and 0"],
     [
       "a duplicated BEGIN marker",

@@ -156,6 +156,16 @@ describe("undeclared-policy renderers", () => {
     };
     const narrowed: { readonly labels: { readonly override: "x" } } = hidden;
     expect(() => renderPolicyDefaultsTable(labels, narrowed)).toThrow(empty);
+    // One row per section: a section listed twice would state its default twice.
+    expect(() =>
+      renderPolicyDefaultsTable([...labels, ...labels], { labels: { override: "x" } }),
+    ).toThrow("row 2 of the table repeats the `labels` row");
+    // A key outside the settings-key alphabet is no registry key, so its row is refused, not written.
+    expect(() =>
+      renderPolicyDefaultsTable([{ key: "Labels", undeclaredDefault: "delete" }], {
+        Labels: { override: "x" },
+      }),
+    ).toThrow("row 1 of the table does not open with a section key in a code span");
   });
 });
 

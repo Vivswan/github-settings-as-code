@@ -79,6 +79,20 @@ describe("renderSectionsTable", () => {
       }),
     ).toThrow('row 1 of the table cell 5 is blank or contains "|" or a line break');
   });
+
+  test("refuses a section listed twice", () => {
+    // The table walks a registry, one row per key: a second row for a key would render as a second, competing answer.
+    const row = {
+      key: "labels",
+      permission: { repo: ["issues"] },
+      undeclaredDefault: "delete",
+    } as const;
+    expect(() =>
+      renderSectionsTable([row, row], {
+        labels: { sections_table: { endpoints: "labels CRUD", notes: "n" } },
+      }),
+    ).toThrow("row 2 of the table repeats the `labels` row");
+  });
 });
 
 describe("renderCoverage", () => {
