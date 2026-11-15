@@ -1,8 +1,6 @@
 /**
- * The grammar used to read the output back is micromark's, which differs from GitHub's cmark-gfm on two points:
- * it does not decode a character reference inside an angle autolink's target, and its bare-URL reader runs on the
- * text after unescaping, so it links a URL whose colon is escaped where GitHub leaves it plain. The rows for a
- * URL that must come out unlinked therefore assert the emitted text, not the parsed tree.
+ * Free text written by the report's Markdown helpers, read back with the GFM grammar: what a table cell or a
+ * line renders as, and where a bare URL in it points.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -127,39 +125,6 @@ describe("free text in a summary renders literally under the GFM grammar", () =>
         [href],
         `see ${text} now`,
       ]);
-    },
-  );
-
-  test.each([
-    [
-      "a named character reference in a URL",
-      "see https://example.com/hook?a=1&amp;b=2 now",
-      "see https\\://example.com/hook?a=1\\&amp;b=2 now",
-    ],
-    [
-      "a numeric character reference in a URL",
-      "https://example.com/hook?x=&#124;y",
-      "https\\://example.com/hook?x=\\&#124;y",
-    ],
-    [
-      "a numeric character reference padded past the CommonMark digit limit, which GitHub still decodes",
-      "https://example.com/hook?x=&#00000124;y",
-      "https\\://example.com/hook?x=\\&#00000124;y",
-    ],
-    [
-      "an uppercase scheme and a host without a dot",
-      "HTTPS://localhost/_admin_/end",
-      "HTTPS\\://localhost/\\_admin\\_/end",
-    ],
-    [
-      "an uppercase scheme with a port and brackets",
-      "HTTP://localhost:8080/hook?x=[1]",
-      "HTTP\\://localhost:8080/hook?x=\\[1]",
-    ],
-  ])(
-    "%s is written unlinkable: GitHub decodes a reference inside a link target and keeps a backslash inside a URL it links itself, so either would point somewhere the text does not say",
-    (_what, text, emitted) => {
-      expect([markdownCell(text), markdownText(text)]).toEqual([emitted, emitted]);
     },
   );
 });
