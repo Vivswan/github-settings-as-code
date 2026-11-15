@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import { err } from "neverthrow";
 import { executePlan } from "../../../src/engine/execute.js";
 import type { SectionInput } from "../../../src/sections/contract/declared.js";
 import { planContext } from "../../../src/sections/contract/plan.js";
 import { labelsSection } from "../../../src/sections/labels/index.js";
+import { sectionModule } from "../../../src/sections/registry.js";
 import { MockApi } from "../../mock-api.js";
-import { NO_SECRETS, REPO, unwrap } from "../section-run.js";
+import { REPO, unwrap } from "../section-run.js";
 import { validatedInput } from "../validated-input.js";
 
 const LIST = "GET /repos/o/r/labels?per_page=100&page=1";
@@ -126,25 +128,28 @@ describe("labels", () => {
     ]);
   });
 
-  test('an undeclared live label named ".." is never deleted by path: its DELETE would resolve to the repository route, so the section refuses and sends nothing', async () => {
+  // Refusing only when the request is issued would delete the label planned before it, and show check mode a deletion plan.
+  test('an undeclared live label named ".." refuses the whole plan before anything is reported or sent: its DELETE would resolve to the repository route', async () => {
     const api = new MockApi({
-      [LIST]: { data: [{ name: "..", color: "ededed", description: null }] },
-    }).allowMutations("DELETE /repos/o/r/*");
-    const execution = await executePlan(await plan(api, []), labelsSection, api, REPO, NO_SECRETS);
-
-    expect([execution, api.mutations()]).toEqual([
-      {
-        status: "failed",
-        failure: {
-          kind: "refused",
-          message:
-            'labels: DELETE /repos/{owner}/{repo}/labels/{name} cannot be sent for name "..": as a URL path segment "." and ".." resolve to another API route. Rename or remove it on GitHub',
-        },
-        changes: [],
-        notes: [],
-        landed: 0,
-        unattempted: [],
+      [LIST]: {
+        data: [
+          { name: "old", color: "ededed", description: null },
+          { name: "..", color: "ededed", description: null },
+        ],
       },
+    }).allowMutations("DELETE /repos/o/r/*");
+    const guarded = sectionModule("labels");
+    const planned = await guarded.plan(
+      planContext(guarded, api, REPO),
+      validatedInput("labels", []),
+    );
+
+    expect([planned, api.mutations()]).toEqual([
+      err({
+        kind: "refused",
+        message:
+          'labels: DELETE /repos/{owner}/{repo}/labels/{name} cannot be sent for name "..": as a URL path segment "." and ".." resolve to another API route. Rename or remove it on GitHub',
+      }),
       [],
     ]);
   });

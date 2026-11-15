@@ -9,6 +9,7 @@
  */
 
 import { err, ok, type Result } from "neverthrow";
+import type { RepoRef } from "../../discovery/targets.js";
 import type { ClientAnswer, RequestMark } from "../../github/api.js";
 import {
   type ApiError,
@@ -153,7 +154,7 @@ export async function callDeclared(
 function sectionPath(
   section: SectionMeta,
   endpoint: EndpointDecl,
-  ctx: SectionContext,
+  ctx: { repo: RepoRef },
   params: Readonly<Record<string, string>> | undefined,
   query: Readonly<Record<string, string>> | undefined,
 ): Result<string, SectionFailure> {
@@ -164,6 +165,33 @@ function sectionPath(
   return expand(endpoint, ctx, params, query).mapErr((reason) =>
     sectionFailure("refused", `${section.key}: ${reason}`),
   );
+}
+
+/**
+ * The first planned REST write whose path a live value cannot fill, as the section's refusal. The registry judges
+ * every plan with it, so check mode reports the refusal instead of a deletion plan, and apply sends no write of a
+ * plan it would stop in the middle of. A role no endpoint declares is a GraphQL write, which has no path.
+ */
+export function plannedPathRefusal(
+  section: SectionMeta,
+  ctx: { repo: RepoRef },
+  ops: ReadonlyArray<{
+    readonly role: string;
+    readonly params?: Readonly<Record<string, string>>;
+    readonly query?: Readonly<Record<string, string>>;
+  }>,
+): SectionFailure | undefined {
+  for (const op of ops) {
+    const endpoint = Object.hasOwn(section.endpoints, op.role)
+      ? section.endpoints[op.role]
+      : undefined;
+    const path = endpoint && sectionPath(section, endpoint, ctx, op.params, op.query);
+    if (path?.isErr()) {
+      return path.error;
+    }
+  }
+
+  return undefined;
 }
 
 /** Tolerated statuses come back as { error }; an explicit `tolerate` only ever tolerates FEWER than declared. */

@@ -6,6 +6,7 @@
  *   adding a section: create sections/<key>/ -> add the key to SECTION_KEYS in schema.ts -> add one line here
  */
 
+import { err, ok } from "neverthrow";
 import type { z } from "zod";
 import { type ListSection, SECTION_KEYS, type SectionKey } from "../schema.js";
 import type { DeepReadonly, MustBeNever } from "../types.js";
@@ -36,6 +37,7 @@ import {
 } from "./contract/module.js";
 import { gatedByOwner } from "./contract/owner.js";
 import type { PlanContext, SnapshotContext } from "./contract/plan.js";
+import { plannedPathRefusal } from "./contract/requests.js";
 import { customPropertiesSection } from "./custom_properties/index.js";
 import { dependabotSecretsSection } from "./dependabot_secrets/index.js";
 import { deployKeysSection } from "./deploy_keys/index.js";
@@ -229,9 +231,16 @@ function refusingForeignContexts<K extends SectionKey>(module: SectionModule<K>)
     ...module,
     plan: (ctx, desired) => {
       const problem = foreign(ctx, "plan");
-      return problem === null
-        ? module.plan(ctx, desired)
-        : Promise.reject(new Error(`BUG: ${problem}`));
+      if (problem !== null) {
+        return Promise.reject(new Error(`BUG: ${problem}`));
+      }
+
+      return module.plan(ctx, desired).then((planned) =>
+        planned.andThen((plan) => {
+          const refusal = plannedPathRefusal(module, ctx, plan.ops);
+          return refusal === undefined ? ok(plan) : err(refusal);
+        }),
+      );
     },
     ...(hasSnapshot(module)
       ? {
