@@ -378,6 +378,21 @@ describe("parseSummaryOutcomes", () => {
       rulesets: "drift",
     });
   });
+  // The fuzzer and the scenarios compare these outcomes with the oracle's, so a row read from shown text, or a row dropped, moves the verdict.
+  test.each<[string, string[], Record<string, string>]>([
+    [
+      "a table row shown inside a code block is not an outcome",
+      ["```text", "| Section | Status |", "|---|---|", "| labels | :warning: drift |", "```"],
+      {},
+    ],
+    [
+      "a status of more than one word keeps its row",
+      ["| Section | Status | Detail |", "|---|---|---|", "| labels | :x: not verified | - |"],
+      { labels: "not verified" },
+    ],
+  ])("%s", (_case, lines, outcomes) => {
+    expect(parseSummaryOutcomes(lines.join("\n"))).toEqual(outcomes);
+  });
 });
 
 describe("isSubsequence (mutations matcher)", () => {

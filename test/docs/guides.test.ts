@@ -30,7 +30,7 @@ import { listLayering, SECTIONS } from "../../src/sections/registry.js";
 import { STALE_VERSION_HINT } from "../../src/sections/secret_scanning_custom_patterns/index.js";
 import { ROOT } from "../root.js";
 import { deleteEnumerationProblems } from "./claims.js";
-import { codeFences, fencedBlocks, markdownTree, sectionLines, tableRows } from "./markdown.js";
+import { codeFences, fencedBlocks, markdownTree, sectionText, tableRows } from "./markdown.js";
 import { assertValidSettingsExample } from "./settings-examples.js";
 import { stalePins } from "./version-pins.js";
 
@@ -620,7 +620,7 @@ describe("docs/ guide pages", () => {
     'the layering guide\'s "%s" folds to the merged document it shows',
     (heading, count, notices) => {
       const markdown = readFileSync(join(DOCS, "operate", "layering.md"), "utf8");
-      const section = sectionLines(markdown, heading, "docs/operate/layering.md").join("\n");
+      const section = sectionText(markdown, heading, "docs/operate/layering.md");
       const layers: Layer[] = fencedBlocks(section, "yaml layer").map((block, index) => ({
         name: `layer-${index}`,
         doc: parseYaml(block),
@@ -640,12 +640,13 @@ describe("docs/ guide pages", () => {
   ])('%s: the "%s" table names every input the mode rejects', (page, heading, rejected) => {
     // The rejected set grows with the input declarations, so the table must name each one or the page under-reports the refusal.
     const markdown = readFileSync(join(ROOT, page), "utf8");
-    const section = sectionLines(markdown, heading, page);
-    const rejectedRow = section.find((line) => line.includes("| Rejected"));
+    const rows = tableRows(sectionText(markdown, heading, page));
+    const rejectedRow = rows.find(([, meaning = ""]) => meaning.startsWith("Rejected"));
     if (rejectedRow === undefined) {
       throw new Error(`${page} has no "Rejected" row in its inputs table`);
     }
-    const named = [...rejectedRow.matchAll(/`([a-z-]+)`/g)].map((match) => match[1]);
+    const [inputs = ""] = rejectedRow;
+    const named = [...inputs.matchAll(/`([a-z-]+)`/g)].map((match) => match[1]);
     expect(new Set(named)).toEqual(new Set(rejected));
   });
 
@@ -653,8 +654,8 @@ describe("docs/ guide pages", () => {
     // The roster and the key fields live in sixteen module declarations; a section added or rekeyed without its row
     // would leave the page claiming a fold the engine no longer performs.
     const markdown = readFileSync(join(DOCS, "operate", "layering.md"), "utf8");
-    const section = sectionLines(markdown, "The rules", "docs/operate/layering.md");
-    const rows = tableRows(section.join("\n")).filter(
+    const section = sectionText(markdown, "The rules", "docs/operate/layering.md");
+    const rows = tableRows(section).filter(
       ([sections = "", keyCell = ""]) =>
         /^`[a-z_]+`(, `[a-z_]+`)*$/.test(sections) && keyCell.startsWith("`"),
     );
@@ -674,19 +675,19 @@ describe("docs/ guide pages", () => {
     // The quoted message is compared against the whole error its layer raises (wrapped in that layer's prefix), so no row can quote a message its
     // own layer does not raise.
     const PAGE = "docs/operate/layering.md";
-    const section = sectionLines(
+    const section = sectionText(
       readFileSync(join(DOCS, "operate", "layering.md"), "utf8"),
       "Refusals",
       PAGE,
     );
-    const prefix = section.join("\n").match(/`layer "([^"`]+)": \.\.\.`/);
+    const prefix = section.match(/`layer "([^"`]+)": \.\.\.`/);
     if (!prefix) {
       throw new Error(
         `${PAGE}'s Refusals section no longer quotes the fold's \`layer "<name>": ...\` prefix`,
       );
     }
     const layerName = prefix[1] ?? "";
-    const rows = refusalRows(section, PAGE);
+    const rows = refusalRows(section.split("\n"), PAGE);
     // The rows drive test.each, which runs nothing over an empty table, so a table that lost its rows fails here instead.
     for (const gate of ["validation", "fold"] as const) {
       if (!rows.some((row) => row.gate === gate)) {
@@ -1120,6 +1121,32 @@ describe("fence policy guard (mutation checks)", () => {
       expect(fenceViolations(markdown, ALLOWED_FENCE_INFO)).toEqual(violations);
     },
   );
+});
+
+describe("section reader", () => {
+  // The section tests read a claim out of one section, so a cut that ends early or runs on reads the wrong claim.
+  test.each<[string, string, string]>([
+    [
+      "a heading-looking line inside a code block does not end the section",
+      "## A\n\nfirst\n\n```text\n## not a heading\n```\n\nlast\n\n## B\n\nother\n",
+      "first\n\n```text\n## not a heading\n```\n\nlast",
+    ],
+    [
+      "a deeper heading stays inside the section",
+      "## A\n\n### Sub\n\nbody\n\n## B\n",
+      "### Sub\n\nbody",
+    ],
+    ["the last section runs to the document's end", "## Z\n\n## A\n\nbody\n", "body"],
+    ["a setext heading names its section", "A\n---\n\nbody\n\n## B\n", "body"],
+    ["a closing hash run is not part of the heading's text", "## A ##\n\nbody\n", "body"],
+    [
+      "an indented first line keeps its indent, so an indented code block stays one",
+      "## A\n\n    ```yaml\n    a: 1\n    ```\n\n## B\n",
+      "    ```yaml\n    a: 1\n    ```",
+    ],
+  ])("%s", (_case, markdown, section) => {
+    expect(sectionText(markdown, "A", "(inline)")).toBe(section);
+  });
 });
 
 describe("code fence reader", () => {

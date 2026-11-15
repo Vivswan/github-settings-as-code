@@ -1,5 +1,6 @@
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { gfmTableFromMarkdown } from "mdast-util-gfm-table";
+import { toString as headingText } from "mdast-util-to-string";
 import { gfmTable } from "micromark-extension-gfm-table";
 import { visitParents } from "unist-util-visit-parents";
 
@@ -85,16 +86,42 @@ export function fencedBlocks(markdown: string, info: string): string[] {
     .map((fence) => fence.body);
 }
 
-/** The lines of a markdown section between `## <heading>` and the next `## `. */
-export function sectionLines(markdown: string, heading: string, source: string): string[] {
-  const lines = markdown.split("\n");
-  const start = lines.findIndex((line) => line.trim() === `## ${heading}`);
-  if (start === -1) {
+/**
+ * The source of the section under the second-level heading whose text is `heading`: from the heading to the next heading
+ * of the page's own outline at that level or above, or to the document's end. A heading inside a code block, a
+ * blockquote, or a list item is content.
+ */
+export function sectionText(markdown: string, heading: string, source: string): string {
+  const blocks = markdownTree(markdown).children;
+  const start = blocks.findIndex(
+    (block) => block.type === "heading" && block.depth === 2 && headingText(block) === heading,
+  );
+  const opener = blocks[start];
+  if (opener === undefined) {
     throw new Error(`no "## ${heading}" section found in ${source}`);
   }
-  const rest = lines.slice(start + 1);
-  const end = rest.findIndex((line) => line.startsWith("## "));
-  return end === -1 ? rest : rest.slice(0, end);
+  const next = blocks
+    .slice(start + 1)
+    .find((block) => block.type === "heading" && block.depth <= 2);
+  const from = opener.position?.end.offset ?? 0;
+  // Only the blank lines around the section go: an indent on its first line is content (an indented code block).
+  return markdown
+    .slice(from, next?.position?.start.offset ?? markdown.length)
+    .replace(/^(?:[ \t]*\r?\n)+/, "")
+    .trimEnd();
+}
+
+/** A node's source text. */
+function sourceOf(
+  node: { type: string; position?: { start: { offset?: number }; end: { offset?: number } } },
+  markdown: string,
+): string {
+  const start = node.position?.start.offset;
+  const end = node.position?.end.offset;
+  if (start === undefined || end === undefined) {
+    throw new Error(`BUG: mdast-util-from-markdown left a ${node.type} node without a position`);
+  }
+  return markdown.slice(start, end);
 }
 
 /**
@@ -107,14 +134,8 @@ export function tableRows(markdown: string): string[][] {
   visitParents(tree, "tableRow", (row) => {
     rows.push(
       row.children.map((cell) => {
-        const start = cell.position?.start.offset;
-        const end = cell.position?.end.offset;
-        if (start === undefined || end === undefined) {
-          throw new Error("BUG: mdast-util-from-markdown left a tableCell node without a position");
-        }
         // The closing pipe goes; a cell ending in an escaped pipe keeps it, since that one is content.
-        return markdown
-          .slice(start, end)
+        return sourceOf(cell, markdown)
           .replace(/^\|/, "")
           .replace(/(?<!\\)\|$/, "")
           .trim();
