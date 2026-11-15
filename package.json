@@ -99,6 +99,7 @@
     "ajv-formats": "3.0.1",
     "entities": "8.1.0",
     "estree-walker": "3.0.3",
+    "fast-check": "4.10.2",
     "github-slugger": "2.0.0",
     "graphql": "17.0.2",
     "knip": "6.39.0",

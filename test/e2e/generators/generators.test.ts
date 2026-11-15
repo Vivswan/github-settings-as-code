@@ -42,6 +42,7 @@ import {
 } from "./multi-scenario.js";
 import { predictDiscovery, predictMerge } from "./oracle.js";
 import { Rng } from "./prng.js";
+import { forEachSeed, seedsBelow } from "./seed-property.js";
 import {
   ARTIFACT_TEST_RECIPIENT,
   genLiveWitness,
@@ -346,16 +347,15 @@ function expectNoDirectiveReaches(merged: Json): void {
 
 describe("three-way drift detection", () => {
   test("every generated section doc passes schema, validateSettingsDoc, and its zod shape", () => {
-    const offenders: string[] = [];
     for (const key of SECTION_KEYS) {
-      for (let i = 0; i < 200; i++) {
-        offenders.push(...driftOffenders(key, i));
-      }
+      forEachSeed(seedsBelow(200), (i) => {
+        const offenders = driftOffenders(key, i);
+        expect(
+          offenders,
+          `generated section doc(s) drifting from schema, validator, or shape:\n  ${offenders.join("\n  ")}`,
+        ).toEqual([]);
+      });
     }
-    expect(
-      offenders,
-      `generated section doc(s) drifting from schema, validator, or shape:\n  ${offenders.join("\n  ")}`,
-    ).toEqual([]);
   });
 
   test("validateAgainstPublishedSchema rejects a section with the wrong type", () => {
@@ -366,19 +366,19 @@ describe("three-way drift detection", () => {
 
 describe("generator couplings and pools", () => {
   test("actions keeps selected_actions coupled to allowed_actions selected", () => {
-    for (let i = 0; i < 200; i++) {
+    forEachSeed(seedsBelow(200), (i) => {
       const actions = genSettings(new Rng(i), "actions") as Record<string, unknown>;
       if (actions.selected_actions !== undefined) {
         expect(actions.allowed_actions).toBe("selected");
       }
-    }
+    });
   });
 
   test("branches protection payloads only use known keys, wildcards only translated ones", () => {
     const draws: BranchDraws = { signatures: 0, wildcards: 0, bypassers: 0, deployments: 0 };
-    for (let i = 0; i < 200; i++) {
+    forEachSeed(seedsBelow(200), (i) => {
       countBranchDraws(i, draws);
-    }
+    });
     expect(draws.signatures).toBeGreaterThan(0);
     expect(draws.wildcards).toBeGreaterThan(0);
     expect(draws.bypassers).toBeGreaterThan(0);
@@ -386,21 +386,21 @@ describe("generator couplings and pools", () => {
   });
 
   test("labels never collide on name identities", () => {
-    for (let i = 0; i < 200; i++) {
+    forEachSeed(seedsBelow(200), (i) => {
       const labels = genSettings(new Rng(i), "labels") as Array<{ name: string }>;
       const names = labels.map((l) => l.name.toLowerCase());
       expect(new Set(names).size).toBe(names.length);
-    }
+    });
   });
 
   test("hostile names surface across seeds", () => {
     let hostile = 0;
-    for (let i = 0; i < 100; i++) {
+    forEachSeed(seedsBelow(100), (i) => {
       const json = JSON.stringify(genSettings(new Rng(i), "labels"));
       if (/pipe|quote|percent|space|unicode|éñ|slash|hash/.test(json)) {
         hostile++;
       }
-    }
+    });
     expect(hostile).toBeGreaterThan(0);
   });
 
@@ -409,17 +409,17 @@ describe("generator couplings and pools", () => {
     for (const key of ["collaborators", "rulesets", "webhooks"] as const) {
       let plain = 0;
       const wrapped = new Map<string, number>();
-      for (let i = 0; i < 400; i++) {
+      forEachSeed(seedsBelow(400), (i) => {
         const value = genSettings(new Rng(i), key);
         if (Array.isArray(value)) {
           plain++;
-          continue;
+          return;
         }
         const wrapper = value as { [UNDECLARED_KEY]?: string; entries: unknown[] };
         expect(Array.isArray(wrapper.entries)).toBe(true);
         const policy = wrapper[UNDECLARED_KEY] ?? "(omitted)";
         wrapped.set(policy, (wrapped.get(policy) ?? 0) + 1);
-      }
+      });
       expect(plain).toBeGreaterThan(0);
       for (const policy of ["keep", "delete", "(omitted)"]) {
         expect(wrapped.get(policy) ?? 0, `${key} never drew the ${policy} form`).toBeGreaterThan(0);
@@ -430,7 +430,7 @@ describe("generator couplings and pools", () => {
 
 describe("genLiveWitness", () => {
   test("matching labels mirror every field the labels handler diffs", () => {
-    for (let i = 0; i < 200; i++) {
+    forEachSeed(seedsBelow(200), (i) => {
       const declared = genSettings(new Rng(i), "labels") as Label[];
       const witness = genLiveWitness(new Rng(i + 500), "labels", declared, "matching");
       expect(witness.kind).toBe("matching");
@@ -446,7 +446,7 @@ describe("genLiveWitness", () => {
           expect(live[j]?.description).toBe(label.description);
         }
       });
-    }
+    });
   });
 
   test("witnesses seed the FINAL post-rename state for new_name labels", () => {
@@ -462,11 +462,11 @@ describe("genLiveWitness", () => {
     expect(matchingLive[0]?.color).toBe("d73a4a");
     expect(matchingLive[0]?.description).toBe("broken");
     expect(matchingLive[1]?.name).toBe("keep");
-    for (let i = 0; i < 50; i++) {
+    forEachSeed(seedsBelow(50), (i) => {
       const drift = genLiveWitness(new Rng(i), "labels", declared, "drift-update");
       expect(drift.kind).toBe("drift-update");
       expectOneLabelDivergence(declared, drift.state.labels as Label[]);
-    }
+    });
     const extra = genLiveWitness(new Rng(2), "labels", declared, "extra-undeclared");
     expect((extra.state.labels as Label[])[0]?.name).toBe("defect");
   });
@@ -484,7 +484,7 @@ describe("genLiveWitness", () => {
   });
 
   test("labels drift-update perturbs exactly one declared field (or the name's case)", () => {
-    for (let i = 0; i < 200; i++) {
+    forEachSeed(seedsBelow(200), (i) => {
       const declared = genSettings(new Rng(i), "labels") as Label[];
       const witness = genLiveWitness(new Rng(i + 500), "labels", declared, "drift-update");
       expect(witness.kind).toBe("drift-update");
@@ -507,11 +507,11 @@ describe("genLiveWitness", () => {
         }
       });
       expect(drifted).toBe(1);
-    }
+    });
   });
 
   test("labels extra-undeclared adds exactly one undeclared label over a matching base", () => {
-    for (let i = 0; i < 200; i++) {
+    forEachSeed(seedsBelow(200), (i) => {
       const declared = genSettings(new Rng(i), "labels") as Label[];
       const witness = genLiveWitness(new Rng(i + 500), "labels", declared, "extra-undeclared");
       expect(witness.kind).toBe("extra-undeclared");
@@ -520,11 +520,11 @@ describe("genLiveWitness", () => {
       const extra = live[live.length - 1] as Label;
       // The extra label matches no declared identity (case-insensitively), so the handler classifies it undeclared.
       expect(declared.some((l) => l.name.toLowerCase() === extra.name.toLowerCase())).toBe(false);
-    }
+    });
   });
 
   test("matching milestones mirror every declared field, due_on included", () => {
-    for (let i = 0; i < 200; i++) {
+    forEachSeed(seedsBelow(200), (i) => {
       const declared = genSettings(new Rng(i), "milestones") as Milestone[];
       const witness = genLiveWitness(new Rng(i + 500), "milestones", declared, "matching");
       expect(witness.kind).toBe("matching");
@@ -546,12 +546,12 @@ describe("genLiveWitness", () => {
           expect(entry.due_on?.slice(0, 10)).toBe(milestone.due_on);
         }
       });
-    }
+    });
   });
 
   test("milestones drift-update perturbs one declared field, or degrades to matching", () => {
     let drifts = 0;
-    for (let i = 0; i < 200; i++) {
+    forEachSeed(seedsBelow(200), (i) => {
       const declared = genSettings(new Rng(i), "milestones") as Milestone[];
       const witness = genLiveWitness(new Rng(i + 500), "milestones", declared, "drift-update");
       const live = witness.state.milestones as Milestone[];
@@ -577,7 +577,7 @@ describe("genLiveWitness", () => {
         expect(witness.kind).toBe("matching");
         expect(diverged).toBe(0);
       }
-    }
+    });
     expect(drifts).toBeGreaterThan(0);
   });
 
@@ -592,10 +592,10 @@ describe("genLiveWitness", () => {
     // assertion; the collision test below is its negative control.
     for (const key of WITNESS_SECTIONS) {
       for (const kind of WITNESS_KINDS[key]) {
-        for (let i = 0; i < 300; i++) {
+        forEachSeed(seedsBelow(300), (i) => {
           const declared = genSettings(new Rng(i), key);
           expect(() => genLiveWitness(new Rng(i + 500), key, declared, kind)).not.toThrow();
-        }
+        });
       }
     }
   });
@@ -645,10 +645,12 @@ describe("SECTION_PRIMARY_READ", () => {
 });
 
 describe("genInvalidSettings", () => {
+  const CATALOG_SEEDS = seedsBelow(200).map((i) => i * 13 + 1);
+
   test("every catalog case is rejected and the error names its token", () => {
     for (const { name, build } of INVALID_SETTINGS_CASES) {
-      for (let i = 0; i < 25; i++) {
-        const { doc, offendingToken } = build(new Rng(i * 13 + 1));
+      forEachSeed(CATALOG_SEEDS.slice(0, 25), (seed) => {
+        const { doc, offendingToken } = build(new Rng(seed));
         const verdict = validateSettingsDoc(doc, "settings.yml", SectionSelection.ALL, silentIo());
         if (verdict.isOk()) {
           throw new Error(`case "${name}" produced a doc the validator accepts`);
@@ -659,7 +661,7 @@ describe("genInvalidSettings", () => {
             `case "${name}" token "${offendingToken}" missing from error: ${rendered}`,
           );
         }
-      }
+      });
     }
   });
 
@@ -679,23 +681,19 @@ describe("genInvalidSettings", () => {
       "_layerin",
     ]);
 
-    const satisfied = new Set<string>();
     for (const { name, build } of INVALID_SETTINGS_CASES) {
-      for (let i = 0; i < 200; i++) {
-        const { offendingToken } = build(new Rng(i * 13 + 1));
-        if (boilerplate.includes(offendingToken)) {
-          satisfied.add(`${name}: ${offendingToken}`);
-        }
-      }
+      forEachSeed(CATALOG_SEEDS, (seed) => {
+        const { offendingToken } = build(new Rng(seed));
+        expect(boilerplate.includes(offendingToken), `${name}: ${offendingToken}`).toBe(false);
+      });
     }
-    expect([...satisfied]).toEqual([]);
   });
 
   test("draws every catalog case over seeds", () => {
     const drawn = new Set<string>();
-    for (let i = 0; i < 400; i++) {
+    forEachSeed(seedsBelow(400), (i) => {
       drawn.add(genInvalidSettings(new Rng(i)).name);
-    }
+    });
     const catalog = INVALID_SETTINGS_CASES.map((c) => c.name);
     expect(new Set(catalog).size).toBe(catalog.length);
     expect([...drawn].sort()).toEqual([...catalog].sort());
@@ -717,7 +715,7 @@ describe("genScenario", () => {
   const KNOWN_MASK_KEYS = new Set<string>(MASK_KEYS);
 
   test("produces internally consistent, schema-valid scenarios with sound meta", () => {
-    for (let i = 0; i < 200; i++) {
+    forEachSeed(seedsBelow(200), (i) => {
       const { scenario, meta } = genScenario(new Rng(i));
       expect(() => validateAgainstPublishedSchema(scenario.settings)).not.toThrow();
       const declared = new Set(Object.keys(scenario.settings ?? {}) as SectionKey[]);
@@ -737,15 +735,15 @@ describe("genScenario", () => {
       expect(meta.sections.length).toBeGreaterThan(0);
       expect([403, 404, "fine_grained"]).toContain(meta.denialStyle);
       expectAllowlistConsistent(scenario, meta, declared, i);
-    }
+    });
   });
 
   test("honors the sections option", () => {
-    for (let i = 0; i < 30; i++) {
+    forEachSeed(seedsBelow(30), (i) => {
       const { scenario, meta } = genScenario(new Rng(i), { sections: ["labels"] });
       expect(Object.keys(scenario.settings ?? {})).toEqual(["labels"]);
       expect(meta.sections).toEqual(["labels"]);
-    }
+    });
   });
 
   test("liveKinds records the seeded witness per section, and every kind surfaces", () => {
@@ -754,7 +752,7 @@ describe("genScenario", () => {
       "drift-update": 0,
       "extra-undeclared": 0,
     };
-    for (let i = 0; i < 300; i++) {
+    forEachSeed(seedsBelow(300), (i) => {
       const { scenario, meta } = genScenario(new Rng(i));
       for (const key of WITNESS_SECTIONS) {
         const kind = meta.liveKinds?.[key];
@@ -767,7 +765,7 @@ describe("genScenario", () => {
         expect(meta.sections).toContain(key);
         expect(Array.isArray(scenario.live_state?.[key])).toBe(true);
       }
-    }
+    });
     expect(seen.matching).toBeGreaterThan(0);
     expect(seen["drift-update"]).toBeGreaterThan(0);
     expect(seen["extra-undeclared"]).toBeGreaterThan(0);
@@ -778,10 +776,10 @@ describe("genScenario", () => {
     // generator holds the line the mock's grant check draws, or a fully-granted apply on a personal account 422s.
     let personal = 0;
     let organizationMaintain = 0;
-    for (let i = 0; i < 300; i++) {
+    forEachSeed(seedsBelow(300), (i) => {
       const { scenario, meta } = genScenario(new Rng(i));
       if (scenario.settings?.collaborators === undefined) {
-        continue;
+        return;
       }
       const entries = entriesOf(scenario.settings.collaborators);
       if (meta.ownerKind === "user") {
@@ -794,36 +792,36 @@ describe("genScenario", () => {
       } else if (entries.some((entry) => entry.permission === "maintain")) {
         organizationMaintain++;
       }
-    }
+    });
     expect(personal).toBeGreaterThan(0);
     expect(organizationMaintain).toBeGreaterThan(0);
   });
 
   test("declared branches and workflows are present in live_state so they converge", () => {
-    for (let i = 0; i < 200; i++) {
+    forEachSeed(seedsBelow(200), (i) => {
       const { scenario } = genScenario(new Rng(i));
       expectBranchesSeeded(scenario, i);
       expectWorkflowsSeeded(scenario, i);
-    }
+    });
   });
 });
 
 describe("genMultiScenario", () => {
   test("builds 2 to 5 valid targets with exactly one fileless", () => {
-    for (let i = 0; i < 100; i++) {
+    forEachSeed(seedsBelow(100), (i) => {
       const { scenario, meta } = genMultiScenario(new Rng(i));
       expect(() => parseScenario(scenario, `m-${i}`)).not.toThrow();
       expect(meta.repos.length).toBeGreaterThanOrEqual(2);
       expect(meta.repos.length).toBeLessThanOrEqual(5);
       const fileless = meta.repos.filter((r) => r.target.kind === "missing");
       expect(fileless.length).toBe(1);
-    }
+    });
   });
 
   test("a raw-settings target serves settings_raw, opts out of nothing, and plants no canaries", () => {
     let sawUnparseable = 0;
     let sawNonMapping = 0;
-    for (let i = 0; i < 400; i++) {
+    forEachSeed(seedsBelow(400), (i) => {
       const { scenario, meta } = genMultiScenario(new Rng(i));
       for (const repo of meta.repos) {
         if (repo.target.kind !== "raw-invalid") {
@@ -836,7 +834,7 @@ describe("genMultiScenario", () => {
         }
         expectRawTargetSpec(scenario, repo, repo.target.raw, i);
       }
-    }
+    });
     expect(sawUnparseable).toBeGreaterThan(0);
     expect(sawNonMapping).toBeGreaterThan(0);
   });
@@ -844,7 +842,7 @@ describe("genMultiScenario", () => {
   test("the fileless target runs exactly the defaults' sections; every other target exactly its own", () => {
     // The defaults document is applied whole to the fileless target and never merged into one that has a file, so no
     // normal target's meta gains (or nulls) a section it did not declare itself.
-    for (let i = 0; i < 100; i++) {
+    forEachSeed(seedsBelow(100), (i) => {
       const { scenario, meta } = genMultiScenario(new Rng(i));
       expect(meta.defaults).toEqual({
         sections: Object.keys(scenario.defaults_file ?? {}) as SectionKey[],
@@ -859,13 +857,13 @@ describe("genMultiScenario", () => {
       for (const repo of meta.repos) {
         expectTargetSections(scenario, repo, i);
       }
-    }
+    });
   });
 
   test("the redaction flag follows the mechanical rule per target", () => {
     let sawRedacted = false;
     let sawShown = false;
-    for (let i = 0; i < 200; i++) {
+    forEachSeed(seedsBelow(200), (i) => {
       const { scenario, meta } = genMultiScenario(new Rng(i));
       const redact = meta.privateRepos === "redact";
       if (redact) {
@@ -884,7 +882,7 @@ describe("genMultiScenario", () => {
         ).toBe(expected);
       }
       expect(scenario.inputs?.private_repos).toBe(meta.privateRepos);
-    }
+    });
     expect(sawRedacted).toBe(true);
     expect(sawShown).toBe(true);
   });
@@ -895,7 +893,7 @@ describe("genMultiScenario", () => {
     let sawIssue = false;
     let sawArtifact = false;
     let sawNone = false;
-    for (let i = 0; i < 300; i++) {
+    forEachSeed(seedsBelow(300), (i) => {
       const { scenario, meta } = genMultiScenario(new Rng(i));
       if (meta.privateReport === "issue") {
         sawIssue = true;
@@ -914,7 +912,7 @@ describe("genMultiScenario", () => {
         expect(scenario.inputs?.private_report).toBeUndefined();
         expect(scenario.inputs?.report_public_key).toBeUndefined();
       }
-    }
+    });
     expect(sawIssue).toBe(true);
     expect(sawArtifact).toBe(true);
     expect(sawNone).toBe(true);
@@ -922,23 +920,23 @@ describe("genMultiScenario", () => {
 
   test("a redact run always has at least one redacted target (non-vacuous leak check)", () => {
     // One non-missing target is forced private under redact, so the forbidden set is never empty.
-    for (let i = 0; i < 300; i++) {
+    forEachSeed(seedsBelow(300), (i) => {
       const { meta } = genMultiScenario(new Rng(i));
       if (meta.privateRepos !== "redact") {
-        continue;
+        return;
       }
       expect(meta.repos.some((r) => r.redaction.kind === "redacted")).toBe(true);
-    }
+    });
   });
 
   test("the forced-private target is fully granted so its canary provably flows", () => {
     // Under apply + fail a single denied section read preflight-aborts the whole target and renders nothing, so the
     // forced-private leak target clears its mask. Other private targets keep random masks, so at LEAST one redacted
     // target must be fully granted (the forced one).
-    for (let i = 0; i < 300; i++) {
+    forEachSeed(seedsBelow(300), (i) => {
       const { scenario, meta } = genMultiScenario(new Rng(i));
       if (meta.privateRepos !== "redact") {
-        continue;
+        return;
       }
       const fullyGrantedRedacted = meta.repos.some((r) => {
         if (r.redaction.kind !== "redacted" || r.redaction.canaries.length === 0) {
@@ -948,12 +946,12 @@ describe("genMultiScenario", () => {
         return Object.keys(spec.permissions ?? {}).length === 0;
       });
       expect(fullyGrantedRedacted).toBe(true);
-    }
+    });
   });
 
   test("redacted targets carry unique canaries planted into their settings and live state", () => {
     let sawCanary = false;
-    for (let i = 0; i < 200; i++) {
+    forEachSeed(seedsBelow(200), (i) => {
       const { scenario, meta } = genMultiScenario(new Rng(i));
       for (const repo of meta.repos) {
         if (repo.redaction.kind !== "redacted") {
@@ -968,7 +966,7 @@ describe("genMultiScenario", () => {
         sawCanary = true;
         expectCanariesPlanted(scenario, repo, canaries);
       }
-    }
+    });
     expect(sawCanary).toBe(true);
   });
 });
@@ -976,11 +974,11 @@ describe("genMultiScenario", () => {
 describe("genDiscoveryScenario", () => {
   test("every pool carries at least one non-public repo (non-vacuous leak check)", () => {
     // Discovery always runs under redact; an all-public pool would hand the leak invariant an empty forbidden set.
-    for (let i = 0; i < 300; i++) {
+    forEachSeed(seedsBelow(300), (i) => {
       const { meta } = genDiscoveryScenario(new Rng(i));
       expect(meta.privateRepos).toBe("redact");
       expect(meta.pool.some((r) => (r.visibility ?? "public") !== "public")).toBe(true);
-    }
+    });
   });
 });
 
@@ -1001,15 +999,15 @@ describe("seed determinism (byte-equal JSON)", () => {
 
 describe("battery forces (constructed eligibility, never rejection-sampled)", () => {
   test("issue-report force always yields the delivering issue channel", () => {
-    for (let i = 0; i < 200; i++) {
+    forEachSeed(seedsBelow(200), (i) => {
       const { meta } = genMultiScenario(new Rng(i), "issue-report");
       expect(meta.privateRepos).toBe("redact");
       expect(meta.privateReport).toBe("issue");
-    }
+    });
   });
 
   test("idempotence-eligible force pins apply, none-channel, no raw, empty masks", () => {
-    for (let i = 0; i < 200; i++) {
+    forEachSeed(seedsBelow(200), (i) => {
       const { scenario, meta } = genMultiScenario(new Rng(i), "idempotence-eligible");
       expect(meta.mode).toBe("apply");
       expect(meta.privateReport).toBe("none");
@@ -1021,11 +1019,11 @@ describe("battery forces (constructed eligibility, never rejection-sampled)", ()
           expect(Object.keys(repo.target.meta.mask)).toEqual([]);
         }
       }
-    }
+    });
   });
 
   test("plain-first-target force keeps index 0 fault-victim-eligible", () => {
-    for (let i = 0; i < 200; i++) {
+    forEachSeed(seedsBelow(200), (i) => {
       const { meta } = genMultiScenario(new Rng(i), "plain-first-target");
       expect(meta.privateRepos).toBe("show");
       const first = meta.repos[0];
@@ -1034,15 +1032,15 @@ describe("battery forces (constructed eligibility, never rejection-sampled)", ()
       }
       expect(first.target.kind).not.toBe("raw-invalid");
       expect(canariesOf(first)).toEqual([]);
-    }
+    });
   });
 
   test("converges force always yields a non-empty kept set", () => {
-    for (let i = 0; i < 200; i++) {
+    forEachSeed(seedsBelow(200), (i) => {
       const { scenario, meta } = genDiscoveryScenario(new Rng(i), "converges");
       expect(predictDiscovery(meta.pool, meta.filters).length).toBeGreaterThan(0);
       expect(scenario.discovery?.inputs).toEqual({});
-    }
+    });
   });
 });
 
@@ -1050,7 +1048,7 @@ describe("dead-corner knobs", () => {
   test("code scanning declares each optional field within its schema enum, runner_label only when labeled", () => {
     let sawThreat = 0;
     let sawLabeled = 0;
-    for (let i = 0; i < 300; i++) {
+    forEachSeed(seedsBelow(300), (i) => {
       const cfg = genSettings(new Rng(i), "code_scanning_default_setup") as Record<string, unknown>;
       if (cfg.threat_model !== undefined) {
         sawThreat++;
@@ -1066,33 +1064,33 @@ describe("dead-corner knobs", () => {
       if (cfg.runner_type === "labeled") {
         expect(cfg.runner_label).toBe("e2e-runner");
       }
-    }
+    });
     expect(sawThreat).toBeGreaterThan(0);
     expect(sawLabeled).toBeGreaterThan(0);
   });
 
   test("every denial style surfaces across seeds, 404 included", () => {
     const seen = new Set<string | number>();
-    for (let i = 0; i < 300; i++) {
+    forEachSeed(seedsBelow(300), (i) => {
       seen.add(genScenario(new Rng(i)).meta.denialStyle);
-    }
+    });
     expect([...seen].sort()).toEqual([403, 404, "fine_grained"].sort());
   });
 
   test("the excluded outcome is reachable: allowlists surface across seeds", () => {
     let sawAllowlist = 0;
-    for (let i = 0; i < 300; i++) {
+    forEachSeed(seedsBelow(300), (i) => {
       const { meta } = genScenario(new Rng(i));
       if (meta.onlySections !== undefined) {
         sawAllowlist++;
       }
-    }
+    });
     expect(sawAllowlist).toBeGreaterThan(0);
   });
 
   test("the multi global mask varies ONLY org_members, and rides token_permissions", () => {
     let sawGlobal = 0;
-    for (let i = 0; i < 300; i++) {
+    forEachSeed(seedsBelow(300), (i) => {
       const { scenario, meta } = genMultiScenario(new Rng(i));
       const global = scenario.token_permissions;
       if (global !== undefined) {
@@ -1105,7 +1103,7 @@ describe("dead-corner knobs", () => {
           }
         }
       }
-    }
+    });
     expect(sawGlobal).toBeGreaterThan(0);
   });
 
@@ -1116,48 +1114,48 @@ describe("dead-corner knobs", () => {
     //   unforced roll  -> can also produce a redacted empty-mask target, and that one may keep teams
     expect(ORG_GATED_SECTIONS.has("teams")).toBe(true);
     let sawShape = 0;
-    for (let i = 0; i < 600; i++) {
+    forEachSeed(seedsBelow(600), (i) => {
       const { scenario, meta } = genMultiScenario(new Rng(i));
       if (scenario.token_permissions?.org_members !== "none") {
-        continue;
+        return;
       }
       const forced = meta.repos.find((repo) => repo.slug === meta.forcedPrivateSlug);
       if (forced === undefined || forced.target.kind !== "normal") {
-        continue;
+        return;
       }
       sawShape++;
       for (const key of forced.target.meta.sections) {
         expect(ORG_GATED_SECTIONS.has(key)).toBe(false);
       }
-    }
+    });
     expect(sawShape).toBeGreaterThan(0);
   });
 
   test("a GHES base prefix surfaces occasionally on both generators", () => {
     let single = 0;
     let multi = 0;
-    for (let i = 0; i < 300; i++) {
+    forEachSeed(seedsBelow(300), (i) => {
       if (genScenario(new Rng(i)).scenario.base_prefix === "/api/v3") {
         single++;
       }
       if (genMultiScenario(new Rng(i)).scenario.base_prefix === "/api/v3") {
         multi++;
       }
-    }
+    });
     expect(single).toBeGreaterThan(0);
     expect(multi).toBeGreaterThan(0);
   });
 });
 
 describe("genMergeScenario", () => {
-  const SEEDS = Array.from({ length: 300 }, (_, i) => i);
+  const SEEDS = seedsBelow(300);
   // Each battery below runs hundreds of generator draws, the heaviest probing the validator per layer: near bun's 5 s default on a loaded runner.
   const MERGE_TIMEOUT = 20_000;
 
   test(
     "produces schema-valid mode: render scenarios whose layers the runner files in meta order",
     () => {
-      for (const seed of SEEDS) {
+      forEachSeed(SEEDS, (seed) => {
         const { scenario, meta } = genMergeScenario(new Rng(seed));
         expect(() => parseScenario(scenario, `seed-${seed}`)).not.toThrow();
         expect(scenario.inputs?.mode).toBe("render");
@@ -1174,7 +1172,7 @@ describe("genMergeScenario", () => {
           doc: scenario.settings as Record<string, unknown>,
         });
         expect(meta.layering).toBe(scenario.inputs?.layering ?? "deep");
-      }
+      });
     },
     MERGE_TIMEOUT,
   );
@@ -1183,21 +1181,21 @@ describe("genMergeScenario", () => {
     "the oracle's boundary read agrees with the generator's refusal intent, layer by layer",
     () => {
       let refused = 0;
-      for (const seed of SEEDS) {
+      forEachSeed(SEEDS, (seed) => {
         const { meta } = genMergeScenario(new Rng(seed));
         const prediction = predictMerge(meta);
         if (meta.refusal === undefined) {
           expect(prediction.kind, `seed ${seed}: an admitted stack read as refused`).not.toBe(
             "refused",
           );
-          continue;
+          return;
         }
         refused++;
         expect(prediction, `seed ${seed}: ${meta.refusal.kind}`).toEqual({
           kind: "refused",
           layer: meta.refusal.layer,
         });
-      }
+      });
       expect(refused).toBeGreaterThan(20);
     },
     MERGE_TIMEOUT,
@@ -1207,11 +1205,11 @@ describe("genMergeScenario", () => {
     "a predicted merged document is valid and survives the YAML round trip the runner compares through",
     () => {
       let merged = 0;
-      for (const seed of SEEDS) {
+      forEachSeed(SEEDS, (seed) => {
         const { meta } = genMergeScenario(new Rng(seed));
         const prediction = predictMerge(meta);
         if (prediction.kind !== "merged") {
-          continue;
+          return;
         }
         merged++;
         const verdict = validateSettingsDoc(
@@ -1223,7 +1221,7 @@ describe("genMergeScenario", () => {
         expect("error" in verdict ? verdict.error : undefined, `seed ${seed}`).toBeUndefined();
         expect(parseYaml(stringifyYaml(prediction.merged))).toEqual(prediction.merged);
         expectNoDirectiveReaches(prediction.merged);
-      }
+      });
       expect(merged).toBeGreaterThan(150);
     },
     MERGE_TIMEOUT,
@@ -1234,7 +1232,7 @@ describe("genMergeScenario", () => {
     () => {
       const features = new Set<string>();
       const refusals = new Set<string>();
-      for (const seed of SEEDS) {
+      forEachSeed(SEEDS, (seed) => {
         const { meta } = genMergeScenario(new Rng(seed));
         for (const feature of meta.features) {
           features.add(feature);
@@ -1243,7 +1241,7 @@ describe("genMergeScenario", () => {
           refusals.add(meta.refusal.kind);
           expect(meta.features).toEqual(["refused"]);
         }
-      }
+      });
       expect(MERGE_FEATURES.filter((feature) => !features.has(feature))).toEqual([]);
       expect(MERGE_REFUSAL_KINDS.filter((kind) => !refusals.has(kind))).toEqual([]);
     },
@@ -1253,7 +1251,7 @@ describe("genMergeScenario", () => {
   test(
     "forces construct their eligibility: a pinned run layering, or the named refusal",
     () => {
-      for (let seed = 0; seed < 60; seed++) {
+      forEachSeed(seedsBelow(60), (seed) => {
         for (const layering of LAYERING_DIRECTIVES) {
           const { scenario, meta } = genMergeScenario(new Rng(seed), {
             force: { kind: "valid", layering },
@@ -1271,14 +1269,14 @@ describe("genMergeScenario", () => {
           expect(meta.refusal.kind).toBe(refusal);
           expect(predictMerge(meta)).toEqual({ kind: "refused", layer: meta.refusal.layer });
         }
-      }
+      });
     },
     MERGE_TIMEOUT,
   );
 
   test("honors the sections option", () => {
     const pool: SectionKey[] = ["labels", "rulesets", "milestones", "pages"];
-    for (let seed = 0; seed < 60; seed++) {
+    forEachSeed(seedsBelow(60), (seed) => {
       const { meta } = genMergeScenario(new Rng(seed), { sections: pool });
       for (const layer of meta.layers) {
         for (const key of Object.keys(layer.doc)) {
@@ -1288,7 +1286,7 @@ describe("genMergeScenario", () => {
           ).toBe(true);
         }
       }
-    }
+    });
   });
 });
 
