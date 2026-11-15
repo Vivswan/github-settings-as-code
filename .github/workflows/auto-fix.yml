@@ -1,0 +1,45 @@
+# This file is managed by Vivswan/repo-platform.
+# Local edits are replaced on the next sync.
+#
+# Fixes a same-repository pull request's branch: the fix-lint label, or a push the registration's autofix.push names,
+# runs this repository's hook (.github/actions/autofix) and pushes what it changed as one commit.
+#
+# What a fix may touch is the `autofix` block of .repo-platform.yml on the default branch; the hook holds the commands.
+
+name: Auto Fix
+
+on:
+  pull_request:
+    types: [labeled, opened, synchronize, reopened]
+  # A fork's pull request, for the label alone: the called workflow removes it with a note, checks nothing out, and
+  # runs no pull request code.
+  pull_request_target: # zizmor: ignore[dangerous-triggers]
+    types: [labeled]
+
+permissions: {}
+
+# One lane per pull request and trigger: a newer push replaces the older push's fix, and adding the label again replaces
+# the older label's. The event name keeps the fork job's run out of the fix's lane; another label gets a lane of its own,
+# and its `label-` prefix keeps a label named `push` out of the push lane.
+concurrency:
+  group: >-
+    auto-fix-${{ github.event_name }}-${{ github.event.pull_request.number }}-${{
+    github.event.action == 'labeled' && format('label-{0}', github.event.label.name) || 'push' }}
+  cancel-in-progress: true
+
+jobs:
+  #   pull_request        -> a same-repository pull request: the fix-lint label, or any push to it
+  #   pull_request_target -> a fork's pull request given the fix-lint label: the label's removal
+  autofix:
+    if: >-
+      (github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (github.event.action != 'labeled' || github.event.label.name == 'fix-lint')) ||
+      (github.event_name == 'pull_request_target' &&
+      github.event.label.name == 'fix-lint' &&
+      github.event.pull_request.head.repo.full_name != github.repository)
+    # The ceiling of the called jobs: the push job commits and comments, and every other job narrows itself.
+    permissions:
+      contents: write
+      pull-requests: write
+    uses: Vivswan/repo-platform/.github/workflows/fleet-autofix.yml@stable
