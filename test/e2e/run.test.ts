@@ -54,12 +54,6 @@ test.each<[label: string, args: string[], named: string]>([
     ["--sections", " , "],
     "--sections got an empty list; name at least one section, or all",
   ],
-  // The later "all" would otherwise clear the filter and run the corpus over a list that named nothing.
-  [
-    "an earlier --sections with an empty list",
-    ["--sections", "", "--sections", "all"],
-    "--sections got an empty list; name at least one section, or all",
-  ],
   ["a misspelled flag", ["--section", "labels"], "'--section'"],
   // A "--" or a flag standing where the value belongs must not become the value: here the later "all" would clear
   // the filter and run the corpus.

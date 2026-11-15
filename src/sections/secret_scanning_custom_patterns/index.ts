@@ -11,7 +11,6 @@
 import { isDeepStrictEqual } from "node:util";
 import { ok, Result } from "neverthrow";
 import { z } from "zod";
-import { isPlainObject } from "../../plain-data.js";
 import { agree } from "../../text.js";
 import type { UndeclaredPolicy } from "../../types.js";
 import {
@@ -107,18 +106,17 @@ const LivePatternEntry = z.looseObject({
 
 type _LivePatternEntryPin = Pinned<typeof LivePatternEntry, Item<typeof ENDPOINTS.list>>;
 
-/** One entry of the bulk create's 422 map, exactly as the API description spells it (every field optional); strict, so an entry carrying anything else is shown as sent. */
-const PatternRefusal = z.strictObject({
-  errors: z
-    .array(z.strictObject({ code: z.string().optional(), message: z.string().optional() }))
-    .optional(),
+/** The bulk create's 422 body as the API description spells it (every field optional), keyed by the pattern's index in the request. */
+const CreateRefusal = z.object({
+  validation_errors: z.record(
+    z.string(),
+    z.object({
+      errors: z
+        .array(z.object({ code: z.string().optional(), message: z.string().optional() }))
+        .optional(),
+    }),
+  ),
 });
-
-/** The key of a 422 map entry that can name a pattern of the request: a zero-based index in its one decimal spelling. */
-const REQUEST_INDEX = /^(0|[1-9]\d*)$/;
-
-/** How much of an answer GitHub sent outside the described shape one failure line carries. */
-const AS_SENT_LIMIT = 300;
 
 function liveFrom(entry: z.infer<typeof LivePatternEntry>): LivePattern {
   const fields: Partial<Record<UpdatableKey, unknown>> = {};
@@ -210,91 +208,36 @@ function updateOp(
   };
 }
 
-/** A value GitHub sent outside the described shape, as JSON, cut where the line would stop being readable. */
-function asSent(value: unknown): string {
-  const text = JSON.stringify(value);
-  return text.length > AS_SENT_LIMIT
-    ? `${text.slice(0, AS_SENT_LIMIT)}... (cut at ${AS_SENT_LIMIT} characters)`
-    : text;
-}
-
-/** One pattern's refusal under its settings-file label: a clause per error, the bare label without one, the entry as sent when it is outside the shape. */
-function patternRefusal(label: string, entry: unknown): string[] {
-  const read = PatternRefusal.safeParse(entry);
-  if (!read.success) {
-    return [`${label}: ${asSent(entry)}`];
-  }
-
-  const { errors = [] } = read.data;
-  if (errors.length === 0) {
-    return [label];
-  }
-
-  return errors.map(({ code, message }) => {
-    const coded = code === undefined ? "" : ` (${code})`;
-    const said = message === undefined ? "" : `: ${message}`;
-    return `${label}${coded}${said}`;
-  });
-}
-
 /**
- * What a bulk create's 422 body says, split by whether it names a pattern of the request; undefined when the body
- * has no validation_errors at all. GitHub alone judges a pattern's regular expressions, so nothing it answers is
- * dropped: whatever is not the described shape, or under no request index, is carried as sent and blames no pattern.
+ * The sentences a create's 422 line ends in. An entry of the described shape under an index of the request names its
+ * pattern, a clause per error (the bare label without one); any other answer names none and gets the generic line.
  */
-function createRefusals(
+function createRefusalAdvice(
   body: string,
   toCreate: readonly SecretScanningPatternConfig[],
-): { named: string[]; unnamed: string[] } | undefined {
+): string {
   const parsed: unknown = Result.fromThrowable(JSON.parse)(body).unwrapOr(undefined);
-  if (!isPlainObject(parsed) || !Object.hasOwn(parsed, "validation_errors")) {
-    return undefined;
-  }
-
-  const sent = parsed.validation_errors;
-  if (!isPlainObject(sent) || Object.keys(sent).length === 0) {
-    return { named: [], unnamed: [`validation_errors: ${asSent(sent)}`] };
-  }
-
-  const named: string[] = [];
-  const unnamed: string[] = [];
-  for (const [index, entry] of Object.entries(sent)) {
-    const pattern = REQUEST_INDEX.test(index) ? toCreate[Number(index)] : undefined;
+  const refused = CreateRefusal.safeParse(parsed).data?.validation_errors ?? {};
+  const named = Object.entries(refused).flatMap(([index, { errors = [] }]) => {
+    const pattern = toCreate[Number(index)];
     if (pattern === undefined) {
-      unnamed.push(`validation_errors[${JSON.stringify(index)}]: ${asSent(entry)}`);
-      continue;
+      return [];
     }
 
-    named.push(...patternRefusal(`${key}[${pattern.name}]`, entry));
-  }
-
-  return { named, unnamed };
-}
-
-/** The sentences a create's 422 line ends in: the named refusals with their fix, then what GitHub tied to no pattern. */
-function createRefusalAdvice(refusals: ReturnType<typeof createRefusals>): string {
-  if (refusals === undefined) {
+    const label = `${key}[${pattern.name}]`;
+    return errors.length === 0
+      ? [label]
+      : errors.map(({ code, message }) => {
+          const coded = code === undefined ? "" : ` (${code})`;
+          const said = message === undefined ? "" : `: ${message}`;
+          return `${label}${coded}${said}`;
+        });
+  });
+  if (named.length === 0) {
     return "GitHub did not say which pattern it refused; check the regular expressions of the patterns named above";
   }
 
-  const { named, unnamed } = refusals;
-  const sentences: string[] = [];
-  if (named.length > 0) {
-    sentences.push(
-      `GitHub refused ${named.join("; ")}`,
-      "Fix each named pattern in the settings file to satisfy GitHub's message",
-    );
-  }
-  if (unnamed.length > 0) {
-    sentences.push(
-      `GitHub ${named.length > 0 ? "also " : ""}answered, tied to no pattern of the request: ${unnamed.join("; ")}`,
-    );
-  }
-  if (named.length === 0) {
-    sentences.push("Check the regular expressions of the patterns named above");
-  }
-
-  return sentences.join(". ");
+  return `GitHub refused ${named.join("; ")}. Fix each named pattern in the settings file to satisfy GitHub's message`;
 }
 
 /** The one bulk create, its drift and change lines one per pattern; undefined with nothing to create. */
@@ -319,7 +262,7 @@ function createOp(
     tolerate: {
       statuses: [422],
       outcome: (error) => {
-        const advice = createRefusalAdvice(createRefusals(error.body, toCreate));
+        const advice = createRefusalAdvice(error.body, toCreate);
         const docs = error.documentationUrl
           ? `. The fields and values this endpoint accepts are documented at ${error.documentationUrl}`
           : "";
