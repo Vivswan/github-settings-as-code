@@ -28,6 +28,7 @@ export const REPOSITORY_WEBHOOK_EVENTS = [
   "gollum",
   "issue_comment",
   "issue_dependencies",
+  "issue_relates_to",
   "issues",
   "label",
   "member",
