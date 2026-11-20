@@ -81,7 +81,6 @@ For `@vivswan/github-settings-as-code` consumers.
 
 The same change reshaped `validateSettingsDoc`, `parseSnapshotFileConfig`, `snapshotFileDestination`, and `writeReplacing`. All four are internal-entry names, so the intro's rule applies.
 
-
 ## 27. Library: one problem code for a malformed document
 
 For `@vivswan/github-settings-as-code` consumers. The left column is the pre-release v3 builds' shape, as in sections 24 and 29.
