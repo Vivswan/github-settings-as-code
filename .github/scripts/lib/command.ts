@@ -71,12 +71,15 @@ function stdinSource(stdin: CommandOptions["stdin"]): "inherit" | "ignore" | Buf
   return stdin === "inherit" ? "inherit" : Buffer.from(stdin.text);
 }
 
-/** The status a shell would report for a command that ran. */
-function shellStatus(exitCode: number | null, signalCode: string | null | undefined): number {
+/** The status a shell would report for a command that ran; a signal with no name arrives as its number. */
+function shellStatus(
+  exitCode: number | null,
+  signalCode: NodeJS.Signals | number | null | undefined,
+): number {
   if (signalCode == null) {
     return exitCode ?? 1;
   }
-  return 128 + (constants.signals[signalCode as NodeJS.Signals] ?? 0);
+  return 128 + (typeof signalCode === "number" ? signalCode : constants.signals[signalCode]);
 }
 
 /** The run itself, each captured stream as text; a program that cannot start is the 127 a shell reports, its reason as stderr. */
