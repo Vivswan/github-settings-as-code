@@ -9,6 +9,9 @@ name: Checks
 on:
   workflow_call:
 
+permissions:
+  contents: read
+
 jobs:
   check:
     runs-on: ubuntu-latest
