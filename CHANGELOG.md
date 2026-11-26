@@ -1,5 +1,23 @@
 # Changelog
 
+## [3.1.0](https://github.com/Vivswan/github-settings-as-code/compare/source-v3.0.1...source-v3.1.0) (2026-11-26)
+
+
+### Features
+
+* **release:** publish the npm package through the platform's npm module ([#645](https://github.com/Vivswan/github-settings-as-code/issues/645)) ([21e75be](https://github.com/Vivswan/github-settings-as-code/commit/21e75be6071cb863e1de00a9f797d7df3f9d0514))
+
+
+### Bug Fixes
+
+* **ci:** probe @octokit/openapi-webhooks in the nightly dependency check ([#653](https://github.com/Vivswan/github-settings-as-code/issues/653)) ([cb5d64c](https://github.com/Vivswan/github-settings-as-code/commit/cb5d64c431ec92c932caba979fa15ca51b3d2ad9))
+* **discovery:** redact a private repository's name when the exclude pattern that names it is echoed ([#634](https://github.com/Vivswan/github-settings-as-code/issues/634)) ([107f418](https://github.com/Vivswan/github-settings-as-code/commit/107f41808125353f9a4050d2f05662dde80a4186))
+* refuse dot-segment names, report every YAML error, and pair list items by value ([#629](https://github.com/Vivswan/github-settings-as-code/issues/629)) ([573e111](https://github.com/Vivswan/github-settings-as-code/commit/573e111833d0ca37ed21530f204eb5ed9c6bc102))
+* **report:** render free text in summary and report tables literally ([#630](https://github.com/Vivswan/github-settings-as-code/issues/630)) ([28e46ad](https://github.com/Vivswan/github-settings-as-code/commit/28e46adee852bfa738452e18e8843c6c599920ef))
+* **scripts:** read Markdown and TypeScript with their parsers in the doc and gap generators ([#626](https://github.com/Vivswan/github-settings-as-code/issues/626)) ([eb9b2a2](https://github.com/Vivswan/github-settings-as-code/commit/eb9b2a2b38d89f6d85cb7254e9709aab062ce037))
+* **secret_scanning_custom_patterns:** let GitHub judge a custom pattern's dialect ([#649](https://github.com/Vivswan/github-settings-as-code/issues/649)) ([7d85587](https://github.com/Vivswan/github-settings-as-code/commit/7d85587ac596ad8b2887e0de1765a59c7e991fea))
+* **sections:** generate the webhook event list and decode deploy keys strictly ([#624](https://github.com/Vivswan/github-settings-as-code/issues/624)) ([ab31661](https://github.com/Vivswan/github-settings-as-code/commit/ab31661939431053ef3b8ca24c9eda2472eb0b28))
+
 ## [3.0.1](https://github.com/Vivswan/github-settings-as-code/compare/source-v3.0.0...source-v3.0.1) (2026-11-13)
 
 
